@@ -1,0 +1,35 @@
+# Development files
+/benchmark/
+/stability/
+/tests/
+/scripts/
+/tmp/
+
+# Editor directories
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+.cursor/
+
+# Configuration files
+eslint.config.js
+.prettierrc
+.prettierignore
+.editorconfig
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+
+# Misc
+.DS_Store
+Thumbs.db
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+

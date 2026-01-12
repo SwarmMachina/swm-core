@@ -1,0 +1,26 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+.cursor/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Temp
+dist/
+tmp/
+temp/
+
+# Coverage / Test
+coverage/
+*.lcov
+/benchmark-results/
