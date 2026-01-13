@@ -51,7 +51,7 @@
     "uwebsockets.js": "uNetworking/uWebSockets.js#v20.56.0"
   },
   "devDependencies": {
-    "@swarmmachina/standards": "github:SwarmMachina/standards#semver:^1.0.0",
+    "@swarmmachina/standards": "^1.0.1",
     "autocannon": "^8.0.0",
     "express": "^5.2.1",
     "fastify": "^5.6.2",
