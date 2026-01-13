@@ -22,9 +22,6 @@ on [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js).
 ## Installation
 
 ```bash
-# Configure registry for GitHub packages
-npm config set @swarmmachina:registry https://npm.pkg.github.com
-
 # Install the package
 npm install @swarmmachina/swm-core
 ```

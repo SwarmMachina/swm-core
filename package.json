@@ -32,7 +32,7 @@
     "url": "git+https://github.com/SwarmMachina/swm-core.git"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "scripts": {
     "check": "prettier . --check && eslint . --ext .js,.vue",
@@ -45,7 +45,7 @@
     "bench:post:profile": "node ./benchmark/run-bench.js post-base all --profile",
     "bench:list": "node ./benchmark/run-bench.js --list-tests",
     "prepublishOnly": "npm run fix && npm test",
-    "release": "npm run fix && npm test && npm publish"
+    "release": "npm run check && npm test && npm publish"
   },
   "dependencies": {
     "uwebsockets.js": "uNetworking/uWebSockets.js#v20.56.0"
