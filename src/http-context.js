@@ -52,7 +52,6 @@ export default class HttpContext {
   #ip = ''
   #method = ''
   #url = ''
-  #finalize = null
   #statusOverride = null
   #contentLength = undefined
   #bodyParser = new BodyParser()
@@ -62,6 +61,59 @@ export default class HttpContext {
   text = (maxSize) => this.#bodyParser.text(maxSize)
   json = (maxSize) => this.#bodyParser.json(maxSize)
 
+  onAbort = () => this.abort()
+
+  finalize = () => {
+    if (this.done) {
+      return
+    }
+
+    this.done = true
+    this.server.finalizeHttpContext(this)
+  }
+
+  onResolve = (result) => {
+    if (this.done || this.aborted || this.replied) {
+      return
+    }
+
+    try {
+      this.send(result)
+    } catch (err) {
+      if (!this.replied) {
+        try {
+          this.sendError(err)
+        } catch {
+          //
+        }
+      }
+
+      void this.server.safeHttpError(this, err)
+    }
+
+    if (!this.streaming) {
+      this.finalize()
+    }
+  }
+
+  onReject = (err) => {
+    if (this.done || this.aborted || this.replied) {
+      return
+    }
+
+    try {
+      this.sendError(err)
+    } catch {
+      //
+    }
+
+    void this.server.safeHttpError(this, err)
+
+    if (!this.streaming) {
+      this.finalize()
+    }
+  }
+
   /**
    * @param {ContextPool} pool
    */
@@ -70,6 +122,9 @@ export default class HttpContext {
 
     this.res = null
     this.req = null
+    this.server = null
+
+    this.done = false
     this.replied = false
     this.aborted = false
     this.streaming = false
@@ -80,14 +135,16 @@ export default class HttpContext {
   /**
    * @param {import('uwebsockets.js').HttpResponse} res
    * @param {import('uwebsockets.js').HttpRequest} req
-   * @param {Function} [finalize]
+   * @param {Server} [server]
    * @param {number} [maxSize]
    * @returns {HttpContext}
    */
-  reset(res, req, finalize = null, maxSize = 1024 * 1024 * 16) {
+  reset(res, req, server, maxSize = 1024 * 1024 * 16) {
     this.res = res
     this.req = req
+    this.server = server
 
+    this.done = false
     this.replied = false
     this.aborted = false
     this.streaming = false
@@ -101,8 +158,6 @@ export default class HttpContext {
     this.#url = ''
     this.#method = ''
 
-    this.#finalize = finalize
-
     this.#bodyParser.reset(this, maxSize)
 
     return this
@@ -113,13 +168,15 @@ export default class HttpContext {
   clear() {
     this.res = null
     this.req = null
+    this.server = null
+
+    this.done = false
     this.replied = false
     this.aborted = false
     this.streaming = false
     this.streamingStarted = false
     this.onWritableCallback = null
 
-    this.#finalize = null
     this.#statusOverride = null
     this.#contentLength = undefined
     this.#ip = ''
@@ -133,10 +190,7 @@ export default class HttpContext {
     this.aborted = true
     this.onWritableCallback = null
     this.#bodyParser.abort()
-
-    if (typeof this.#finalize === 'function') {
-      this.#finalize()
-    }
+    this.finalize()
   }
 
   /**
@@ -351,6 +405,18 @@ export default class HttpContext {
   }
 
   /**
+   * @param {Error} error
+   * @returns {void}
+   */
+  sendError(error) {
+    if (isFinite(error?.status)) {
+      return this.reply(error.status, TEXT_PLAIN_HEADER, error.message)
+    }
+
+    return this.reply(500, TEXT_PLAIN_HEADER, 'Internal Server Error')
+  }
+
+  /**
    * @param {number} status
    * @param {Record<string,string>} headers
    * @param {string|ArrayBuffer|Uint8Array|Buffer|null|undefined} body
@@ -449,9 +515,7 @@ export default class HttpContext {
       if (done) {
         this.streaming = false
 
-        if (this.#finalize) {
-          this.#finalize()
-        }
+        this.finalize()
       }
     })
 
@@ -479,10 +543,7 @@ export default class HttpContext {
     })
 
     this.streaming = false
-
-    if (this.#finalize) {
-      this.#finalize()
-    }
+    this.finalize()
   }
 
   /**

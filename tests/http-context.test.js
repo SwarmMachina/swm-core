@@ -1217,11 +1217,11 @@ describe('HttpContext', () => {
         const res = createMockRes()
         const req = createMockReq()
         let finalizeCallCount = 0
-        const finalize = () => {
+        const finalizeHttpContext = () => {
           finalizeCallCount++
         }
 
-        ctx.reset(res, req, finalize)
+        ctx.reset(res, req, { finalizeHttpContext })
         ctx.startStreaming(200)
 
         res.setTryEndResultSequence([[true, true]])
@@ -1256,11 +1256,11 @@ describe('HttpContext', () => {
         const res = createMockRes()
         const req = createMockReq()
         let finalizeCallCount = 0
-        const finalize = () => {
+        const finalizeHttpContext = () => {
           finalizeCallCount++
         }
 
-        ctx.reset(res, req, finalize)
+        ctx.reset(res, req, { finalizeHttpContext })
         ctx.startStreaming(200)
 
         ctx.end('bye')
@@ -1278,7 +1278,7 @@ describe('HttpContext', () => {
         const res = createMockRes()
         const req = createMockReq()
 
-        ctx.reset(res, req)
+        ctx.reset(res, req, { finalizeHttpContext: () => {} })
         ctx.startStreaming(200)
 
         ctx.end()
@@ -1413,7 +1413,7 @@ describe('HttpContext', () => {
         const res = createMockRes()
         const req = createMockReq()
 
-        ctx.reset(res, req)
+        ctx.reset(res, req, { finalizeHttpContext: () => {} })
         res.setWriteResultSequence([true, true, true])
 
         const readable = createMockReadable()
@@ -1441,7 +1441,7 @@ describe('HttpContext', () => {
         const res = createMockRes()
         const req = createMockReq()
 
-        ctx.reset(res, req)
+        ctx.reset(res, req, { finalizeHttpContext: () => {} })
         res.setWriteResultSequence([false, true])
 
         const readable = createMockReadable()
@@ -1489,11 +1489,11 @@ describe('HttpContext', () => {
         const res = createMockRes()
         const req = createMockReq()
         let finalizeCallCount = 0
-        const finalize = () => {
+        const finalizeHttpContext = () => {
           finalizeCallCount++
         }
 
-        ctx.reset(res, req, finalize)
+        ctx.reset(res, req, { finalizeHttpContext })
         res.setWriteResultSequence([true])
 
         const readable = createMockReadable()
