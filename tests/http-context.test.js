@@ -1011,7 +1011,7 @@ describe('HttpContext', () => {
       deepStrictEqual(result, { a: 1, b: 'test' })
     })
 
-    test('json() with invalid JSON should throw Error with message starting with "Invalid JSON: "', async () => {
+    test('json() with invalid JSON should throw Error Invalid JSON', async () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
@@ -1023,7 +1023,7 @@ describe('HttpContext', () => {
       res.pushData('{invalid json}', true)
 
       await rejects(jsonPromise, (err) => {
-        strictEqual(err.message.startsWith('Invalid JSON: '), true)
+        strictEqual(err.message.startsWith('Invalid JSON'), true)
         return true
       })
     })

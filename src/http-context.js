@@ -1,3 +1,5 @@
+import BodyParser from './body-parser.js'
+
 export const TEXT_PLAIN_HEADER = Object.freeze({ 'content-type': 'text/plain; charset=utf-8' })
 export const JSON_HEADER = Object.freeze({ 'content-type': 'application/json; charset=utf-8' })
 export const OCTET_STREAM_HEADER = Object.freeze({ 'content-type': 'application/octet-stream' })
@@ -46,31 +48,26 @@ export const STATUS_TEXT = Object.freeze({
   504: '504 Gateway Timeout'
 })
 
-const CACHED_ERRORS = Object.freeze({
-  bodyTooLarge: new Error('Request body too large'),
-  aborted: new Error('Request aborted'),
-  sizeMismatch: new Error('Request body size mismatch')
-})
-
-const NOOP = () => {}
-
 export default class HttpContext {
   #ip = ''
   #method = ''
   #url = ''
-  #body = null
-  #bodyError = null
-  #bodyPromise = null
   #finalize = null
   #statusOverride = null
   #contentLength = undefined
-  #maxSize = 1024 * 1024 * 16
+  #bodyParser = new BodyParser()
+
+  body = (maxSize) => this.#bodyParser.body(maxSize)
+  buffer = (maxSize) => this.#bodyParser.buffer(maxSize)
+  text = (maxSize) => this.#bodyParser.text(maxSize)
+  json = (maxSize) => this.#bodyParser.json(maxSize)
 
   /**
    * @param {ContextPool} pool
    */
   constructor(pool) {
     this.pool = pool
+
     this.res = null
     this.req = null
     this.replied = false
@@ -97,18 +94,16 @@ export default class HttpContext {
     this.streamingStarted = false
     this.onWritableCallback = null
 
-    this.#body = null
-    this.#bodyError = null
-    this.#bodyPromise = null
     this.#statusOverride = null
     this.#contentLength = undefined
-    this.#maxSize = maxSize
 
     this.#ip = ''
     this.#url = ''
     this.#method = ''
 
     this.#finalize = finalize
+
+    this.#bodyParser.reset(this, maxSize)
 
     return this
   }
@@ -124,15 +119,24 @@ export default class HttpContext {
     this.streamingStarted = false
     this.onWritableCallback = null
 
-    this.#body = null
-    this.#bodyError = null
-    this.#bodyPromise = null
     this.#finalize = null
     this.#statusOverride = null
     this.#contentLength = undefined
     this.#ip = ''
     this.#url = ''
     this.#method = ''
+
+    this.#bodyParser.clear()
+  }
+
+  abort() {
+    this.aborted = true
+    this.onWritableCallback = null
+    this.#bodyParser.abort()
+
+    if (typeof this.#finalize === 'function') {
+      this.#finalize()
+    }
   }
 
   /**
@@ -239,203 +243,6 @@ export default class HttpContext {
   status(code) {
     this.#statusOverride = code
     return this
-  }
-
-  /**
-   * @param {number} [maxSize]
-   * @returns {Promise<Buffer>}
-   */
-  body(maxSize) {
-    if (this.#body !== null) {
-      return Promise.resolve(this.#body)
-    }
-
-    if (this.#bodyError !== null) {
-      return Promise.reject(this.#bodyError)
-    }
-
-    if (this.#bodyPromise !== null) {
-      return this.#bodyPromise
-    }
-
-    const limit = maxSize ?? this.#maxSize
-    const contentLength = this.contentLength()
-
-    if (this.aborted) {
-      this.#bodyError = CACHED_ERRORS.aborted
-      return Promise.reject(this.#bodyError)
-    }
-
-    if (contentLength !== null && contentLength > limit) {
-      this.#bodyError = CACHED_ERRORS.bodyTooLarge
-      return Promise.reject(this.#bodyError)
-    }
-
-    if (contentLength === 0) {
-      const buf = Buffer.alloc(0)
-
-      this.#body = buf
-      this.res.onData(NOOP)
-      return Promise.resolve(buf)
-    }
-
-    this.#bodyPromise = new Promise((resolve, reject) => {
-      let done = false
-
-      const success = (buf) => {
-        if (done) {
-          return
-        }
-
-        done = true
-        this.#body = buf
-        this.#bodyPromise = null
-        resolve(buf)
-      }
-
-      const fail = (err) => {
-        if (done) {
-          return
-        }
-
-        done = true
-        this.#bodyError = err
-        this.#bodyPromise = null
-        reject(err)
-      }
-
-      if (contentLength !== null) {
-        this.#parseKnownLength(contentLength, success, fail)
-      } else {
-        this.#parseUnknownLength(limit, success, fail)
-      }
-    })
-
-    return this.#bodyPromise
-  }
-
-  #parseKnownLength(contentLength, resolve, reject) {
-    const dst = Buffer.allocUnsafe(contentLength)
-
-    let offset = 0
-    let done = false
-
-    this.res.onData((ab, isLast) => {
-      if (done) {
-        return
-      }
-
-      if (this.aborted) {
-        if (done) {
-          return
-        }
-
-        done = true
-        return reject(CACHED_ERRORS.aborted)
-      }
-
-      const u8 = new Uint8Array(ab)
-      const chunkSize = u8.byteLength
-      const next = offset + chunkSize
-
-      if (next > contentLength) {
-        if (done) {
-          return
-        }
-
-        done = true
-        return reject(CACHED_ERRORS.sizeMismatch)
-      }
-
-      dst.set(u8, offset)
-      offset = next
-
-      if (isLast || offset === contentLength) {
-        if (offset !== contentLength) {
-          if (done) {
-            return
-          }
-
-          done = true
-          return reject(CACHED_ERRORS.sizeMismatch)
-        }
-
-        if (done) {
-          return
-        }
-
-        done = true
-        return resolve(dst)
-      }
-    })
-  }
-
-  #parseUnknownLength(limit, resolve, reject) {
-    const chunks = []
-    let totalSize = 0
-    let done = false
-
-    this.res.onData((ab, isLast) => {
-      if (done) {
-        return
-      }
-      if (this.aborted) {
-        done = true
-        return reject(CACHED_ERRORS.aborted)
-      }
-
-      const buf = Buffer.from(ab) // <- копия
-      const nextSize = totalSize + buf.length
-
-      if (nextSize > limit) {
-        done = true
-        return reject(CACHED_ERRORS.bodyTooLarge)
-      }
-
-      chunks.push(buf)
-      totalSize = nextSize
-
-      if (isLast) {
-        done = true
-        return resolve(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, totalSize))
-      }
-    })
-  }
-
-  /**
-   * @param {number} [maxSize]
-   * @returns {Promise<Buffer>}
-   */
-  buffer(maxSize) {
-    return this.body(maxSize)
-  }
-
-  /**
-   * @param {number} [maxSize]
-   * @returns {Promise<any>}
-   */
-  async json(maxSize) {
-    const buf = await this.body(maxSize)
-
-    if (buf.length === 0) {
-      return null
-    }
-
-    try {
-      return JSON.parse(buf.toString('utf8'))
-    } catch (err) {
-      throw new Error('Invalid JSON: ' + err.message)
-    }
-  }
-
-  /**
-   * @param {number} [maxSize]
-   * @returns {Promise<string>}
-   */
-  async text(maxSize) {
-    const buf = await this.body(maxSize)
-
-    return buf.toString('utf8')
   }
 
   /**

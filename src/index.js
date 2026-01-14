@@ -312,10 +312,7 @@ export default class Server {
 
     ctx = this.httpContextPool.acquire().reset(res, req, finalize, this.maxBodyBytes)
 
-    res.onAborted(() => {
-      ctx.aborted = true
-      return finalize()
-    })
+    res.onAborted(() => ctx.abort())
 
     let handlerResult
     let handlerError
