@@ -273,6 +273,15 @@ export default class Server {
     }
   }
 
+  finalizeHttpContext(ctx) {
+    ctx.release()
+    this.#activeHttp--
+
+    if (this.#draining) {
+      this.#finishShutdownIfNeed()
+    }
+  }
+
   /**
    * @param {import('uwebsockets.js').HttpResponse} res
    * @param {import('uwebsockets.js').HttpRequest} req
@@ -292,97 +301,48 @@ export default class Server {
 
     this.#activeHttp++
 
-    let ctx = null
+    const ctx = this.httpContextPool.acquire().reset(res, req, this, this.maxBodyBytes)
 
-    let done = false
+    res.onAborted(ctx.onAbort)
 
-    const finalize = () => {
-      if (done) {
-        return
-      }
-
-      done = true
-      ctx?.release()
-      this.#activeHttp--
-
-      if (this.#draining) {
-        this.#finishShutdownIfNeed()
-      }
-    }
-
-    ctx = this.httpContextPool.acquire().reset(res, req, finalize, this.maxBodyBytes)
-
-    res.onAborted(() => {
-      ctx.aborted = true
-      return finalize()
-    })
-
-    let handlerResult
-    let handlerError
-    let isAsync = false
+    let result
 
     try {
-      handlerResult = handler(ctx)
-      isAsync = isPromise(handlerResult)
+      result = handler(ctx)
     } catch (err) {
-      handlerError = err
-    }
-
-    if (handlerError) {
-      if (!done && !ctx.replied) {
-        ctx.status(500).send('Internal Server Error')
-        void this.safeHttpError(ctx, handlerError)
+      if (!ctx.replied) {
+        ctx.sendError(err)
       }
 
-      finalize()
+      void this.safeHttpError(ctx, err)
+
+      if (!ctx.streaming) {
+        ctx.finalize()
+      }
+
       return
     }
 
-    if (isAsync) {
-      void handlerResult
-        .then((result) => {
-          if (done) {
-            return
-          }
+    if (isPromise(result)) {
+      // eslint-disable-next-line promise/catch-or-return
+      result.then(ctx.onResolve, ctx.onReject)
+      return
+    }
 
-          if (ctx.replied) {
-            return
-          }
-
-          ctx.send(result)
-        })
-        .catch((err) => {
-          if (done) {
-            return
-          }
-
-          if (ctx.replied) {
-            return
-          }
-
-          ctx.status(500).send('Internal Server Error')
-          void this.safeHttpError(ctx, err)
-        })
-        .finally(() => {
-          if (!ctx.streaming) {
-            finalize()
-          }
-        })
-    } else {
-      if (!done && !ctx.replied) {
-        try {
-          ctx.send(handlerResult)
-        } catch (err) {
-          if (!ctx.replied) {
-            ctx.status(500).send('Internal Server Error')
-          }
-          void this.safeHttpError(ctx, err)
+    if (!ctx.replied) {
+      try {
+        ctx.send(result)
+      } catch (err) {
+        if (!ctx.replied) {
+          ctx.sendError(err)
         }
-      }
 
-      if (!done && !ctx.streaming) {
-        finalize()
+        void this.safeHttpError(ctx, err)
       }
+    }
+
+    if (!ctx.streaming) {
+      ctx.finalize()
     }
   }
 

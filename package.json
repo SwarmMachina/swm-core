@@ -40,9 +40,11 @@
     "test": "node --import ./tests/helpers/register-loader.js --test tests/**/*.test.js",
     "test:coverage": "node --import ./tests/helpers/register-loader.js --test --experimental-test-coverage tests/**/*.test.js",
     "bench:base": "node ./benchmark/run-bench.js base all",
-    "bench:post": "node ./benchmark/run-bench.js post-base all",
     "bench:base:profile": "node ./benchmark/run-bench.js base all --profile",
+    "bench:base:core": "node ./benchmark/run-bench.js base",
+    "bench:post": "node ./benchmark/run-bench.js post-base all",
     "bench:post:profile": "node ./benchmark/run-bench.js post-base all --profile",
+    "bench:post:core": "node ./benchmark/run-bench.js base",
     "bench:list": "node ./benchmark/run-bench.js --list-tests",
     "prepublishOnly": "npm run fix && npm test",
     "release": "npm run check && npm test && npm publish"
