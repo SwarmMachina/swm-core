@@ -1,5 +1,3 @@
-// Run with: node --test tests/ws-context.test.js
-
 import { describe, test } from 'node:test'
 import { strictEqual, deepStrictEqual, throws } from 'node:assert/strict'
 import WSContext from '../src/ws-context.js'
@@ -130,7 +128,6 @@ describe('WSContext', () => {
     test('should not call anything when pool is null', () => {
       const ctx = new WSContext(null)
 
-      // Should not throw
       ctx.release()
     })
 

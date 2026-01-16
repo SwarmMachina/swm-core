@@ -43,28 +43,25 @@ describe('HttpContext', () => {
         const req = createMockReq()
         const finalize = () => {}
 
-        // Set some values
         ctx.reset(res, req, finalize, 5000)
         ctx.status(418)
-        ctx.ip() // populate cache
-        ctx.method() // populate cache
-        ctx.url() // populate cache
-        ctx.contentLength() // populate cache
+        ctx.ip()
+        ctx.method()
+        ctx.url()
+        ctx.contentLength()
 
-        // Reset with same finalize and maxSize
-        ctx.reset(res, req, finalize, 5) // small maxSize for testing
+        ctx.reset(res, req, finalize, 5)
 
-        strictEqual(ctx.getStatus(200), STATUS_TEXT[200]) // statusOverride should be reset
-        strictEqual(ctx.ip(), '') // cache should be reset
-        strictEqual(ctx.method(), '') // cache should be reset
-        strictEqual(ctx.url(), '') // cache should be reset
-        strictEqual(ctx.contentLength(), null) // cache should be reset
+        strictEqual(ctx.getStatus(200), STATUS_TEXT[200])
+        strictEqual(ctx.ip(), '')
+        strictEqual(ctx.method(), '')
+        strictEqual(ctx.url(), '')
+        strictEqual(ctx.contentLength(), null)
 
-        // Verify maxSize is preserved: body with unknown length > maxSize should reject
         const bodyPromise = ctx.body()
 
-        res.pushData('123', false) // 3 bytes
-        res.pushData('456', false) // 3 more bytes = 6 total > 5 limit
+        res.pushData('123', false)
+        res.pushData('456', false)
 
         await rejects(bodyPromise, (err) => {
           strictEqual(err.message, 'Request body too large')
@@ -89,17 +86,17 @@ describe('HttpContext', () => {
         const finalize = () => {}
 
         ctx.reset(res, req, finalize)
-        ctx.ip() // populate cache
-        ctx.method() // populate cache
-        ctx.url() // populate cache
+        ctx.ip()
+        ctx.method()
+        ctx.url()
 
         ctx.clear()
 
         strictEqual(ctx.res, null)
         strictEqual(ctx.req, null)
-        strictEqual(ctx.ip(), '') // cache cleared
-        strictEqual(ctx.method(), '') // cache cleared
-        strictEqual(ctx.url(), '') // cache cleared
+        strictEqual(ctx.ip(), '')
+        strictEqual(ctx.method(), '')
+        strictEqual(ctx.url(), '')
       })
 
       test('should reset all state flags', () => {
@@ -144,7 +141,7 @@ describe('HttpContext', () => {
       test('should do nothing if pool is null', () => {
         const ctx = new HttpContext(null)
 
-        ctx.release() // should not throw
+        ctx.release()
       })
     })
   })
@@ -211,7 +208,7 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         strictEqual(ctx.method(), 'POST')
-        strictEqual(ctx.method(), 'POST') // second call
+        strictEqual(ctx.method(), 'POST')
 
         strictEqual(req.calls.filter((c) => c[0] === 'getMethod').length, 1)
       })
@@ -232,7 +229,7 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         strictEqual(ctx.url(), '/api/users')
-        strictEqual(ctx.url(), '/api/users') // second call
+        strictEqual(ctx.url(), '/api/users')
 
         strictEqual(req.calls.filter((c) => c[0] === 'getUrl').length, 1)
       })
@@ -515,7 +512,7 @@ describe('HttpContext', () => {
       const endCalls = res.calls.filter((c) => c[0] === 'end')
 
       strictEqual(endCalls.length, 1)
-      strictEqual(endCalls[0].length, 1) // only ['end'], no body argument
+      strictEqual(endCalls[0].length, 1)
     })
 
     test('should do nothing if ctx.replied is true', () => {
@@ -554,7 +551,6 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
       ctx.reply(200, TEXT_PLAIN_HEADER, 'ok')
 
-      // cork should be called, but nothing inside
       strictEqual(res.calls.length, 1)
       strictEqual(res.calls[0][0], 'cork')
       strictEqual(res.calls.filter((c) => c[0] === 'writeStatus').length, 0)
@@ -577,7 +573,7 @@ describe('HttpContext', () => {
       const endCalls1 = res1.calls.filter((c) => c[0] === 'end')
 
       strictEqual(endCalls1.length, 1)
-      strictEqual(endCalls1[0].length, 1) // no body
+      strictEqual(endCalls1[0].length, 1)
 
       ctx.reset(res2, req)
       ctx.send(undefined)
@@ -586,7 +582,7 @@ describe('HttpContext', () => {
       const endCalls2 = res2.calls.filter((c) => c[0] === 'end')
 
       strictEqual(endCalls2.length, 1)
-      strictEqual(endCalls2[0].length, 1) // no body
+      strictEqual(endCalls2[0].length, 1)
     })
 
     test('send("str") should call reply(200, TEXT_PLAIN_HEADER, "str")', () => {
@@ -811,7 +807,6 @@ describe('HttpContext', () => {
       strictEqual(result.length, 0)
       strictEqual(Buffer.isBuffer(result), true)
       strictEqual(res.calls.filter((c) => c[0] === 'onData').length, 1)
-      // onDataCb should exist (it's NOOP, but we can check it was called)
       strictEqual(typeof res.onDataCb, 'function')
     })
 
@@ -824,7 +819,6 @@ describe('HttpContext', () => {
 
       const bodyPromise = ctx.body()
 
-      // Simulate data arrival
       res.pushData(Buffer.from([1, 2]), false)
       res.pushData(Buffer.from([3, 4]), true)
 
@@ -948,7 +942,7 @@ describe('HttpContext', () => {
 
       const promise1 = ctx.body()
 
-      res.pushData(Buffer.from([1, 2, 3]), true) // too much data
+      res.pushData(Buffer.from([1, 2, 3]), true)
 
       await rejects(promise1, (err) => {
         strictEqual(err.message, 'Request body size mismatch')
@@ -1209,7 +1203,7 @@ describe('HttpContext', () => {
         const tryEndCall = res.calls.find(([name, ...args]) => name === 'tryEnd' && args[0] === 'abc')
 
         strictEqual(tryEndCall !== undefined, true)
-        strictEqual(tryEndCall[2], 13) // 10 + 3
+        strictEqual(tryEndCall[2], 13)
       })
 
       test('when done=true -> streaming becomes false and finalize called', () => {
@@ -1286,7 +1280,7 @@ describe('HttpContext', () => {
         const endCalls = res.calls.filter((c) => c[0] === 'end')
 
         strictEqual(endCalls.length, 1)
-        strictEqual(endCalls[0].length, 1) // only ['end'], no body
+        strictEqual(endCalls[0].length, 1)
       })
     })
 
@@ -1312,12 +1306,12 @@ describe('HttpContext', () => {
 
         strictEqual(cbCallCount, 1)
         strictEqual(lastOffset, 123)
-        strictEqual(result1, false) // handler returns false
+        strictEqual(result1, false)
 
         const result2 = res.triggerWritable(456)
 
-        strictEqual(cbCallCount, 1) // not called again
-        strictEqual(result2, true) // handler returns true when no callback
+        strictEqual(cbCallCount, 1)
+        strictEqual(result2, true)
       })
 
       test('aborted -> onWritable should no-op and not register', () => {
@@ -1447,16 +1441,16 @@ describe('HttpContext', () => {
         const readable = createMockReadable()
         const p = ctx.stream(readable, 200)
 
-        readable.emit('data', 'a') // write returns false, should pause
+        readable.emit('data', 'a')
 
         strictEqual(readable.getPauseCallCount(), 1)
         strictEqual(readable.getResumeCallCount(), 0)
 
-        res.triggerWritable(100) // trigger writable, should resume
+        res.triggerWritable(100)
 
         strictEqual(readable.getResumeCallCount(), 1)
 
-        readable.emit('data', 'b') // write returns true
+        readable.emit('data', 'b')
         readable.emit('end')
 
         await p

@@ -23,4 +23,4 @@ temp/
 # Coverage / Test
 coverage/
 *.lcov
-/benchmark-results/
+/benchmark/profiles/

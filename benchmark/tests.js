@@ -24,9 +24,9 @@ const TESTS = new Map([
       name: 'base',
       method: 'GET',
       path: '/base',
-      duration: 30,
-      connections: 1000,
-      pipelining: 1,
+      duration: 10,
+      connections: 100,
+      pipelining: 10,
       description: 'Basic JSON response test',
       payload: { ok: true }
     }
