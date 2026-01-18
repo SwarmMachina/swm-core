@@ -40,6 +40,7 @@
     "test": "node --import ./tests/helpers/register-loader.js --test tests/**/*.test.js",
     "test:coverage": "node --import ./tests/helpers/register-loader.js --test --experimental-test-coverage tests/**/*.test.js",
     "bench": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true",
+    "bench:core": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
     "prepublishOnly": "npm run fix && npm test",
     "release": "npm run check && npm test && npm publish"
   },

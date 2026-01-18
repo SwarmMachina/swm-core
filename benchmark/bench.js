@@ -1,4 +1,3 @@
-// bench/bench.mjs
 import { once } from 'node:events'
 import fs from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
@@ -8,8 +7,16 @@ import { getTest } from './tests.js'
 import runLoad from './helpers/run-load.js'
 import { spawn } from 'child_process'
 import delay from './helpers/delay.js'
+import shuffle from './helpers/shuffle.js'
+import ensureDir from './helpers/ensure-dir.js'
+import { formatYmdHms, msToHuman } from './helpers/format.js'
+import timed from './helpers/timed-fn.js'
+import median from './helpers/median.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+const BASE_ORDER = ['core', 'micro', 'fastify', 'express']
+const WANTED = new Set(BASE_ORDER)
 
 /**
  * @param {string[]} argv
@@ -18,7 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 function parseArgs(argv) {
   const out = {
     testName: 'base',
-    frameworks: ['core', 'express', 'fastify', 'micro'],
+    frameworks: [...BASE_ORDER],
     runs: 1,
     warmup: 10,
     sampleMs: 250,
@@ -57,19 +64,6 @@ function parseArgs(argv) {
 }
 
 /**
- * @param {string[]} arr
- * @returns {string[]}
- */
-function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0
-
-    ;[arr[i], arr[j]] = [arr[j], arr[i]]
-  }
-  return arr
-}
-
-/**
  * @param {ChildProcess} p
  * @param {Function} predicate
  * @param {number} timeoutMs
@@ -101,15 +95,6 @@ function waitForMessage(p, predicate, timeoutMs = 5000) {
 
     p.on('message', onMessage)
   })
-}
-
-/**
- * @param {string} dir
- * @returns {Promise<string>}
- */
-async function ensureDir(dir) {
-  await fs.mkdir(dir, { recursive: true })
-  return dir
 }
 
 /**
@@ -174,24 +159,6 @@ async function processV8Profile(profileDir) {
 }
 
 /**
- * @param {Date} d
- * @returns {string}
- */
-function makeRunStamp(d = new Date()) {
-  const pad = (n) => String(n).padStart(2, '0')
-
-  return (
-    d.getFullYear() +
-    pad(d.getMonth() + 1) +
-    pad(d.getDate()) +
-    '-' +
-    pad(d.getHours()) +
-    pad(d.getMinutes()) +
-    pad(d.getSeconds())
-  )
-}
-
-/**
  * @param {object} o
  * @param {string} o.fw
  * @param {string} o.testName
@@ -252,17 +219,6 @@ async function stopServer(p) {
 }
 
 /**
- * @param {number[]} values
- * @returns {number}
- */
-function median(values) {
-  const a = values.slice().sort((x, y) => x - y)
-  const mid = (a.length / 2) | 0
-
-  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2
-}
-
-/**
  * @param {object} params
  * @param {string} params.fw
  * @param {object} params.test
@@ -274,6 +230,10 @@ function median(values) {
  * @returns {object}
  */
 async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStamp }) {
+  console.log(`\n[bench] ${fw}: start (run=${runIndex + 1}, test=${test.name})`)
+
+  const tAll0 = performance.now()
+
   const { proc, port, profileDir } = await startServer({ fw, testName: test.name, runIndex, v8prof, runStamp })
 
   const url = `http://127.0.0.1:${port}${test.path}`
@@ -291,13 +251,20 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
     filePath: null
   }
 
+  let warmupMs = 0
+
   if (warmupSec > 0) {
-    await runLoad(`${fw}-${test.name}-warmup`, { ...baseOpts, duration: warmupSec }, { profile: false, track: false })
+    const w = await timed(() =>
+      runLoad(`${fw}-${test.name}-warmup`, { ...baseOpts, duration: warmupSec }, { profile: false, track: false })
+    )
+
+    warmupMs = w.ms
+    console.log(`[bench] ${fw}: warmup done in ${msToHuman(warmupMs)}`)
   }
 
   proc.send?.({ type: 'metrics:start', sampleMs })
 
-  const load = await runLoad(`${fw}-${test.name}`, baseOpts, { profile: false, track: false })
+  const runTimed = await timed(() => runLoad(`${fw}-${test.name}`, baseOpts, { profile: false, track: false }))
 
   proc.send?.({ type: 'metrics:stop' })
   const metricsMsg = await waitForMessage(proc, (m) => m && m.type === 'metrics', 15_000)
@@ -306,9 +273,10 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
 
   const prof = v8prof ? await processV8Profile(profileDir).catch(() => null) : null
 
-  const r = load.result
+  const r = runTimed.result.result
+  const totalMs = performance.now() - tAll0
 
-  return {
+  const out = {
     rps: r.requests?.average || 0,
     latencyP99: r.latency?.p99 || null,
     latencyAvg: r.latency?.average || null,
@@ -316,6 +284,13 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
     metrics: metricsMsg?.data || null,
     v8prof: prof
   }
+
+  console.log(
+    `[bench] ${fw}: done in ${msToHuman(totalMs)} (run ${msToHuman(runTimed.ms)}${warmupSec > 0 ? ` + warmup ${msToHuman(warmupMs)}` : ''}) ` +
+      `rps=${Math.round(out.rps)} p99=${out.latencyP99 ?? 'n/a'}ms errors=${out.errors}`
+  )
+
+  return out
 }
 
 /**
@@ -325,7 +300,7 @@ async function main() {
   const args = parseArgs(process.argv)
   const test = getTest(args.testName)
 
-  const runStamp = makeRunStamp()
+  const runStamp = formatYmdHms()
   const perFw = Object.fromEntries(args.frameworks.map((fw) => [fw, []]))
 
   console.log(
@@ -333,6 +308,7 @@ async function main() {
   )
 
   for (let i = 0; i < args.runs; i++) {
+    const rows = []
     const order = shuffle(args.frameworks.slice())
 
     console.log(`\n== run ${i + 1}/${args.runs}: ${order.join(', ')} ==`)
@@ -351,31 +327,77 @@ async function main() {
       perFw[fw].push(res)
 
       const m = res.metrics
-      const loadAvg = m?.loadAvg
-        ? `${m.loadAvg[0].toFixed(2)}/${m.loadAvg[1].toFixed(2)}/${m.loadAvg[2].toFixed(2)}`
-        : 'n/a'
-      const rss = m?.memMB?.rssPeak != null ? `${m.memMB.rssPeak.toFixed(0)}MB` : 'n/a'
-      const heap = m?.memMB?.heapUsedPeak != null ? `${m.memMB.heapUsedPeak.toFixed(0)}MB` : 'n/a'
-      const elu = m?.eluPct != null ? `${m.eluPct.toFixed(1)}%` : 'n/a'
-      const cpuCore = m?.cpuCorePct != null ? `${m.cpuCorePct.toFixed(1)}%` : 'n/a'
-      const cpuHost = m?.cpuHostPct != null ? `${m.cpuHostPct.toFixed(1)}%` : 'n/a'
-      const eldP99 = m?.eventLoopDelayMs?.p99 != null ? `${m.eventLoopDelayMs.p99.toFixed(2)}ms` : 'n/a'
 
-      console.log(
-        `${fw}: load=${loadAvg} rss=${rss} heap=${heap} cpuCore=${cpuCore} cpuHost=${cpuHost} ELU=${elu} ELDp99=${eldP99} rps=${res.rps.toFixed(0)} p99=${res.latencyP99 ?? 'n/a'}ms errors=${res.errors}`
-      )
+      rows.push({
+        fw,
+
+        load1: m?.loadAvg?.[0] ?? null,
+        load5: m?.loadAvg?.[1] ?? null,
+        load15: m?.loadAvg?.[2] ?? null,
+
+        rssMB: m?.memMB?.rssPeak ?? null,
+        heapMB: m?.memMB?.heapUsedPeak ?? null,
+
+        cpuCorePct: m?.cpuCorePct ?? null,
+        cpuHostPct: m?.cpuHostPct ?? null,
+        eluPct: m?.eluPct ?? null,
+        eldP99ms: m?.eventLoopDelayMs?.p99 ?? null,
+
+        rps: res.rps || 0,
+        latAvgMs: res.latencyAvg ?? null,
+        latP99Ms: res.latencyP99 ?? null,
+        errors: res.errors || 0
+      })
     }
+
+    const byFw = Object.create(null)
+
+    for (const r of rows) {
+      byFw[r.fw] = r
+    }
+
+    const extra = rows.filter((r) => !WANTED.has(r.fw))
+    const ordered = [...BASE_ORDER.map((fw) => byFw[fw]).filter(Boolean), ...extra]
+
+    console.table(
+      ordered.map((r) => ({
+        fw: r.fw,
+        load: r.load1 != null ? `${r.load1.toFixed(2)}/${r.load5.toFixed(2)}/${r.load15.toFixed(2)}` : 'n/a',
+        rss: r.rssMB != null ? `${r.rssMB.toFixed(0)}MB` : 'n/a',
+        heap: r.heapMB != null ? `${r.heapMB.toFixed(0)}MB` : 'n/a',
+        cpuCore: r.cpuCorePct != null ? `${r.cpuCorePct.toFixed(1)}%` : 'n/a',
+        cpuHost: r.cpuHostPct != null ? `${r.cpuHostPct.toFixed(1)}%` : 'n/a',
+        ELU: r.eluPct != null ? `${r.eluPct.toFixed(1)}%` : 'n/a',
+        ELDp99: r.eldP99ms != null ? `${r.eldP99ms.toFixed(2)}ms` : 'n/a',
+        rps: Math.round(r.rps),
+        latAvg: r.latAvgMs != null ? `${r.latAvgMs.toFixed(2)}ms` : 'n/a',
+        latP99: r.latP99Ms != null ? `${r.latP99Ms.toFixed(2)}ms` : 'n/a',
+        errors: r.errors
+      }))
+    )
   }
 
   console.log('\n== median ==')
-  for (const fw of args.frameworks) {
-    const rps = perFw[fw].map((x) => x.rps)
-    const p99 = perFw[fw].map((x) => x.latencyP99).filter((v) => v != null)
 
-    console.log(
-      `${fw}: rps=${median(rps).toFixed(0)} p99=${p99.length ? median(p99).toFixed(2) : 'n/a'}ms (n=${perFw[fw].length})`
-    )
-  }
+  const extra = args.frameworks.filter((fw) => !WANTED.has(fw))
+  const list = [...BASE_ORDER.filter((fw) => args.frameworks.includes(fw)), ...extra]
+
+  console.table(
+    list.map((fw) => {
+      const arr = perFw[fw] || []
+      const rps = arr.map((x) => x.rps)
+      const p99 = arr.map((x) => x.latencyP99).filter((v) => v != null)
+      const avg = arr.map((x) => x.latencyAvg).filter((v) => v != null)
+
+      return {
+        fw,
+        rps: rps.length ? Math.round(median(rps)) : null,
+        latAvgMs: avg.length ? Number(median(avg).toFixed(2)) : null,
+        latP99Ms: p99.length ? Number(median(p99).toFixed(2)) : null,
+        n: arr.length
+      }
+    })
+  )
 }
 
 main().catch((e) => {
