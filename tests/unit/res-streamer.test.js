@@ -2,10 +2,10 @@
 
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
-import { createMockReq, createMockRes, createMockReadable } from './helpers/mock-http.js'
-import HttpContext from '../src/http-context.js'
-import ResStreamer from '../src/res-streamer.js'
-import { CACHED_ERRORS, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../src/constants.js'
+import { createMockReq, createMockRes, createMockReadable } from '../helpers/mock-http.js'
+import HttpContext from '../../src/http-context.js'
+import ResStreamer from '../../src/res-streamer.js'
+import { CACHED_ERRORS, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../../src/constants.js'
 
 describe('ResStreamer', () => {
   describe('reset()', () => {

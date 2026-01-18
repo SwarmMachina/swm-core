@@ -2,9 +2,9 @@
 
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
-import { createMockReq, createMockRes, createMockReadable } from './helpers/mock-http.js'
-import HttpContext from '../src/http-context.js'
-import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../src/constants.js'
+import { createMockReq, createMockRes, createMockReadable } from '../helpers/mock-http.js'
+import HttpContext from '../../src/http-context.js'
+import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../../src/constants.js'
 
 describe('HttpContext', () => {
   describe('reset()/clear()/release()', () => {

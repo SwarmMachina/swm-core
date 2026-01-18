@@ -692,23 +692,20 @@ export default class Server {
       return this.#shutdownPromise
     }
 
-    this.#shutdownPromise = new Promise((resolve) => {
-      this.#shutdownResolver = resolve
+    const { promise, resolve } = Promise.withResolvers()
 
-      if (!this.#draining) {
-        this.#draining = true
+    this.#shutdownPromise = promise
+    this.#shutdownResolver = resolve
 
-        this.stopAccepting()
+    if (!this.#draining) {
+      this.#draining = true
 
-        if (timeout > 0) {
-          this.#shutdownTimeout = setTimeout(() => {
-            this.close()
-          }, timeout)
-        }
+      if (timeout > 0) {
+        this.#shutdownTimeout = setTimeout(() => this.close(), timeout)
       }
+    }
 
-      this.#finishShutdownIfNeed()
-    })
+    this.#finishShutdownIfNeed()
 
     return this.#shutdownPromise
   }

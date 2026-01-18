@@ -2,7 +2,7 @@
 
 import { describe, test } from 'node:test'
 import { strictEqual, deepStrictEqual, throws } from 'node:assert/strict'
-import WSContext from '../src/ws-context.js'
+import WSContext from '../../src/ws-context.js'
 
 describe('WSContext', () => {
   describe('constructor', () => {

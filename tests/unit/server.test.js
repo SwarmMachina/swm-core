@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
-import Server from '../src/index.js'
+import Server from '../../src/index.js'
 import {
   createMockHttpRequest,
   createMockHttpResponse,
@@ -11,8 +11,8 @@ import {
   mockCalls,
   resetMockApp,
   setListenCallback
-} from './helpers/mock-uws-module.js'
-import { STATUS_TEXT } from '../src/constants.js'
+} from '../helpers/mock-uws-module.js'
+import { STATUS_TEXT } from '../../src/constants.js'
 
 describe('Server', () => {
   beforeEach(() => {

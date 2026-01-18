@@ -2,9 +2,9 @@
 
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual } from 'node:assert/strict'
-import BodyParser from '../src/body-parser.js'
-import { createMockReq, createMockRes } from './helpers/mock-http.js'
-import HttpContext from '../src/http-context.js'
+import BodyParser from '../../src/body-parser.js'
+import { createMockReq, createMockRes } from '../helpers/mock-http.js'
+import HttpContext from '../../src/http-context.js'
 
 describe('BodyParser', () => {
   describe('reset()', () => {

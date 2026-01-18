@@ -37,8 +37,11 @@
   "scripts": {
     "check": "prettier . --check && eslint . --ext .js,.vue",
     "fix": "prettier . --write && eslint . --ext .js,.vue --fix",
-    "test": "node --import ./tests/helpers/register-loader.js --test tests/**/*.test.js",
-    "test:coverage": "node --import ./tests/helpers/register-loader.js --test --experimental-test-coverage tests/**/*.test.js",
+    "test": "node --import ./tests/helpers/register-loader.js --test tests/unit/*.test.js",
+    "test:coverage": "node --import ./tests/helpers/register-loader.js --test --experimental-test-coverage tests/unit/*.test.js",
+    "test:e2e": "node --test tests/e2e/**/*.test.js",
+    "test:e2e:http": "node --test tests/e2e/http/*.test.js",
+    "test:e2e:ws": "node --test tests/e2e/ws/*.test.js",
     "bench": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true",
     "bench:core": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
     "prepublishOnly": "npm run fix && npm test",

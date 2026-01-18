@@ -2,7 +2,7 @@
 
 import { describe, test } from 'node:test'
 import { deepStrictEqual, strictEqual, throws } from 'node:assert/strict'
-import ContextPool from '../src/context-pool.js'
+import ContextPool from '../../src/context-pool.js'
 
 describe('ContextPool', () => {
   describe('constructor', () => {
