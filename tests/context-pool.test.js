@@ -1,5 +1,7 @@
+// noinspection JSCheckFunctionSignatures
+
 import { describe, test } from 'node:test'
-import { strictEqual, deepStrictEqual, throws } from 'node:assert/strict'
+import { deepStrictEqual, strictEqual, throws } from 'node:assert/strict'
 import ContextPool from '../src/context-pool.js'
 
 describe('ContextPool', () => {
@@ -70,6 +72,26 @@ describe('ContextPool', () => {
       pool.acquire()
 
       strictEqual(receivedPool, pool)
+    })
+
+    test('should allow re-release after acquire (acquire must remove ctx from inPool tracking)', () => {
+      let idCounter = 0
+      const createFn = () => ({ id: ++idCounter, clear: () => {} })
+      const pool = new ContextPool(createFn, 10)
+
+      const ctx = pool.acquire()
+
+      pool.release(ctx)
+      strictEqual(pool.pool.length, 1)
+
+      const same = pool.acquire()
+
+      strictEqual(same, ctx)
+      strictEqual(pool.pool.length, 0)
+
+      pool.release(same)
+      strictEqual(pool.pool.length, 1)
+      strictEqual(pool.pool[0], ctx)
     })
   })
 

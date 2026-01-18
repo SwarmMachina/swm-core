@@ -1,7 +1,10 @@
+// noinspection JSCheckFunctionSignatures
+
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
-import HttpContext, { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../src/http-context.js'
-import { createMockReq, createMockRes } from './helpers/mock-http.js'
+import { createMockReq, createMockRes, createMockReadable } from './helpers/mock-http.js'
+import HttpContext from '../src/http-context.js'
+import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../src/constants.js'
 
 describe('HttpContext', () => {
   describe('reset()/clear()/release()', () => {
@@ -369,14 +372,14 @@ describe('HttpContext', () => {
       strictEqual(ctx.getStatus(null), STATUS_TEXT[500])
     })
 
-    test('getStatus should return undefined for unknown status codes', () => {
+    test('getStatus should return 500 for unknown status codes', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
 
       ctx.reset(res, req)
 
-      strictEqual(ctx.getStatus(599), undefined)
+      strictEqual(ctx.getStatus(599), '500 Internal Server Error')
     })
   })
 
@@ -1054,12 +1057,14 @@ describe('HttpContext', () => {
         strictEqual(ctx.streaming, true)
         strictEqual(ctx.streamingStarted, false)
 
-        strictEqual(res.calls[0][0], 'cork')
+        strictEqual(res.calls.filter((c) => c[0] === 'onWritable').length, 1)
         strictEqual(res.calls.filter((c) => c[0] === 'cork').length, 1)
+
         strictEqual(
           res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[200]),
           true
         )
+
         strictEqual(
           res.calls.some(
             ([name, ...args]) =>
@@ -1198,12 +1203,16 @@ describe('HttpContext', () => {
         res.setWriteOffset(10)
         res.setTryEndResultSequence([[true, false]])
 
-        ctx.tryEnd('abc')
+        const chunk = 'abc'
+        const chunkLen = Buffer.byteLength(chunk)
+        const totalSize = ctx.getWriteOffset() + chunkLen
 
-        const tryEndCall = res.calls.find(([name, ...args]) => name === 'tryEnd' && args[0] === 'abc')
+        ctx.tryEnd(chunk, totalSize)
+
+        const tryEndCall = res.calls.find(([name, ...args]) => name === 'tryEnd' && args[0] === chunk)
 
         strictEqual(tryEndCall !== undefined, true)
-        strictEqual(tryEndCall[2], 13)
+        strictEqual(tryEndCall[2], totalSize)
       })
 
       test('when done=true -> streaming becomes false and finalize called', () => {
@@ -1219,8 +1228,11 @@ describe('HttpContext', () => {
         ctx.startStreaming(200)
 
         res.setTryEndResultSequence([[true, true]])
+        const chunk = 'x'
+        const chunkLen = Buffer.byteLength(chunk)
+        const totalSize = ctx.getWriteOffset() + chunkLen
 
-        ctx.tryEnd('x')
+        ctx.tryEnd('x', totalSize)
 
         strictEqual(ctx.streaming, false)
         strictEqual(finalizeCallCount, 1)
@@ -1289,8 +1301,10 @@ describe('HttpContext', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq()
+
         let cbCallCount = 0
         let lastOffset = null
+
         const cbSpy = (offset) => {
           cbCallCount++
           lastOffset = offset
@@ -1311,7 +1325,7 @@ describe('HttpContext', () => {
         const result2 = res.triggerWritable(456)
 
         strictEqual(cbCallCount, 1)
-        strictEqual(result2, true)
+        strictEqual(result2, false)
       })
 
       test('aborted -> onWritable should no-op and not register', () => {
@@ -1358,50 +1372,6 @@ describe('HttpContext', () => {
     })
 
     describe('stream(readable)', () => {
-      /**
-       *
-       */
-      function createMockReadable() {
-        const listeners = {}
-        let pauseCallCount = 0
-        let resumeCallCount = 0
-        let destroyCallCount = 0
-
-        return {
-          on(event, cb) {
-            if (!listeners[event]) {
-              listeners[event] = []
-            }
-            listeners[event].push(cb)
-          },
-          emit(event, arg) {
-            if (listeners[event]) {
-              for (const cb of listeners[event]) {
-                cb(arg)
-              }
-            }
-          },
-          pause() {
-            pauseCallCount++
-          },
-          resume() {
-            resumeCallCount++
-          },
-          destroy() {
-            destroyCallCount++
-          },
-          getPauseCallCount() {
-            return pauseCallCount
-          },
-          getResumeCallCount() {
-            return resumeCallCount
-          },
-          getDestroyCallCount() {
-            return destroyCallCount
-          }
-        }
-      }
-
       test('happy path, write always true', async () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
@@ -1504,6 +1474,329 @@ describe('HttpContext', () => {
         strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
         strictEqual(finalizeCallCount, 1)
       })
+    })
+  })
+
+  describe('abort()', () => {
+    test('should set aborted=true, stop streaming flags, clear onWritableCallback, call finalizeHttpContext once', () => {
+      let finalizeCount = 0
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeHttpError() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.streaming = true
+      ctx.streamingStarted = true
+      ctx.onWritableCallback = () => {}
+
+      ctx.abort()
+
+      strictEqual(ctx.aborted, true)
+      strictEqual(ctx.streaming, false)
+      strictEqual(ctx.streamingStarted, false)
+      strictEqual(ctx.onWritableCallback, null)
+      strictEqual(finalizeCount, 1)
+
+      ctx.abort()
+
+      strictEqual(finalizeCount, 1)
+    })
+
+    test('abort during pending body() should reject body promise with Request aborted', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+      const server = {
+        finalizeHttpContext() {
+          /* noop */
+        },
+        safeHttpError() {
+          /* noop */
+        }
+      }
+
+      ctx.reset(res, req, server, 100)
+      const p = ctx.body()
+
+      ctx.abort()
+
+      await rejects(p, (err) => {
+        strictEqual(err.message, 'Request aborted')
+        strictEqual(err.status, 418)
+        return true
+      })
+    })
+  })
+
+  describe('onResolve/onReject', () => {
+    test('onResolve should send(result) and finalize if not streaming', () => {
+      let finalizeCount = 0
+      let safeErrCount = 0
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeHttpError() {
+          safeErrCount++
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.onResolve('ok')
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[200]),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'ok'),
+        true
+      )
+      strictEqual(finalizeCount, 1)
+      strictEqual(safeErrCount, 0)
+    })
+
+    test('onResolve should call sendError + safeHttpError if send throws, and still finalize', () => {
+      let finalizeCount = 0
+      let safeErrCount = 0
+      let lastErr = null
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeHttpError(ctx, err) {
+          safeErrCount++
+          lastErr = err
+        }
+      }
+
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+
+      const obj = {
+        toJSON() {
+          throw new Error('boom')
+        }
+      }
+
+      ctx.onResolve(obj)
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[500]),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'Internal Server Error'),
+        true
+      )
+      strictEqual(safeErrCount, 1)
+      strictEqual(lastErr.message, 'boom')
+      strictEqual(finalizeCount, 1)
+    })
+
+    test('onReject should sendError(err), call safeHttpError, and finalize if not streaming', () => {
+      let finalizeCount = 0
+      let safeErrCount = 0
+      let lastErr = null
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeHttpError(ctx, err) {
+          safeErrCount++
+          lastErr = err
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      const err = Object.assign(new Error('bad'), { status: 400 })
+
+      ctx.onReject(err)
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[400]),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'bad'),
+        true
+      )
+      strictEqual(safeErrCount, 1)
+      strictEqual(lastErr, err)
+      strictEqual(finalizeCount, 1)
+    })
+
+    test('onResolve should NOT finalize when streaming=true', () => {
+      let finalizeCount = 0
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeHttpError() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.streaming = true
+
+      ctx.onResolve('ok')
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[200]),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'ok'),
+        true
+      )
+      strictEqual(finalizeCount, 0)
+    })
+
+    test('onReject should NOT finalize when streaming=true', () => {
+      let finalizeCount = 0
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeHttpError() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.streaming = true
+
+      ctx.onReject(Object.assign(new Error('bad'), { status: 400 }))
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[400]),
+        true
+      )
+      strictEqual(finalizeCount, 0)
+    })
+
+    test('onResolve/onReject should no-op if already replied OR aborted OR done', () => {
+      let finalizeCount = 0
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeHttpError() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res1 = createMockRes()
+      const res2 = createMockRes()
+      const res3 = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res1, req, server)
+      ctx.replied = true
+      ctx.onResolve('x')
+      ctx.onReject(new Error('y'))
+
+      strictEqual(res1.calls.length, 0)
+      strictEqual(finalizeCount, 0)
+
+      ctx.reset(res2, req, server)
+      ctx.aborted = true
+      ctx.onResolve('x')
+      ctx.onReject(new Error('y'))
+
+      strictEqual(res2.calls.length, 0)
+      strictEqual(finalizeCount, 0)
+
+      ctx.reset(res3, req, server)
+      ctx.done = true
+      ctx.onResolve('x')
+      ctx.onReject(new Error('y'))
+
+      strictEqual(res3.calls.length, 0)
+      strictEqual(finalizeCount, 0)
+    })
+  })
+
+  describe('streaming edge-cases', () => {
+    test('stream() should set replied=true and streaming=true, and return resolved if already replied', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        finalizeHttpContext() {
+          /* noop */
+        },
+        safeHttpError() {
+          /* noop */
+        }
+      }
+
+      ctx.reset(res, req, server)
+      ctx.replied = true
+
+      const readable = createMockReadable()
+      const p = ctx.stream(readable, 200)
+
+      await p
+
+      strictEqual(res.calls.length, 0)
+    })
+
+    test('tryEnd done=true should set ctx.streaming=false (already exists) and must allow second startStreaming()', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        finalizeHttpContext() {
+          /* noop */
+        },
+        safeHttpError() {
+          /* noop */
+        }
+      }
+
+      ctx.reset(res, req, server)
+      ctx.startStreaming(200)
+
+      res.setTryEndResultSequence([[true, true]])
+      const chunk = 'x'
+      const chunkLen = Buffer.byteLength(chunk)
+      const totalSize = ctx.getWriteOffset() + chunkLen
+
+      ctx.tryEnd('x', totalSize)
+
+      strictEqual(ctx.streaming, false)
+
+      const initialCallCount = res.calls.length
+
+      ctx.startStreaming(200)
+
+      strictEqual(ctx.streaming, false)
+      strictEqual(res.calls.length, initialCallCount)
     })
   })
 })

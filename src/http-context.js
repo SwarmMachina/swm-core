@@ -1,52 +1,6 @@
 import BodyParser from './body-parser.js'
-
-export const TEXT_PLAIN_HEADER = Object.freeze({ 'content-type': 'text/plain; charset=utf-8' })
-export const JSON_HEADER = Object.freeze({ 'content-type': 'application/json; charset=utf-8' })
-export const OCTET_STREAM_HEADER = Object.freeze({ 'content-type': 'application/octet-stream' })
-
-export const STATUS_TEXT = Object.freeze({
-  100: '100 Continue',
-  101: '101 Switching Protocols',
-  102: '102 Processing',
-
-  200: '200 OK',
-  201: '201 Created',
-  202: '202 Accepted',
-  203: '203 Non-Authoritative Information',
-  204: '204 No Content',
-  205: '205 Reset Content',
-  206: '206 Partial Content',
-
-  300: '300 Multiple Choices',
-  301: '301 Moved Permanently',
-  302: '302 Found',
-  303: '303 See Other',
-  304: '304 Not Modified',
-  307: '307 Temporary Redirect',
-  308: '308 Permanent Redirect',
-
-  400: '400 Bad Request',
-  401: '401 Unauthorized',
-  403: '403 Forbidden',
-  404: '404 Not Found',
-  405: '405 Method Not Allowed',
-  406: '406 Not Acceptable',
-  408: '408 Request Timeout',
-  409: '409 Conflict',
-  410: '410 Gone',
-  413: '413 Payload Too Large',
-  414: '414 URI Too Long',
-  415: '415 Unsupported Media Type',
-  418: "418 I'm a teapot",
-  422: '422 Unprocessable Entity',
-  429: '429 Too Many Requests',
-
-  500: '500 Internal Server Error',
-  501: '501 Not Implemented',
-  502: '502 Bad Gateway',
-  503: '503 Service Unavailable',
-  504: '504 Gateway Timeout'
-})
+import ResStreamer from './res-streamer.js'
+import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './constants.js'
 
 export default class HttpContext {
   #ip = ''
@@ -55,6 +9,7 @@ export default class HttpContext {
   #statusOverride = null
   #contentLength = undefined
   #bodyParser = new BodyParser()
+  #resStreamer = new ResStreamer()
 
   body = (maxSize) => this.#bodyParser.body(maxSize)
   buffer = (maxSize) => this.#bodyParser.buffer(maxSize)
@@ -159,6 +114,7 @@ export default class HttpContext {
     this.#method = ''
 
     this.#bodyParser.reset(this, maxSize)
+    this.#resStreamer.reset(this, res)
 
     return this
   }
@@ -184,11 +140,20 @@ export default class HttpContext {
     this.#method = ''
 
     this.#bodyParser.clear()
+    this.#resStreamer.clear()
   }
 
   abort() {
+    if (this.done || this.aborted) {
+      return
+    }
+
     this.aborted = true
+    this.streaming = false
+    this.streamingStarted = false
     this.onWritableCallback = null
+
+    this.#resStreamer.abort()
     this.#bodyParser.abort()
     this.finalize()
   }
@@ -306,7 +271,7 @@ export default class HttpContext {
   getStatus(status) {
     const finalStatus = this.#statusOverride !== null ? this.#statusOverride : status
 
-    return STATUS_TEXT[finalStatus ?? 500]
+    return STATUS_TEXT[finalStatus] || STATUS_TEXT[500]
   }
 
   /**
@@ -457,10 +422,7 @@ export default class HttpContext {
     this.replied = true
     this.streaming = true
 
-    this.res.cork(() => {
-      this.res.writeStatus(this.getStatus(status))
-      this.setHeaders(headers)
-    })
+    this.#resStreamer.begin(status, headers)
 
     return this
   }
@@ -479,47 +441,29 @@ export default class HttpContext {
     }
 
     this.streamingStarted = true
-
-    let ok = false
-
-    this.res.cork(() => {
-      ok = this.res.write(chunk)
-    })
-
-    return ok
+    return this.#resStreamer.write(chunk)
   }
 
   /**
    * @param {string|ArrayBuffer|Uint8Array|Buffer} [chunk]
+   * @param {number} totalSize
    * @returns {[boolean, boolean]}
    */
-  tryEnd(chunk) {
+  tryEnd(chunk, totalSize) {
     if (this.aborted) {
       return [false, false]
     }
-
     if (!this.streaming) {
       throw new Error('Must call startStreaming() before tryEnd()')
     }
 
-    let result = [false, false]
+    const [ok, done] = this.#resStreamer.tryEnd(chunk, totalSize)
 
-    this.res.cork(() => {
-      const offset = this.res.getWriteOffset()
-      const chunkLen = typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength
-      const totalSize = offset + chunkLen
-      const [ok, done] = this.res.tryEnd(chunk, totalSize)
+    if (done) {
+      this.streaming = false
+    }
 
-      result = [ok, done]
-
-      if (done) {
-        this.streaming = false
-
-        this.finalize()
-      }
-    })
-
-    return result
+    return [ok, done]
   }
 
   /**
@@ -529,56 +473,27 @@ export default class HttpContext {
     if (this.aborted) {
       return
     }
-
     if (!this.streaming) {
       throw new Error('Must call startStreaming() before end()')
     }
 
-    this.res.cork(() => {
-      if (chunk != null) {
-        this.res.end(chunk)
-      } else {
-        this.res.end()
-      }
-    })
-
     this.streaming = false
-    this.finalize()
+    this.#resStreamer.end(chunk)
   }
 
-  /**
-   * @param {Function} callback
-   */
   onWritable(callback) {
     if (this.aborted) {
       return
     }
-
-    this.onWritableCallback = callback
-
-    this.res.onWritable((offset) => {
-      const cb = this.onWritableCallback
-
-      if (!cb) {
-        return true
-      }
-
-      this.onWritableCallback = null
-      cb(offset)
-
-      return false
-    })
+    this.#resStreamer.onWritable(callback)
   }
 
-  /**
-   * @returns {number}
-   */
   getWriteOffset() {
     if (this.aborted) {
       return 0
     }
 
-    return this.res.getWriteOffset()
+    return this.#resStreamer.getWriteOffset()
   }
 
   /**
@@ -587,43 +502,14 @@ export default class HttpContext {
    * @param {Record<string,string>} headers
    * @returns {Promise<void>}
    */
-  async stream(readable, status = 200, headers = null) {
-    this.startStreaming(status, headers)
+  stream(readable, status = 200, headers = null) {
+    if (this.replied || this.aborted) {
+      return Promise.resolve()
+    }
 
-    return new Promise((resolve, reject) => {
-      let paused = false
+    this.replied = true
+    this.streaming = true
 
-      readable.on('data', (chunk) => {
-        if (this.aborted) {
-          readable.destroy()
-          resolve()
-          return
-        }
-
-        const ok = this.write(chunk)
-
-        if (!ok && !paused) {
-          paused = true
-          readable.pause()
-
-          this.onWritable(() => {
-            paused = false
-            readable.resume()
-          })
-        }
-      })
-
-      readable.on('end', () => {
-        this.end()
-        resolve()
-      })
-
-      readable.on('error', (err) => {
-        if (!this.aborted) {
-          this.end()
-        }
-        reject(err)
-      })
-    })
+    return this.#resStreamer.stream(readable, status, headers)
   }
 }

@@ -1,3 +1,5 @@
+// noinspection JSCheckFunctionSignatures
+
 import { describe, test } from 'node:test'
 import { strictEqual, deepStrictEqual, throws } from 'node:assert/strict'
 import WSContext from '../src/ws-context.js'
@@ -106,6 +108,71 @@ describe('WSContext', () => {
       strictEqual(ctx.server, null)
       strictEqual(ctx.ws, null)
       strictEqual(ctx.data, null)
+    })
+
+    test('after clear, methods should throw again due to null ws/server', () => {
+      const pool = { release: () => {} }
+      const server = { publish: () => {} }
+      const ws = {
+        send: () => {},
+        end: () => {},
+        subscribe: () => {},
+        unsubscribe: () => {}
+      }
+      const ctx = new WSContext(pool)
+
+      ctx.reset(server, ws, null)
+      ctx.clear()
+
+      throws(
+        () => {
+          ctx.send('x')
+        },
+        {
+          name: 'Error',
+          message: 'WSContext: ws is null (did you forget reset?)'
+        }
+      )
+
+      throws(
+        () => {
+          ctx.end()
+        },
+        {
+          name: 'Error',
+          message: 'WSContext: ws is null (did you forget reset?)'
+        }
+      )
+
+      throws(
+        () => {
+          ctx.subscribe('t')
+        },
+        {
+          name: 'Error',
+          message: 'WSContext: ws is null (did you forget reset?)'
+        }
+      )
+
+      throws(
+        () => {
+          ctx.unsubscribe('t')
+        },
+        {
+          name: 'Error',
+          message: 'WSContext: ws is null (did you forget reset?)'
+        }
+      )
+
+      throws(
+        () => {
+          ctx.publish('t', 'm')
+        },
+        {
+          name: 'Error',
+          message: 'WSContext: server is null (did you forget reset?)'
+        }
+      )
     })
   })
 
@@ -377,6 +444,89 @@ describe('WSContext', () => {
       const result = ctx.send('test')
 
       strictEqual(result, 999)
+    })
+
+    test('should treat DataView as binary and default isBinary=true', () => {
+      const sendCalls = []
+      const ws = {
+        send: (data, isBinary) => {
+          sendCalls.push({ data, isBinary })
+          return 48
+        },
+        end: () => {},
+        subscribe: () => {},
+        unsubscribe: () => {}
+      }
+      const pool = { release: () => {} }
+      const ctx = new WSContext(pool)
+
+      ctx.reset({ publish: () => {} }, ws, null)
+
+      const view = new DataView(new Uint8Array([1, 2, 3]).buffer)
+      const result = ctx.send(view)
+
+      strictEqual(sendCalls.length, 1)
+      strictEqual(sendCalls[0].data, view)
+      strictEqual(sendCalls[0].isBinary, true)
+      strictEqual(result, 48)
+    })
+
+    test('should pass ArrayBufferView with offset (Uint8Array.subarray) as is, and default isBinary=true', () => {
+      const sendCalls = []
+      const ws = {
+        send: (data, isBinary) => {
+          sendCalls.push({ data, isBinary })
+          return 49
+        },
+        end: () => {},
+        subscribe: () => {},
+        unsubscribe: () => {}
+      }
+      const pool = { release: () => {} }
+      const ctx = new WSContext(pool)
+
+      ctx.reset({ publish: () => {} }, ws, null)
+
+      const u8 = new Uint8Array([9, 8, 7, 6])
+      const sub = u8.subarray(1, 3) // [8,7], byteOffset != 0
+      const result = ctx.send(sub)
+
+      strictEqual(sendCalls.length, 1)
+      strictEqual(sendCalls[0].data, sub)
+      strictEqual(sendCalls[0].isBinary, true)
+      strictEqual(result, 49)
+    })
+
+    test('should not override explicit isBinary argument (even if mismatched with data type)', () => {
+      const sendCalls = []
+      const ws = {
+        send: (data, isBinary) => {
+          sendCalls.push({ data, isBinary })
+          return 50
+        },
+        end: () => {},
+        subscribe: () => {},
+        unsubscribe: () => {}
+      }
+      const pool = { release: () => {} }
+      const ctx = new WSContext(pool)
+
+      ctx.reset({ publish: () => {} }, ws, null)
+
+      const result1 = ctx.send('text', true)
+
+      strictEqual(sendCalls.length, 1)
+      strictEqual(sendCalls[0].data, 'text')
+      strictEqual(sendCalls[0].isBinary, true)
+      strictEqual(result1, 50)
+
+      const buffer = Buffer.from('x')
+      const result2 = ctx.send(buffer, false)
+
+      strictEqual(sendCalls.length, 2)
+      strictEqual(sendCalls[1].data, buffer)
+      strictEqual(sendCalls[1].isBinary, false)
+      strictEqual(result2, 50)
     })
   })
 
@@ -811,6 +961,44 @@ describe('WSContext', () => {
       strictEqual(publishCalls[0].topic, 'topic')
       strictEqual(publishCalls[0].msg, 'message')
       strictEqual(publishCalls[0].isBinary, undefined)
+    })
+
+    test('should allow publishing Buffer and Uint8Array and pass them through unchanged', () => {
+      const publishCalls = []
+      const server = {
+        publish: (topic, msg, isBinary) => {
+          publishCalls.push({ topic, msg, isBinary })
+          return true
+        }
+      }
+      const ws = {
+        send: () => {},
+        end: () => {},
+        subscribe: () => {},
+        unsubscribe: () => {}
+      }
+      const pool = { release: () => {} }
+      const ctx = new WSContext(pool)
+
+      ctx.reset(server, ws, null)
+
+      const buffer = Buffer.from('a')
+
+      ctx.publish('t', buffer)
+
+      strictEqual(publishCalls.length, 1)
+      strictEqual(publishCalls[0].topic, 't')
+      strictEqual(publishCalls[0].msg, buffer)
+      strictEqual(publishCalls[0].isBinary, undefined)
+
+      const uint8Array = new Uint8Array([1, 2])
+
+      ctx.publish('t', uint8Array)
+
+      strictEqual(publishCalls.length, 2)
+      strictEqual(publishCalls[1].topic, 't')
+      strictEqual(publishCalls[1].msg, uint8Array)
+      strictEqual(publishCalls[1].isBinary, undefined)
     })
   })
 })

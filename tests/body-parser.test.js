@@ -1,3 +1,5 @@
+// noinspection JSCheckFunctionSignatures
+
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual } from 'node:assert/strict'
 import BodyParser from '../src/body-parser.js'
@@ -6,7 +8,7 @@ import HttpContext from '../src/http-context.js'
 
 describe('BodyParser', () => {
   describe('reset()', () => {
-    test('should reset all state and set ctx and maxSize', () => {
+    test('should reset all state and set ctx and maxSize', async () => {
       const parser = new BodyParser()
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -14,27 +16,35 @@ describe('BodyParser', () => {
 
       ctx.reset(res, req)
 
-      parser.reset(ctx, 5000)
+      parser.reset(ctx, 5)
 
-      const promise = parser.body()
+      const p = parser.body()
 
-      strictEqual(promise instanceof Promise, true)
+      res.pushData('123456', true)
+
+      await rejects(p, (err) => {
+        strictEqual(err.message, 'Request body too large')
+        strictEqual(err.status, 413)
+        return true
+      })
     })
 
-    test('should use default maxSize if not provided', () => {
+    test('should use default maxSize if not provided', async () => {
       const parser = new BodyParser()
       const ctx = new HttpContext(null)
       const res = createMockRes()
-      const req = createMockReq({ headers: { 'content-length': '10' } })
+      const req = createMockReq()
 
       ctx.reset(res, req)
 
       parser.reset(ctx)
 
-      const promise = parser.body()
+      const p = parser.body()
 
       res.pushData(Buffer.from('1234567890'), true)
-      strictEqual(promise instanceof Promise, true)
+      const result = await p
+
+      strictEqual(result.length, 10)
     })
 
     test('should reset state after previous use', async () => {
@@ -81,6 +91,32 @@ describe('BodyParser', () => {
       parser.clear()
 
       return rejects(parser.body(), (err) => {
+        strictEqual(err.message, 'Internal Server Error')
+        return true
+      })
+    })
+
+    test('should reject pending promise with aborted error', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req)
+
+      parser.reset(ctx)
+
+      const p = parser.body()
+
+      parser.clear()
+
+      await rejects(p, (err) => {
+        strictEqual(err.message, 'Request aborted')
+        strictEqual(err.status, 418)
+        return true
+      })
+
+      await rejects(parser.body(), (err) => {
         strictEqual(err.message, 'Internal Server Error')
         return true
       })
@@ -387,6 +423,47 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+        return true
+      })
+    })
+
+    test('should resolve with empty buffer when body is empty and no content-length', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      parser.reset(ctx, 100)
+
+      const p = parser.body()
+
+      res.pushData(Buffer.alloc(0), true)
+
+      const result = await p
+
+      strictEqual(Buffer.isBuffer(result), true)
+      strictEqual(result.length, 0)
+    })
+
+    test('should treat invalid content-length as unknown length mode', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': 'abc' } })
+
+      ctx.reset(res, req)
+
+      parser.reset(ctx, 5)
+
+      const p = parser.body()
+
+      res.pushData('123456', true)
+
+      await rejects(p, (err) => {
+        strictEqual(err.message, 'Request body too large')
+        strictEqual(err.status, 413)
         return true
       })
     })

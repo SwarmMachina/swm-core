@@ -1,10 +1,4 @@
-const CACHED_ERRORS = Object.freeze({
-  bodyTooLarge: Object.assign(new Error('Request body too large'), { status: 413 }),
-  aborted: Object.assign(new Error('Request aborted'), { status: 418 }),
-  sizeMismatch: Object.assign(new Error('Request body size mismatch'), { status: 400 }),
-  invalidJSON: Object.assign(new Error('Invalid JSON'), { status: 400 }),
-  serverError: Object.assign(new Error('Internal Server Error'), { status: 500 })
-})
+import { CACHED_ERRORS } from './constants.js'
 
 const NOOP = () => {}
 
@@ -46,7 +40,7 @@ export default class BodyParser {
       return
     }
 
-    if (this.#ctx.aborted) {
+    if (!this.#ctx || this.#ctx.aborted) {
       return this.#reject(CACHED_ERRORS.aborted)
     }
 
@@ -73,12 +67,18 @@ export default class BodyParser {
     if (this.#done) {
       return
     }
-    if (this.#ctx.aborted) {
+
+    if (!this.#ctx || this.#ctx.aborted) {
       return this.#reject(CACHED_ERRORS.aborted)
     }
 
     const u8 = new Uint8Array(ab)
     const chunkLen = u8.byteLength
+
+    if (chunkLen === 0 && isLast && this.#len === 0) {
+      return this.#resolve(Buffer.alloc(0))
+    }
+
     const nextLen = this.#len + chunkLen
 
     if (nextLen > this.#limit) {
@@ -191,6 +191,10 @@ export default class BodyParser {
   }
 
   clear() {
+    if (this.#bodyPromise !== null && !this.#done) {
+      this.#reject(CACHED_ERRORS.aborted)
+    }
+
     this.#body = null
     this.#bodyError = null
     this.#bodyPromise = null

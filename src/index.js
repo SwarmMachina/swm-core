@@ -1,8 +1,9 @@
 import { App, us_listen_socket_close } from 'uwebsockets.js'
-import HttpContext, { STATUS_TEXT } from './http-context.js'
+import HttpContext from './http-context.js'
 
 import WSContext from './ws-context.js'
 import ContextPool from './context-pool.js'
+import { STATUS_TEXT } from './constants.js'
 
 const WS_CONTEXT_SYMBOL = Symbol('WS_CONTEXT')
 

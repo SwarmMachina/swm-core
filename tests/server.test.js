@@ -1,7 +1,8 @@
+// noinspection JSCheckFunctionSignatures
+
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
 import Server from '../src/index.js'
-import { STATUS_TEXT } from '../src/http-context.js'
 import {
   createMockHttpRequest,
   createMockHttpResponse,
@@ -11,6 +12,7 @@ import {
   resetMockApp,
   setListenCallback
 } from './helpers/mock-uws-module.js'
+import { STATUS_TEXT } from '../src/constants.js'
 
 describe('Server', () => {
   beforeEach(() => {
@@ -1006,6 +1008,336 @@ describe('Server', () => {
       strictEqual(endCall !== undefined, true)
       strictEqual(endCall.code, 1001)
       strictEqual(endCall.reason, 'server shutting down')
+    })
+  })
+
+  describe('handleWithContext()', () => {
+    test('should respond 503 and close connection when draining', () => {
+      const server = new Server({ router: () => 'ok' })
+
+      server.shutdown(0)
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, server.router)
+
+      strictEqual(res.getStatus(), STATUS_TEXT[503])
+      strictEqual(res.getHeaders()['Connection'], 'close')
+      strictEqual(res.isEnded(), true)
+    })
+
+    test('should register onAborted with ctx.onAbort', () => {
+      const server = new Server({ router: () => 'ok' })
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, server.router)
+
+      const onAbortedCall = res.calls.find((c) => c.method === 'onAborted')
+
+      strictEqual(onAbortedCall !== undefined, true)
+      strictEqual(typeof onAbortedCall.callback, 'function')
+    })
+
+    test('should sendError and safeHttpError when handler throws (sync), and finalize when not streaming', async () => {
+      let safeErrCalled = 0
+      let finalizeCalled = 0
+
+      const server = new Server({
+        router: () => {
+          throw Object.assign(new Error('bad'), { status: 400 })
+        },
+        onHttpError: (ctx, err) => {
+          safeErrCalled++
+        }
+      })
+
+      const originalFinalize = server.finalizeHttpContext.bind(server)
+
+      server.finalizeHttpContext = (ctx) => {
+        finalizeCalled++
+        return originalFinalize(ctx)
+      }
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, server.router)
+
+      await Promise.resolve()
+
+      strictEqual(res.getStatus(), STATUS_TEXT[400])
+      strictEqual(res.isEnded(), true)
+      strictEqual(safeErrCalled, 1)
+      strictEqual(finalizeCalled, 1)
+    })
+
+    test('should NOT finalize when ctx.streaming=true after sync throw', async () => {
+      let safeErrCalled = 0
+      let finalizeCalled = 0
+
+      const server = new Server({
+        router: (ctx) => {
+          ctx.streaming = true
+          throw new Error('x')
+        },
+        onHttpError: (ctx, err) => {
+          safeErrCalled++
+        }
+      })
+
+      const originalFinalize = server.finalizeHttpContext.bind(server)
+
+      server.finalizeHttpContext = (ctx) => {
+        finalizeCalled++
+        return originalFinalize(ctx)
+      }
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, server.router)
+
+      await Promise.resolve()
+
+      strictEqual(safeErrCalled, 1)
+      strictEqual(finalizeCalled, 0)
+    })
+
+    test('should handle promise resolve via ctx.onResolve and finalize if not streaming', async () => {
+      let finalizeCalled = 0
+
+      const server = new Server({
+        router: () => Promise.resolve('ok')
+      })
+
+      const originalFinalize = server.finalizeHttpContext.bind(server)
+
+      server.finalizeHttpContext = (ctx) => {
+        finalizeCalled++
+        return originalFinalize(ctx)
+      }
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, server.router)
+
+      await Promise.resolve()
+
+      strictEqual(res.getStatus(), STATUS_TEXT[200])
+      strictEqual(res.isEnded(), true)
+      strictEqual(finalizeCalled, 1)
+    })
+
+    test('should handle promise reject via ctx.onReject, sendError, safeHttpError, and finalize if not streaming', async () => {
+      let safeErrCalled = 0
+      let finalizeCalled = 0
+
+      const server = new Server({
+        router: () => Promise.reject(Object.assign(new Error('no'), { status: 401 })),
+        onHttpError: (ctx, err) => {
+          safeErrCalled++
+        }
+      })
+
+      const originalFinalize = server.finalizeHttpContext.bind(server)
+
+      server.finalizeHttpContext = (ctx) => {
+        finalizeCalled++
+        return originalFinalize(ctx)
+      }
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, server.router)
+
+      await Promise.resolve()
+
+      strictEqual(res.getStatus(), STATUS_TEXT[401])
+      strictEqual(res.isEnded(), true)
+      strictEqual(safeErrCalled, 1)
+      strictEqual(finalizeCalled, 1)
+    })
+
+    test('when promise resolves but ctx.send throws, it should sendError(500) and safeHttpError called', async () => {
+      let safeErrCalled = 0
+
+      const server = new Server({
+        router: () =>
+          Promise.resolve({
+            toJSON() {
+              throw new Error('boom')
+            }
+          }),
+        onHttpError: (ctx, err) => {
+          safeErrCalled++
+        }
+      })
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, server.router)
+
+      await Promise.resolve()
+
+      strictEqual(res.getStatus(), STATUS_TEXT[500])
+      strictEqual(res.getHeaders()['content-type'], 'text/plain; charset=utf-8')
+      strictEqual(safeErrCalled, 1)
+    })
+  })
+
+  describe('WS event handlers', () => {
+    test('onMessage: should call handler and swallow errors into safeWsError when handler throws', async () => {
+      let errorCalled = 0
+
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          onMessage: () => {
+            throw new Error('x')
+          },
+          onError: (ctx, err) => {
+            errorCalled++
+          }
+        }
+      })
+
+      const ws = createMockWebSocket()
+
+      server.onOpen(ws)
+      server.onMessage(ws, new Uint8Array([1]).buffer, true)
+
+      await Promise.resolve()
+
+      strictEqual(errorCalled, 1)
+    })
+
+    test('onMessage: async reject should call safeWsError', async () => {
+      let errorCalled = 0
+
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          onMessage: async () => {
+            throw new Error('x')
+          },
+          onError: (ctx, err) => {
+            errorCalled++
+          }
+        }
+      })
+
+      const ws = createMockWebSocket()
+
+      server.onOpen(ws)
+      server.onMessage(ws, new Uint8Array([1]).buffer, true)
+
+      await Promise.resolve()
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(errorCalled, 1)
+    })
+
+    test('onClose: must deleteWsContext and decrement activeWs even if onClose throws', async () => {
+      let errorCalled = 0
+
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          onClose: () => {
+            throw new Error('close error')
+          },
+          onError: (ctx, err) => {
+            errorCalled++
+          }
+        }
+      })
+
+      const ws = createMockWebSocket()
+
+      server.onOpen(ws)
+      const userData = ws.getUserData()
+      const symbolsBefore = Object.getOwnPropertySymbols(userData)
+
+      strictEqual(symbolsBefore.length, 1)
+
+      server.onClose(ws, 1000, new Uint8Array([1]).buffer)
+
+      await Promise.resolve()
+
+      const symbolsAfter = Object.getOwnPropertySymbols(userData)
+
+      strictEqual(symbolsAfter.length, 0)
+      strictEqual(errorCalled, 1)
+    })
+
+    test('onClose: async onClose should deleteWsContext only after promise settles', async () => {
+      let resolveFn
+
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          onClose: () =>
+            new Promise((resolve) => {
+              resolveFn = resolve
+            })
+        }
+      })
+
+      const ws = createMockWebSocket()
+
+      server.onOpen(ws)
+      const userData = ws.getUserData()
+      const symbolsBefore = Object.getOwnPropertySymbols(userData)
+
+      strictEqual(symbolsBefore.length, 1)
+
+      server.onClose(ws, 1000, new Uint8Array([1]).buffer)
+
+      const symbolsImmediate = Object.getOwnPropertySymbols(userData)
+
+      strictEqual(symbolsImmediate.length, 1)
+
+      resolveFn()
+
+      await new Promise((resolve) => setImmediate(resolve))
+
+      const symbolsAfter = Object.getOwnPropertySymbols(userData)
+
+      strictEqual(symbolsAfter.length, 0)
+    })
+
+    test('shutdown should close app only after activeWs becomes 0 (finishShutdownIfNeed)', async () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true }
+      })
+
+      await server.listen()
+      const mockApp = getCurrentMockApp()
+
+      const ws = createMockWebSocket()
+
+      server.onOpen(ws)
+
+      const shutdownPromise = server.shutdown(0)
+
+      strictEqual(mockApp.getCloseCallCount(), 0)
+
+      server.onClose(ws, 1000, new Uint8Array([1]).buffer)
+
+      await Promise.resolve()
+
+      strictEqual(mockApp.getCloseCallCount(), 1)
+      await shutdownPromise
     })
   })
 })

@@ -185,7 +185,7 @@ export function createMockHttpResponse() {
     },
     onAborted(cb) {
       abortedCallback = cb
-      calls.push({ method: 'onAborted' })
+      calls.push({ method: 'onAborted', callback: cb })
     },
     triggerAborted() {
       if (abortedCallback) {

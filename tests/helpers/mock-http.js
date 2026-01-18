@@ -11,7 +11,6 @@ export function createMockRes(options = {}) {
   let proxiedIp = null
   let remoteIp = null
 
-  // Streaming support
   let writeOffset = 0
   let writeResultSequence = []
   let writeResultFn = null
@@ -70,7 +69,7 @@ export function createMockRes(options = {}) {
     onData(cb) {
       calls.push(['onData'])
       onDataCb = cb
-      res.onDataCb = cb // expose for testing
+      res.onDataCb = cb
     },
     getProxiedRemoteAddressAsText() {
       getProxiedRemoteAddressAsTextCallCount++
@@ -80,7 +79,6 @@ export function createMockRes(options = {}) {
       getRemoteAddressAsTextCallCount++
       return remoteIp
     },
-    // Streaming methods
     write(chunk) {
       calls.push(['write', chunk])
       if (writeResultFn) {
@@ -109,7 +107,6 @@ export function createMockRes(options = {}) {
       calls.push(['onWritable'])
       onWritableCb = cb
     },
-    // Helpers for controlling streaming behavior
     setWriteResultSequence(results) {
       writeResultSequence = [...results]
       writeResultFn = null
@@ -143,6 +140,69 @@ export function createMockRes(options = {}) {
   }
 
   return res
+}
+
+/**
+ * Creates a mock readable stream object
+ * @returns {object}
+ */
+export function createMockReadable() {
+  const listeners = {}
+  let pauseCallCount = 0
+  let resumeCallCount = 0
+  let destroyCallCount = 0
+
+  return {
+    off(event, cb) {
+      if (listeners[event]) {
+        const index = listeners[event].indexOf(cb)
+
+        if (index > -1) {
+          listeners[event].splice(index, 1)
+        }
+      }
+    },
+    removeListener(event, cb) {
+      if (listeners[event]) {
+        const index = listeners[event].indexOf(cb)
+
+        if (index > -1) {
+          listeners[event].splice(index, 1)
+        }
+      }
+    },
+    on(event, cb) {
+      if (!listeners[event]) {
+        listeners[event] = []
+      }
+      listeners[event].push(cb)
+    },
+    emit(event, arg) {
+      if (listeners[event]) {
+        for (const cb of listeners[event]) {
+          cb(arg)
+        }
+      }
+    },
+    pause() {
+      pauseCallCount++
+    },
+    resume() {
+      resumeCallCount++
+    },
+    destroy() {
+      destroyCallCount++
+    },
+    getPauseCallCount() {
+      return pauseCallCount
+    },
+    getResumeCallCount() {
+      return resumeCallCount
+    },
+    getDestroyCallCount() {
+      return destroyCallCount
+    }
+  }
 }
 
 /**
