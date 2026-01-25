@@ -126,7 +126,7 @@ export default class HttpContext {
     this.req = null
     this.server = null
 
-    this.done = false
+    this.done = true
     this.replied = false
     this.aborted = false
     this.streaming = false

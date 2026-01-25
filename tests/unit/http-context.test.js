@@ -2,7 +2,7 @@
 
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
-import { createMockReq, createMockRes, createMockReadable } from '../helpers/mock-http.js'
+import { createMockReadable, createMockReq, createMockRes } from '../helpers/mock-http.js'
 import HttpContext from '../../src/http-context.js'
 import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../../src/constants.js'
 
@@ -18,6 +18,15 @@ describe('HttpContext', () => {
 
         strictEqual(ctx.res, res)
         strictEqual(ctx.req, req)
+      })
+
+      test('should keep done=true to prevent double finalize after pool release', () => {
+        const ctx = new HttpContext(null)
+
+        ctx.done = true
+        ctx.clear()
+
+        strictEqual(ctx.done, true)
       })
 
       test('should reset replied/aborted/streaming/streamingStarted/onWritableCallback', () => {
@@ -1797,6 +1806,58 @@ describe('HttpContext', () => {
 
       strictEqual(ctx.streaming, false)
       strictEqual(res.calls.length, initialCallCount)
+    })
+  })
+
+  describe('finalize() idempotency', () => {
+    /**
+     * @returns {{ ctx: HttpContext, server: { finalizeCalls: number }, pool: { releaseCalls: number } }}
+     */
+    function createFinalizeHarness() {
+      const pool = {
+        releaseCalls: 0,
+        /**
+         * @param {HttpContext} ctx
+         */
+        release(ctx) {
+          this.releaseCalls++
+          ctx.clear()
+        }
+      }
+
+      const server = {
+        finalizeCalls: 0,
+        /**
+         * @param {HttpContext} ctx
+         */
+        finalizeHttpContext(ctx) {
+          this.finalizeCalls++
+          ctx.release()
+        },
+        safeHttpError() {
+          /* noop */
+        }
+      }
+
+      const ctx = new HttpContext(pool)
+
+      return { ctx, server, pool }
+    }
+
+    test('should not call server.finalizeHttpContext twice if clear() happens during first finalize', () => {
+      const { ctx, server, pool } = createFinalizeHarness()
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.startStreaming(200)
+
+      ctx.end('ok')
+
+      ctx.finalize()
+
+      strictEqual(server.finalizeCalls, 1)
+      strictEqual(pool.releaseCalls, 1)
     })
   })
 })
