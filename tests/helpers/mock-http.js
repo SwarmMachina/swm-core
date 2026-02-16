@@ -212,6 +212,7 @@ export function createMockReadable() {
  * @param {string} [options.url]
  * @param {Record<string, string>} [options.headers]
  * @param {Record<string, string>} [options.query]
+ * @param {string} [options.fullQuery]
  * @param {string[]} [options.parameters]
  * @returns {object}
  */
@@ -219,6 +220,7 @@ export function createMockReq(options = {}) {
   const calls = []
   const headers = { ...(options.headers || {}) }
   const query = { ...(options.query || {}) }
+  let fullQuery = options.fullQuery
   const parameters = [...(options.parameters || [])]
   let method = options.method || ''
   let url = options.url || ''
@@ -248,10 +250,28 @@ export function createMockReq(options = {}) {
     },
     getQuery(key) {
       calls.push(['getQuery', key])
+
+      if (key === undefined) {
+        if (typeof fullQuery === 'string') {
+          return fullQuery
+        }
+
+        const pairs = []
+
+        for (const name in query) {
+          const value = query[name]
+
+          pairs.push(value === '' ? name : `${name}=${value}`)
+        }
+
+        return pairs.join('&')
+      }
+
       return query[key]
     },
     setQuery(key, value) {
       query[key] = value
+      fullQuery = undefined
     },
     getParameter(i) {
       calls.push(['getParameter', i])
@@ -259,6 +279,13 @@ export function createMockReq(options = {}) {
     },
     setParameter(i, value) {
       parameters[i] = value
+    },
+    forEach(cb) {
+      calls.push(['forEach'])
+
+      for (const name in headers) {
+        cb(name, headers[name])
+      }
     }
   }
 }

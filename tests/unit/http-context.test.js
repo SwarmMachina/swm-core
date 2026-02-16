@@ -20,15 +20,6 @@ describe('HttpContext', () => {
         strictEqual(ctx.req, req)
       })
 
-      test('should keep done=true to prevent double finalize after pool release', () => {
-        const ctx = new HttpContext(null)
-
-        ctx.done = true
-        ctx.clear()
-
-        strictEqual(ctx.done, true)
-      })
-
       test('should reset replied/aborted/streaming/streamingStarted/onWritableCallback', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
@@ -49,20 +40,20 @@ describe('HttpContext', () => {
         strictEqual(ctx.onWritableCallback, null)
       })
 
-      test('should reset private fields and preserve finalize/maxSize', async () => {
+      test('should reset private fields and preserve server/maxSize wiring', async () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq()
-        const finalize = () => {}
+        const server = { finalizeHttpContext() {} }
 
-        ctx.reset(res, req, finalize, 5000)
+        ctx.reset(res, req, server, 5000)
         ctx.status(418)
         ctx.ip()
         ctx.method()
         ctx.url()
         ctx.contentLength()
 
-        ctx.reset(res, req, finalize, 5)
+        ctx.reset(res, req, server, 5)
 
         strictEqual(ctx.getStatus(200), STATUS_TEXT[200])
         strictEqual(ctx.ip(), '')
@@ -91,6 +82,15 @@ describe('HttpContext', () => {
     })
 
     describe('clear()', () => {
+      test('should keep done=true to prevent double finalize after pool release', () => {
+        const ctx = new HttpContext(null)
+
+        ctx.done = true
+        ctx.clear()
+
+        strictEqual(ctx.done, true)
+      })
+
       test('should nullify res/req/finalize and reset caches', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
@@ -248,51 +248,158 @@ describe('HttpContext', () => {
     })
   })
 
-  describe('header/query/param simple proxies', () => {
-    test('header(name) should call req.getHeader(name)', () => {
+  describe('header/query/param caching', () => {
+    test('header(name) — caches and returns from cache on repeated call', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({ headers: { 'content-type': 'application/json' } })
 
       ctx.reset(res, req)
 
-      strictEqual(ctx.header('content-type'), 'application/json')
-      deepStrictEqual(
-        req.calls.filter((c) => c[0] === 'getHeader'),
-        [['getHeader', 'content-type']]
-      )
+      const v1 = ctx.header('content-type')
+      const v2 = ctx.header('content-type')
+
+      strictEqual(v1, 'application/json')
+      strictEqual(v2, 'application/json')
+      strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
     })
 
-    test('query(name) should call req.getQuery(name)', () => {
+    test('header(name) — caches missing header as undefined (does not hit req again)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      const v1 = ctx.header('x-missing')
+      const v2 = ctx.header('x-missing')
+
+      strictEqual(v1, undefined)
+      strictEqual(v1, v2)
+      strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
+    })
+
+    test('cacheHeaders() preloads headers and avoids getHeader()', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-type': 'application/json', 'x-trace-id': 'abc' } })
+
+      ctx.reset(res, req)
+      ctx.cacheHeaders()
+
+      strictEqual(ctx.header('content-type'), 'application/json')
+      strictEqual(ctx.header('x-trace-id'), 'abc')
+      strictEqual(ctx.header('x-missing'), '')
+
+      strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 1)
+      strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 0)
+    })
+
+    test('query(name) — caches and returns from cache on repeated call', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({ query: { id: '123' } })
 
       ctx.reset(res, req)
 
-      strictEqual(ctx.query('id'), '123')
-      deepStrictEqual(
-        req.calls.filter((c) => c[0] === 'getQuery'),
-        [['getQuery', 'id']]
-      )
+      const v1 = ctx.query('id')
+      const v2 = ctx.query('id')
+
+      strictEqual(v1, '123')
+      strictEqual(v2, '123')
+      strictEqual(req.calls.filter((c) => c[0] === 'getQuery').length, 1)
     })
 
-    test('param(i) should call req.getParameter(i)', () => {
+    test('query(name) — caches undefined for missing key', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
-      const req = createMockReq({ parameters: ['user', '123'] })
+      const req = createMockReq()
 
       ctx.reset(res, req)
 
-      strictEqual(ctx.param(0), 'user')
-      strictEqual(ctx.param(1), '123')
-      deepStrictEqual(
-        req.calls.filter((c) => c[0] === 'getParameter'),
-        [
-          ['getParameter', 0],
-          ['getParameter', 1]
-        ]
-      )
+      const v1 = ctx.query('missing')
+      const v2 = ctx.query('missing')
+
+      strictEqual(v1, v2)
+      strictEqual(req.calls.filter((c) => c[0] === 'getQuery').length, 1)
+    })
+
+    test('cacheQuery() parses once and serves lookups from cache', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ fullQuery: 'id=123&name=alice&empty' })
+
+      ctx.reset(res, req)
+      ctx.cacheQuery()
+
+      strictEqual(ctx.query('id'), '123')
+      strictEqual(ctx.query('name'), 'alice')
+      strictEqual(ctx.query('empty'), '')
+      strictEqual(ctx.query('missing'), undefined)
+      strictEqual(ctx.query('missing'), undefined)
+
+      strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
+      strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] !== undefined).length, 0)
+    })
+
+    test('cacheQuery() keeps the first value for duplicate keys', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ fullQuery: 'id=1&id=2' })
+
+      ctx.reset(res, req)
+      ctx.cacheQuery()
+
+      strictEqual(ctx.query('id'), '1')
+    })
+
+    test('param(i) — caches and returns from cache on repeated call', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ parameters: ['user', '42'] })
+
+      ctx.reset(res, req)
+
+      const p0a = ctx.param(0)
+      const p0b = ctx.param(0)
+      const p1 = ctx.param(1)
+
+      strictEqual(p0a, 'user')
+      strictEqual(p0b, 'user')
+      strictEqual(p1, '42')
+      strictEqual(req.calls.filter((c) => c[0] === 'getParameter' && c[1] === 0).length, 1)
+      strictEqual(req.calls.filter((c) => c[0] === 'getParameter' && c[1] === 1).length, 1)
+    })
+
+    test('reset() clears header/query/param caches', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req1 = createMockReq({
+        headers: { 'content-type': 'text/plain' },
+        query: { id: '1' },
+        parameters: ['a']
+      })
+      const req2 = createMockReq({
+        headers: { 'content-type': 'application/json' },
+        query: { id: '2' },
+        parameters: ['b']
+      })
+
+      ctx.reset(res, req1)
+
+      strictEqual(ctx.header('content-type'), 'text/plain')
+      strictEqual(ctx.query('id'), '1')
+      strictEqual(ctx.param(0), 'a')
+
+      ctx.reset(res, req2)
+
+      strictEqual(ctx.header('content-type'), 'application/json')
+      strictEqual(ctx.query('id'), '2')
+      strictEqual(ctx.param(0), 'b')
+
+      strictEqual(req2.calls.filter((c) => c[0] === 'getHeader').length, 1)
+      strictEqual(req2.calls.filter((c) => c[0] === 'getQuery').length, 1)
+      strictEqual(req2.calls.filter((c) => c[0] === 'getParameter').length, 1)
     })
   })
 

@@ -206,13 +206,18 @@ export function createMockHttpResponse() {
  */
 export function createMockHttpRequest() {
   const calls = []
+  let method = 'get'
   let url = '/'
   const headers = {}
   const query = {}
+  let fullQuery = undefined
   const parameters = []
 
   return {
     calls,
+    setMethod(m) {
+      method = m
+    },
     setUrl(u) {
       url = u
     },
@@ -221,9 +226,17 @@ export function createMockHttpRequest() {
     },
     setQuery(key, value) {
       query[key] = value
+      fullQuery = undefined
+    },
+    setFullQuery(value) {
+      fullQuery = value
     },
     setParameter(index, value) {
       parameters[index] = value
+    },
+    getMethod() {
+      calls.push({ method: 'getMethod' })
+      return method
     },
     getUrl() {
       calls.push({ method: 'getUrl' })
@@ -235,11 +248,35 @@ export function createMockHttpRequest() {
     },
     getQuery(key) {
       calls.push({ method: 'getQuery', key })
+
+      if (key === undefined) {
+        if (typeof fullQuery === 'string') {
+          return fullQuery
+        }
+
+        const pairs = []
+
+        for (const name in query) {
+          const value = query[name]
+
+          pairs.push(value === '' ? name : `${name}=${value}`)
+        }
+
+        return pairs.join('&')
+      }
+
       return query[key]
     },
     getParameter(index) {
       calls.push({ method: 'getParameter', index })
       return parameters[index]
+    },
+    forEach(cb) {
+      calls.push({ method: 'forEach' })
+
+      for (const name in headers) {
+        cb(name, headers[name])
+      }
     }
   }
 }
