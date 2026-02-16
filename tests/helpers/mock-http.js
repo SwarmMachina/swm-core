@@ -5,6 +5,7 @@
  */
 export function createMockRes(options = {}) {
   const calls = []
+  const warnings = []
   let onDataCb = null
   let getProxiedRemoteAddressAsTextCallCount = 0
   let getRemoteAddressAsTextCallCount = 0
@@ -17,6 +18,7 @@ export function createMockRes(options = {}) {
   let tryEndResultSequence = []
   let tryEndResultFn = null
   let onWritableCb = null
+  let inCork = false
 
   const res = {
     calls,
@@ -46,17 +48,28 @@ export function createMockRes(options = {}) {
     getRemoteAddressAsTextCallCount() {
       return getRemoteAddressAsTextCallCount
     },
+    getWarnings() {
+      return [...warnings]
+    },
     cork(fn) {
       calls.push(['cork'])
       if (options.onCork) {
         options.onCork()
       }
-      fn()
+      inCork = true
+      try {
+        fn()
+      } finally {
+        inCork = false
+      }
     },
     writeStatus(s) {
       calls.push(['writeStatus', s])
     },
     writeHeader(k, v) {
+      if (!inCork) {
+        warnings.push('Warning: uWS.HttpResponse writes must be made from within a corked callback.')
+      }
       calls.push(['writeHeader', k, v])
     },
     end(body) {

@@ -500,7 +500,7 @@ describe('HttpContext', () => {
   })
 
   describe('setHeader()/setHeaders()', () => {
-    test('setHeader should call res.writeHeader and return ctx', () => {
+    test('setHeader should stage header (no immediate write) and return ctx', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
@@ -508,10 +508,7 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
 
       strictEqual(ctx.setHeader('x', '1'), ctx)
-      deepStrictEqual(
-        res.calls.filter((c) => c[0] === 'writeHeader'),
-        [['writeHeader', 'x', '1']]
-      )
+      strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 0)
     })
 
     test('setHeaders(null/undefined) should do nothing', () => {
@@ -527,7 +524,7 @@ describe('HttpContext', () => {
       strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 0)
     })
 
-    test('setHeaders with TEXT_PLAIN_HEADER should write content-type', () => {
+    test('setHeaders with TEXT_PLAIN_HEADER should stage content-type', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
@@ -538,11 +535,10 @@ describe('HttpContext', () => {
 
       const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
 
-      strictEqual(writeHeaderCalls.length, 1)
-      deepStrictEqual(writeHeaderCalls[0], ['writeHeader', 'content-type', 'text/plain; charset=utf-8'])
+      strictEqual(writeHeaderCalls.length, 0)
     })
 
-    test('setHeaders with JSON_HEADER should write content-type', () => {
+    test('setHeaders with JSON_HEADER should stage content-type', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
@@ -553,11 +549,10 @@ describe('HttpContext', () => {
 
       const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
 
-      strictEqual(writeHeaderCalls.length, 1)
-      deepStrictEqual(writeHeaderCalls[0], ['writeHeader', 'content-type', 'application/json; charset=utf-8'])
+      strictEqual(writeHeaderCalls.length, 0)
     })
 
-    test('setHeaders with OCTET_STREAM_HEADER should write content-type', () => {
+    test('setHeaders with OCTET_STREAM_HEADER should stage content-type', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
@@ -568,11 +563,10 @@ describe('HttpContext', () => {
 
       const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
 
-      strictEqual(writeHeaderCalls.length, 1)
-      deepStrictEqual(writeHeaderCalls[0], ['writeHeader', 'content-type', 'application/octet-stream'])
+      strictEqual(writeHeaderCalls.length, 0)
     })
 
-    test('setHeaders should only write non-null/undefined values', () => {
+    test('setHeaders should stage only non-null/undefined values', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
@@ -583,11 +577,97 @@ describe('HttpContext', () => {
 
       const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
 
+      strictEqual(writeHeaderCalls.length, 0)
+    })
+
+    test('setHeader before sendJson should not warn and header should be present', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('x-trace-id', 'abc')
+      ctx.sendJson({ ok: true })
+
+      const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
+
       strictEqual(writeHeaderCalls.length, 2)
       deepStrictEqual(writeHeaderCalls, [
-        ['writeHeader', 'a', '1'],
-        ['writeHeader', 'd', '2']
+        ['writeHeader', 'x-trace-id', 'abc'],
+        ['writeHeader', 'content-type', 'application/json; charset=utf-8']
       ])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('three setHeader calls should produce one correct response without warnings', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('x-a', '1')
+      ctx.setHeader('x-b', '2')
+      ctx.setHeader('x-c', '3')
+      ctx.sendText('ok')
+
+      strictEqual(res.calls.filter((c) => c[0] === 'cork').length, 1)
+      strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 4)
+      strictEqual(
+        res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-a' && value === '1'),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-b' && value === '2'),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-c' && value === '3'),
+        true
+      )
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeaders + sendJson should keep application/json content-type', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeaders({ 'content-type': 'text/plain', 'x-foo': 'bar' })
+      ctx.sendJson({ ok: true })
+
+      const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
+      const contentTypeCalls = writeHeaderCalls.filter(
+        (c) => c[1] === 'content-type'
+      )
+
+      strictEqual(contentTypeCalls.length, 1)
+      deepStrictEqual(contentTypeCalls[0], ['writeHeader', 'content-type', 'application/json; charset=utf-8'])
+      strictEqual(
+        writeHeaderCalls.some((c) => c[1] === 'x-foo' && c[2] === 'bar'),
+        true
+      )
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeader after reply should be safe no-op', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.sendText('done')
+
+      const beforeCalls = res.calls.length
+
+      strictEqual(ctx.setHeader('x-late', '1'), ctx)
+
+      strictEqual(res.calls.length, beforeCalls)
+      strictEqual(
+        res.calls.some(([name, key]) => name === 'writeHeader' && key === 'x-late'),
+        false
+      )
+      strictEqual(res.getWarnings().length, 0)
     })
   })
 
