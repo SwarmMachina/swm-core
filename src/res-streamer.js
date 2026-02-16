@@ -107,7 +107,7 @@ export default class ResStreamer {
 
     res.cork(() => {
       res.writeStatus(typeof status === 'string' ? status : this.#ctx.getStatus(status))
-      this.#ctx.setHeaders(headers)
+      this.#ctx.flushHeaders(headers)
     })
 
     this.#started = true

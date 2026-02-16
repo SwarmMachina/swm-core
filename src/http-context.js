@@ -14,6 +14,7 @@ export default class HttpContext {
   #params = {}
   #statusOverride = null
   #contentLength = undefined
+  #pendingHeaders = new Map()
   #bodyParser = new BodyParser()
   #resStreamer = new ResStreamer()
 
@@ -114,6 +115,7 @@ export default class HttpContext {
 
     this.#statusOverride = null
     this.#contentLength = undefined
+    this.#pendingHeaders.clear()
 
     this.#ip = ''
     this.#url = ''
@@ -147,6 +149,7 @@ export default class HttpContext {
 
     this.#statusOverride = null
     this.#contentLength = undefined
+    this.#pendingHeaders.clear()
     this.#ip = ''
     this.#url = ''
     this.#method = ''
@@ -396,7 +399,11 @@ export default class HttpContext {
    * @returns {HttpContext}
    */
   setHeader(key, value) {
-    this.res.writeHeader(key, value)
+    if (this.replied || this.aborted) {
+      return this
+    }
+
+    this.#stageHeader(key, value)
     return this
   }
 
@@ -404,32 +411,83 @@ export default class HttpContext {
    * @param {Record<string, string> | null | undefined} headers
    */
   setHeaders(headers) {
+    if (this.replied || this.aborted) {
+      return
+    }
+
+    this.#stageHeaders(headers)
+  }
+
+  /**
+   * @param {Record<string, string> | null | undefined} headers
+   */
+  flushHeaders(headers = null) {
+    this.#flushPendingHeaders(headers)
+  }
+
+  /**
+   * @param {string} key
+   * @param {string} value
+   */
+  #stageHeader(key, value) {
+    if (value === undefined || value === null) {
+      return
+    }
+
+    const headerName = String(key)
+    const headerValue = String(value)
+
+    this.#pendingHeaders.set(headerName.toLowerCase(), [headerName, headerValue])
+  }
+
+  /**
+   * @param {Record<string, string> | null | undefined} headers
+   */
+  #stageHeaders(headers) {
     if (!headers) {
       return
     }
 
     if (headers === TEXT_PLAIN_HEADER) {
-      this.res.writeHeader('content-type', 'text/plain; charset=utf-8')
+      this.#stageHeader('content-type', 'text/plain; charset=utf-8')
       return
     }
 
     if (headers === JSON_HEADER) {
-      this.res.writeHeader('content-type', 'application/json; charset=utf-8')
+      this.#stageHeader('content-type', 'application/json; charset=utf-8')
       return
     }
 
     if (headers === OCTET_STREAM_HEADER) {
-      this.res.writeHeader('content-type', 'application/octet-stream')
+      this.#stageHeader('content-type', 'application/octet-stream')
       return
     }
 
     for (const key in headers) {
       const value = headers[key]
 
-      if (value !== undefined && value !== null) {
-        this.res.writeHeader(key, value)
-      }
+      this.#stageHeader(key, value)
     }
+  }
+
+  /**
+   * @param {Record<string, string> | null | undefined} headers
+   */
+  #flushPendingHeaders(headers = null) {
+    if (!this.res) {
+      this.#pendingHeaders.clear()
+      return
+    }
+
+    if (headers) {
+      this.#stageHeaders(headers)
+    }
+
+    for (const [, [key, value]] of this.#pendingHeaders) {
+      this.res.writeHeader(key, value)
+    }
+
+    this.#pendingHeaders.clear()
   }
 
   /**
@@ -515,7 +573,7 @@ export default class HttpContext {
       }
 
       this.res.writeStatus(this.getStatus(status))
-      this.setHeaders(headers)
+      this.#flushPendingHeaders(headers)
 
       if (body != null) {
         this.res.end(body)
