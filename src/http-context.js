@@ -6,6 +6,12 @@ export default class HttpContext {
   #ip = ''
   #method = ''
   #url = ''
+  #headersCached = false
+  #headers = {}
+  #fullQuery = null
+  #fullQueryParsed = false
+  #query = {}
+  #params = {}
   #statusOverride = null
   #contentLength = undefined
   #bodyParser = new BodyParser()
@@ -112,6 +118,12 @@ export default class HttpContext {
     this.#ip = ''
     this.#url = ''
     this.#method = ''
+    this.#headersCached = false
+    this.#headers = {}
+    this.#fullQuery = null
+    this.#fullQueryParsed = false
+    this.#query = {}
+    this.#params = {}
 
     this.#bodyParser.reset(this, maxSize)
     this.#resStreamer.reset(this, res)
@@ -138,6 +150,12 @@ export default class HttpContext {
     this.#ip = ''
     this.#url = ''
     this.#method = ''
+    this.#headersCached = false
+    this.#headers = {}
+    this.#fullQuery = null
+    this.#fullQueryParsed = false
+    this.#query = {}
+    this.#params = {}
 
     this.#bodyParser.clear()
     this.#resStreamer.clear()
@@ -164,6 +182,68 @@ export default class HttpContext {
     if (this.pool) {
       this.pool.release(this)
     }
+  }
+
+  cacheHeaders() {
+    if (this.#headersCached || !this.req) {
+      return
+    }
+
+    this.req.forEach((key, value) => {
+      this.#headers[key] = value
+    })
+
+    this.#headersCached = true
+  }
+
+  cacheQuery() {
+    if (this.#fullQuery !== null || !this.req) {
+      return
+    }
+
+    const fullQuery = this.req.getQuery()
+
+    this.#fullQuery = typeof fullQuery === 'string' ? fullQuery : ''
+    this.#fullQueryParsed = false
+  }
+
+  #parseFullQuery() {
+    if (this.#fullQueryParsed) {
+      return
+    }
+
+    const fullQuery = this.#fullQuery
+
+    if (!fullQuery) {
+      this.#fullQueryParsed = true
+      return
+    }
+
+    let start = 0
+
+    while (start <= fullQuery.length) {
+      let end = fullQuery.indexOf('&', start)
+
+      if (end === -1) {
+        end = fullQuery.length
+      }
+
+      const eq = fullQuery.indexOf('=', start)
+      const hasEq = eq !== -1 && eq < end
+      const key = hasEq ? fullQuery.slice(start, eq) : fullQuery.slice(start, end)
+
+      if (!(key in this.#query)) {
+        this.#query[key] = hasEq ? fullQuery.slice(eq + 1, end) : ''
+      }
+
+      if (end === fullQuery.length) {
+        break
+      }
+
+      start = end + 1
+    }
+
+    this.#fullQueryParsed = true
   }
 
   ip() {
@@ -213,7 +293,25 @@ export default class HttpContext {
    * @returns {string|undefined}
    */
   query(name) {
-    return this.req.getQuery(name)
+    if (name in this.#query) {
+      return this.#query[name]
+    }
+
+    if (this.#fullQuery !== null) {
+      this.#parseFullQuery()
+
+      if (name in this.#query) {
+        return this.#query[name]
+      }
+
+      this.#query[name] = undefined
+      return undefined
+    }
+
+    const value = this.req.getQuery(name)
+
+    this.#query[name] = value
+    return value
   }
 
   /**
@@ -221,7 +319,14 @@ export default class HttpContext {
    * @returns {string|undefined}
    */
   param(i) {
-    return this.req.getParameter(i)
+    if (i in this.#params) {
+      return this.#params[i]
+    }
+
+    const value = this.req.getParameter(i)
+
+    this.#params[i] = value
+    return value
   }
 
   /**
@@ -229,7 +334,18 @@ export default class HttpContext {
    * @returns {string}
    */
   header(name) {
-    return this.req.getHeader(name)
+    if (name in this.#headers) {
+      return this.#headers[name]
+    }
+
+    if (this.#headersCached) {
+      return ''
+    }
+
+    const value = this.req.getHeader(name)
+
+    this.#headers[name] = value
+    return value
   }
 
   contentLength() {

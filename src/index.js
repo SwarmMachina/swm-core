@@ -325,6 +325,11 @@ export default class Server {
     }
 
     if (isPromise(result)) {
+      ctx.method()
+      ctx.url()
+      ctx.cacheQuery()
+      ctx.cacheHeaders()
+
       // eslint-disable-next-line promise/catch-or-return
       result.then(ctx.onResolve, ctx.onReject)
       return
