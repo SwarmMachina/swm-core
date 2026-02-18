@@ -1,6 +1,6 @@
 {
   "name": "@swarmmachina/swm-core",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Zero-dependency high-performance HTTP/WebSocket server built on uWebSockets.js",
   "keywords": [
     "http",
