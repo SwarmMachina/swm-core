@@ -158,7 +158,7 @@ describe('HttpContext', () => {
     })
   })
 
-  describe('ip()/method()/url() caching', () => {
+  describe('ip()/method()/url()/fullQuery() caching', () => {
     describe('ip()', () => {
       test('should return empty string if res is null', () => {
         const ctx = new HttpContext(null)
@@ -244,6 +244,42 @@ describe('HttpContext', () => {
         strictEqual(ctx.url(), '/api/users')
 
         strictEqual(req.calls.filter((c) => c[0] === 'getUrl').length, 1)
+      })
+    })
+
+    describe('fullQuery()', () => {
+      test('should return empty string if req is null', () => {
+        const ctx = new HttpContext(null)
+
+        strictEqual(ctx.fullQuery(), '')
+      })
+
+      test('should return req.getQuery() with no key and cache it', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq({ fullQuery: 'id=123&name=alice' })
+
+        ctx.reset(res, req)
+
+        strictEqual(ctx.fullQuery(), 'id=123&name=alice')
+        strictEqual(ctx.fullQuery(), 'id=123&name=alice')
+
+        strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
+      })
+
+      test('fullQuery() + query(name) should read from cached full query', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq({ fullQuery: 'id=123&name=alice' })
+
+        ctx.reset(res, req)
+
+        strictEqual(ctx.fullQuery(), 'id=123&name=alice')
+        strictEqual(ctx.query('name'), 'alice')
+        strictEqual(ctx.query('missing'), undefined)
+
+        strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
+        strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] !== undefined).length, 0)
       })
     })
   })
@@ -637,9 +673,7 @@ describe('HttpContext', () => {
       ctx.sendJson({ ok: true })
 
       const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
-      const contentTypeCalls = writeHeaderCalls.filter(
-        (c) => c[1] === 'content-type'
-      )
+      const contentTypeCalls = writeHeaderCalls.filter((c) => c[1] === 'content-type')
 
       strictEqual(contentTypeCalls.length, 1)
       deepStrictEqual(contentTypeCalls[0], ['writeHeader', 'content-type', 'application/json; charset=utf-8'])
