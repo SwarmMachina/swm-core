@@ -327,6 +327,16 @@ const page = ctx.query('page') // ?page=1
 
 **Returns:** `string`
 
+##### `ctx.fullQuery()`
+
+Get full raw query string.
+
+```javascript
+const q = ctx.fullQuery() // page=1&limit=20
+```
+
+**Returns:** `string`
+
 ##### `ctx.param(indexOrName)`
 
 Get URL parameter by index or name (for pattern matching in native routing).

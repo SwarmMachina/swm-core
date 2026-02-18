@@ -8,7 +8,8 @@ export default class HttpContext {
   #url = ''
   #headersCached = false
   #headers = {}
-  #fullQuery = null
+  #fullQuery = ''
+  #fullQueryCached = false
   #fullQueryParsed = false
   #query = {}
   #params = {}
@@ -122,7 +123,8 @@ export default class HttpContext {
     this.#method = ''
     this.#headersCached = false
     this.#headers = {}
-    this.#fullQuery = null
+    this.#fullQuery = ''
+    this.#fullQueryCached = false
     this.#fullQueryParsed = false
     this.#query = {}
     this.#params = {}
@@ -155,7 +157,8 @@ export default class HttpContext {
     this.#method = ''
     this.#headersCached = false
     this.#headers = {}
-    this.#fullQuery = null
+    this.#fullQuery = ''
+    this.#fullQueryCached = false
     this.#fullQueryParsed = false
     this.#query = {}
     this.#params = {}
@@ -200,13 +203,14 @@ export default class HttpContext {
   }
 
   cacheQuery() {
-    if (this.#fullQuery !== null || !this.req) {
+    if (this.#fullQueryCached || !this.req) {
       return
     }
 
     const fullQuery = this.req.getQuery()
 
     this.#fullQuery = typeof fullQuery === 'string' ? fullQuery : ''
+    this.#fullQueryCached = true
     this.#fullQueryParsed = false
   }
 
@@ -292,6 +296,27 @@ export default class HttpContext {
   }
 
   /**
+   * @returns {string}
+   */
+  fullQuery() {
+    if (this.#fullQueryCached) {
+      return this.#fullQuery
+    }
+
+    if (!this.req) {
+      return ''
+    }
+
+    const fullQuery = this.req.getQuery()
+
+    this.#fullQuery = typeof fullQuery === 'string' ? fullQuery : ''
+    this.#fullQueryCached = true
+    this.#fullQueryParsed = false
+
+    return this.#fullQuery
+  }
+
+  /**
    * @param {string} name
    * @returns {string|undefined}
    */
@@ -300,7 +325,7 @@ export default class HttpContext {
       return this.#query[name]
     }
 
-    if (this.#fullQuery !== null) {
+    if (this.#fullQueryCached) {
       this.#parseFullQuery()
 
       if (name in this.#query) {
