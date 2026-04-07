@@ -82,7 +82,7 @@ export default class ResStreamer {
 
   /**
    * @param {number|string} status
-   * @param {Record<string,string>|null} headers
+   * @param {Record<string, string | string[]>|null} headers
    * @returns {ResStreamer}
    */
   begin(status = 200, headers = null) {

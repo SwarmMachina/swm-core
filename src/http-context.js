@@ -428,12 +428,61 @@ export default class HttpContext {
       return this
     }
 
-    this.#stageHeader(key, value)
+    if (typeof key !== 'string') {
+      throw new TypeError('Header name must be a string')
+    }
+
+    if (value === undefined || value === null) {
+      return this
+    }
+
+    const headerKey = key.toLowerCase()
+
+    this.#pendingHeaders.set(headerKey, [key, `${value}`])
     return this
   }
 
   /**
-   * @param {Record<string, string> | null | undefined} headers
+   * @param {string} key
+   * @param {string} value
+   * @returns {HttpContext}
+   */
+  appendHeader(key, value) {
+    if (this.replied || this.aborted) {
+      return this
+    }
+
+    if (typeof key !== 'string') {
+      throw new TypeError('Header name must be a string')
+    }
+
+    if (value === undefined || value === null) {
+      return this
+    }
+
+    const headerKey = key.toLowerCase()
+    const headerValue = `${value}`
+    const pendingHeader = this.#pendingHeaders.get(headerKey)
+
+    if (!pendingHeader) {
+      this.#pendingHeaders.set(headerKey, [key, headerValue])
+      return this
+    }
+
+    pendingHeader[0] = key
+    const cur = pendingHeader[1]
+
+    if (typeof cur === 'string') {
+      pendingHeader[1] = [cur, headerValue]
+    } else {
+      cur[cur.length] = headerValue
+    }
+
+    return this
+  }
+
+  /**
+   * @param {Record<string, string | string[]> | null | undefined} headers
    */
   setHeaders(headers) {
     if (this.replied || this.aborted) {
@@ -444,7 +493,7 @@ export default class HttpContext {
   }
 
   /**
-   * @param {Record<string, string> | null | undefined} headers
+   * @param {Record<string, string | string[]> | null | undefined} headers
    */
   flushHeaders(headers = null) {
     this.#flushPendingHeaders(headers)
@@ -452,21 +501,83 @@ export default class HttpContext {
 
   /**
    * @param {string} key
-   * @param {string} value
+   * @param {string | string[] | null | undefined} value
+   * @param {boolean} append
    */
-  #stageHeader(key, value) {
+  #stagePendingHeader(key, value, append) {
     if (value === undefined || value === null) {
       return
     }
 
-    const headerName = String(key)
-    const headerValue = String(value)
+    const headerKey = key.toLowerCase()
 
-    this.#pendingHeaders.set(headerName.toLowerCase(), [headerName, headerValue])
+    if (!Array.isArray(value)) {
+      const headerValue = `${value}`
+
+      if (!append) {
+        this.#pendingHeaders.set(headerKey, [key, headerValue])
+        return
+      }
+
+      const pendingHeader = this.#pendingHeaders.get(headerKey)
+
+      if (!pendingHeader) {
+        this.#pendingHeaders.set(headerKey, [key, headerValue])
+        return
+      }
+
+      pendingHeader[0] = key
+      const cur = pendingHeader[1]
+
+      if (typeof cur === 'string') {
+        pendingHeader[1] = [cur, headerValue]
+      } else {
+        cur[cur.length] = headerValue
+      }
+
+      return
+    }
+
+    this.#stagePendingHeaderArray(key, headerKey, value, append)
   }
 
   /**
-   * @param {Record<string, string> | null | undefined} headers
+   * @param {string} key
+   * @param {string} headerKey
+   * @param {string[]} value
+   * @param {boolean} append
+   */
+  #stagePendingHeaderArray(key, headerKey, value, append) {
+    let pendingHeader = append ? this.#pendingHeaders.get(headerKey) : null
+
+    for (let i = 0, len = value.length; i < len; i++) {
+      const entry = value[i]
+
+      if (entry === undefined || entry === null) {
+        continue
+      }
+
+      const headerValue = `${entry}`
+
+      if (!pendingHeader) {
+        pendingHeader = [key, headerValue]
+        this.#pendingHeaders.set(headerKey, pendingHeader)
+        continue
+      }
+
+      pendingHeader[0] = key
+      const cur = pendingHeader[1]
+
+      if (typeof cur === 'string') {
+        pendingHeader[1] = [cur, headerValue]
+      } else {
+        cur[cur.length] = headerValue
+      }
+    }
+  }
+
+  /**
+   * @param {Record<string, string | string[]> | null | undefined} headers
    */
   #stageHeaders(headers) {
     if (!headers) {
@@ -474,29 +585,27 @@ export default class HttpContext {
     }
 
     if (headers === TEXT_PLAIN_HEADER) {
-      this.#stageHeader('content-type', 'text/plain; charset=utf-8')
+      this.#pendingHeaders.set('content-type', ['content-type', 'text/plain; charset=utf-8'])
       return
     }
 
     if (headers === JSON_HEADER) {
-      this.#stageHeader('content-type', 'application/json; charset=utf-8')
+      this.#pendingHeaders.set('content-type', ['content-type', 'application/json; charset=utf-8'])
       return
     }
 
     if (headers === OCTET_STREAM_HEADER) {
-      this.#stageHeader('content-type', 'application/octet-stream')
+      this.#pendingHeaders.set('content-type', ['content-type', 'application/octet-stream'])
       return
     }
 
     for (const key in headers) {
-      const value = headers[key]
-
-      this.#stageHeader(key, value)
+      this.#stagePendingHeader(key, headers[key], false)
     }
   }
 
   /**
-   * @param {Record<string, string> | null | undefined} headers
+   * @param {Record<string, string | string[]> | null | undefined} headers
    */
   #flushPendingHeaders(headers = null) {
     if (!this.res) {
@@ -508,8 +617,19 @@ export default class HttpContext {
       this.#stageHeaders(headers)
     }
 
-    for (const [, [key, value]] of this.#pendingHeaders) {
-      this.res.writeHeader(key, value)
+    for (const [, pendingHeader] of this.#pendingHeaders) {
+      const headerValue = pendingHeader[1]
+
+      if (typeof headerValue === 'string') {
+        this.res.writeHeader(pendingHeader[0], headerValue)
+        continue
+      }
+
+      const name = pendingHeader[0]
+
+      for (let i = 0, len = headerValue.length; i < len; i++) {
+        this.res.writeHeader(name, headerValue[i])
+      }
     }
 
     this.#pendingHeaders.clear()
@@ -582,7 +702,7 @@ export default class HttpContext {
 
   /**
    * @param {number} status
-   * @param {Record<string,string>} headers
+   * @param {Record<string, string | string[]>} headers
    * @param {string|ArrayBuffer|Uint8Array|Buffer|null|undefined} body
    */
   reply(status = 200, headers = null, body = null) {
@@ -610,7 +730,7 @@ export default class HttpContext {
 
   /**
    * @param {number} status
-   * @param {Record<string,string>} headers
+   * @param {Record<string, string | string[]>} headers
    * @returns {HttpContext}
    */
   startStreaming(status = 200, headers = null) {
