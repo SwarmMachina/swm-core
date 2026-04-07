@@ -291,7 +291,7 @@ The `ctx` object passed to the router function:
 
 Get request lowercased method.
 
-```javascriptx
+```javascript
 const method = ctx.method()
 ```
 
@@ -408,13 +408,44 @@ ctx.status(201).send({ created: true })
 
 ##### `ctx.setHeader(key, value)`
 
-Set a response header. Returns context for chaining.
+Set or replace a staged response header. Header names are case-insensitive. Repeated `setHeader()` calls replace previously staged values for the same header. Null or undefined values are silently ignored.
 
 ```javascript
 ctx.setHeader('x-header-any', 'string-value').status(201).send({ created: true })
 ```
 
 **Returns:** `HttpContext`
+
+##### `ctx.appendHeader(key, value)`
+
+Append another staged response header line without replacing existing values. Useful for repeated headers such as `Set-Cookie`. Null or undefined values are silently ignored.
+
+```javascript
+ctx.appendHeader('set-cookie', 'access=...; Path=/; HttpOnly')
+ctx.appendHeader('set-cookie', 'refresh=...; Path=/refresh; HttpOnly')
+```
+
+**Returns:** `HttpContext`
+
+##### `ctx.setHeaders(headers)`
+
+Set multiple response headers at once. Equivalent to calling `setHeader()` for each key. Header values may be strings or arrays of strings.
+
+```javascript
+ctx.setHeaders({
+  'x-request-id': '123',
+  'cache-control': 'no-cache',
+  'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+})
+```
+
+##### `ctx.flushHeaders([headers])`
+
+Flush all staged headers (and optionally stage additional ones) to the underlying response. Called automatically by `reply()` and `startStreaming()` — only needed for advanced use cases.
+
+```javascript
+ctx.flushHeaders({ 'x-extra': 'value' })
+```
 
 ##### `ctx.send(data)`
 
@@ -429,12 +460,55 @@ ctx.send(null) // 204 No Content
 
 **Supported types:** Object, String, Buffer, null, undefined
 
-##### `ctx.reply(status, headers, body)`
+##### `ctx.sendJson(data, [status])`
 
-Send response with full control over status, headers, and body.
+Send a JSON response with explicit status code. Defaults to `200`.
 
 ```javascript
-ctx.reply(200, { 'content-type': 'application/json' }, '{"ok":true}')
+ctx.sendJson({ users: [] })
+ctx.sendJson({ error: 'Not found' }, 404)
+```
+
+##### `ctx.sendText(text, [status])`
+
+Send a plain text response with explicit status code. Defaults to `200`.
+
+```javascript
+ctx.sendText('OK')
+ctx.sendText('Created', 201)
+```
+
+##### `ctx.sendBuffer(buffer, [status])`
+
+Send a binary response with explicit status code. Defaults to `200`.
+
+```javascript
+ctx.sendBuffer(Buffer.from('data'))
+ctx.sendBuffer(imageBuffer, 201)
+```
+
+##### `ctx.sendError(error)`
+
+Send an error response. If `error.status` is a finite number, uses that as the HTTP status with `error.message` as the body. Otherwise responds with `500 Internal Server Error`.
+
+```javascript
+ctx.sendError(new Error('Something broke'))
+
+// With custom status
+const err = new Error('Not found')
+err.status = 404
+ctx.sendError(err)
+```
+
+##### `ctx.reply(status, headers, body)`
+
+Send response with full control over status, headers, and body. Header values may be strings or arrays of strings. Array values are written as separate header lines.
+
+```javascript
+ctx.reply(200, {
+  'content-type': 'application/json',
+  'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+}, '{"ok":true}')
 ```
 
 ##### `ctx.stream(readable, [status], [headers])`
@@ -452,10 +526,13 @@ await ctx.stream(stream, 200, { 'content-type': 'video/mp4' })
 
 ##### `ctx.startStreaming([status], [headers])`
 
-Start streaming response manually (for advanced use cases).
+Start streaming response manually (for advanced use cases). Header values may be strings or arrays of strings.
 
 ```javascript
-ctx.startStreaming(200, { 'content-type': 'text/plain' })
+ctx.startStreaming(200, {
+  'content-type': 'text/plain',
+  'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+})
 ```
 
 ##### `ctx.write(chunk)`
