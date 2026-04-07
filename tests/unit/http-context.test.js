@@ -535,7 +535,7 @@ describe('HttpContext', () => {
     })
   })
 
-  describe('setHeader()/setHeaders()', () => {
+  describe('setHeader()/appendHeader()/setHeaders()', () => {
     test('setHeader should stage header (no immediate write) and return ctx', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -545,6 +545,73 @@ describe('HttpContext', () => {
 
       strictEqual(ctx.setHeader('x', '1'), ctx)
       strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 0)
+    })
+
+    test('setHeader should throw TypeError for non-string header name', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.setHeader(123, '1'), {
+        name: 'TypeError',
+        message: 'Header name must be a string'
+      })
+    })
+
+    test('setHeader should overwrite previously staged values for the same header', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('set-cookie', 'a=1; Path=/')
+      ctx.setHeader('Set-Cookie', 'b=2; Path=/refresh')
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter((c) => c[0] === 'writeHeader' && c[1].toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [['set-cookie', 'b=2; Path=/refresh']])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('appendHeader should stage repeated response headers in order', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.appendHeader('set-cookie', 'a=1; Path=/'), ctx)
+      strictEqual(ctx.appendHeader('set-cookie', 'b=2; Path=/refresh'), ctx)
+
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter((c) => c[0] === 'writeHeader' && c[1].toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('appendHeader should throw TypeError for non-string header name', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.appendHeader(123, '1'), {
+        name: 'TypeError',
+        message: 'Header name must be a string'
+      })
     })
 
     test('setHeaders(null/undefined) should do nothing', () => {
@@ -616,6 +683,33 @@ describe('HttpContext', () => {
       strictEqual(writeHeaderCalls.length, 0)
     })
 
+    test('setHeaders should stage string[] values as separate header lines', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeaders({
+        'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh'],
+        'x-trace-id': 'abc'
+      })
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter((c) => c[0] === 'writeHeader' && c[1].toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(
+        res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-trace-id' && value === 'abc'),
+        true
+      )
+      strictEqual(res.getWarnings().length, 0)
+    })
+
     test('setHeader before sendJson should not warn and header should be present', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -660,6 +754,46 @@ describe('HttpContext', () => {
         res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-c' && value === '3'),
         true
       )
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeader followed by appendHeader should keep both values for the same header', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('set-cookie', 'a=1; Path=/')
+      ctx.appendHeader('set-cookie', 'b=2; Path=/refresh')
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter((c) => c[0] === 'writeHeader' && c[1].toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('appendHeader followed by setHeader should replace previously staged values', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.appendHeader('set-cookie', 'a=1; Path=/')
+      ctx.appendHeader('set-cookie', 'b=2; Path=/refresh')
+      ctx.setHeader('set-cookie', 'c=3; Path=/final')
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter((c) => c[0] === 'writeHeader' && c[1].toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [['set-cookie', 'c=3; Path=/final']])
       strictEqual(res.getWarnings().length, 0)
     })
 
@@ -746,6 +880,38 @@ describe('HttpContext', () => {
 
       strictEqual(endCalls.length, 1)
       strictEqual(endCalls[0].length, 1)
+    })
+
+    test('reply should write repeated set-cookie headers as separate header lines', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.reply(
+        200,
+        {
+          'content-type': 'application/json; charset=utf-8',
+          'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+        },
+        '{"ok":true}'
+      )
+
+      const setCookieCalls = res.calls
+        .filter((c) => c[0] === 'writeHeader' && c[1].toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(
+        res.calls.some(
+          ([name, key, value]) =>
+            name === 'writeHeader' && key === 'content-type' && value === 'application/json; charset=utf-8'
+        ),
+        true
+      )
     })
 
     test('should do nothing if ctx.replied is true', () => {
@@ -1302,6 +1468,27 @@ describe('HttpContext', () => {
           ),
           true
         )
+      })
+
+      test('should write repeated set-cookie headers as separate header lines', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.startStreaming(200, {
+          'content-type': 'text/plain; charset=utf-8',
+          'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+        })
+
+        const setCookieCalls = res.calls
+          .filter((c) => c[0] === 'writeHeader' && c[1].toLowerCase() === 'set-cookie')
+          .map(([, key, value]) => [key.toLowerCase(), value])
+
+        deepStrictEqual(setCookieCalls, [
+          ['set-cookie', 'a=1; Path=/'],
+          ['set-cookie', 'b=2; Path=/refresh']
+        ])
       })
 
       test('should no-op if ctx.replied=true', () => {

@@ -1,6 +1,7 @@
 import { once } from 'node:events'
 import fs from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
+import { createServer } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getTest } from './tests.js'
@@ -159,6 +160,24 @@ async function processV8Profile(profileDir) {
 }
 
 /**
+ * @returns {Promise<number>}
+ */
+async function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer()
+
+    server.listen(0, () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address ? address.port : 0
+
+      server.close(() => resolve(port))
+    })
+
+    server.on('error', reject)
+  })
+}
+
+/**
  * @param {object} o
  * @param {string} o.fw
  * @param {string} o.testName
@@ -169,6 +188,7 @@ async function processV8Profile(profileDir) {
  */
 async function startServer({ fw, testName, runIndex, v8prof, runStamp }) {
   const serverPath = path.join(__dirname, 'server.js')
+  const port = await getFreePort()
 
   const profileDir = await ensureDir(
     path.join(__dirname, 'profiles', `${testName}-${runStamp}`, `run-${runIndex + 1}`, fw)
@@ -180,7 +200,7 @@ async function startServer({ fw, testName, runIndex, v8prof, runStamp }) {
     nodeArgs.push('--prof')
   }
 
-  nodeArgs.push(serverPath, '--fw', fw, '--port', '3000')
+  nodeArgs.push(serverPath, '--fw', fw, '--port', port)
 
   const p = spawn(process.execPath, nodeArgs, {
     cwd: profileDir,

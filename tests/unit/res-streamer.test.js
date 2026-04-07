@@ -343,6 +343,28 @@ describe('ResStreamer', () => {
       )
     })
 
+    test('should write repeated set-cookie headers as separate header lines', () => {
+      const streamer = new ResStreamer()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      streamer.reset(ctx, res)
+      streamer.begin(200, {
+        'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+      })
+
+      const setCookieCalls = res.calls
+        .filter((c) => c[0] === 'writeHeader' && c[1].toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+    })
+
     test('should use string status if provided', () => {
       const streamer = new ResStreamer()
       const ctx = new HttpContext(null)

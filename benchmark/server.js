@@ -47,6 +47,20 @@ function parseArgs(argv) {
 }
 
 const { fw, port } = parseArgs(process.argv)
+const HEADERS_TEST = TESTS.get('headers')
+
+/**
+ * @param {import('../src/http-context.js').default} ctx
+ */
+function sendCoreHeadersBench(ctx) {
+  ctx.setHeader('content-type', HEADERS_TEST.responseHeaders['content-type'])
+  ctx.setHeader('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
+  ctx.setHeader('x-trace-id', HEADERS_TEST.responseHeaders['x-trace-id'])
+  ctx.setHeader('x-response-id', HEADERS_TEST.responseHeaders['x-response-id'])
+  ctx.appendHeader('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][0])
+  ctx.appendHeader('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
+  ctx.reply(200, null, HEADERS_TEST.responseText)
+}
 
 /**
  * @param {number} port
@@ -70,6 +84,10 @@ async function main() {
 
       if (method === 'get' && url === '/base') {
         return TESTS.get('base').payload
+      }
+
+      if (method === 'get' && url === '/headers') {
+        return sendCoreHeadersBench(ctx)
       }
 
       if (method === 'post' && url === '/base') {
@@ -104,6 +122,15 @@ async function main() {
     app.use(express.json())
 
     app.get('/base', (req, res) => res.status(200).json(TESTS.get('base').payload))
+    app.get('/headers', (req, res) => {
+      res.set('content-type', HEADERS_TEST.responseHeaders['content-type'])
+      res.set('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
+      res.set('x-trace-id', HEADERS_TEST.responseHeaders['x-trace-id'])
+      res.set('x-response-id', HEADERS_TEST.responseHeaders['x-response-id'])
+      res.append('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][0])
+      res.append('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
+      res.status(200).send(HEADERS_TEST.responseText)
+    })
     app.post('/base', (req, res) => res.status(200).json(req.body))
     app.use((req, res) => res.status(404).send('Not Found'))
 
@@ -121,6 +148,15 @@ async function main() {
     const fastify = Fastify({ logger: false })
 
     fastify.get('/base', async () => TESTS.get('base').payload)
+    fastify.get('/headers', async (req, reply) => {
+      reply.header('content-type', HEADERS_TEST.responseHeaders['content-type'])
+      reply.header('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
+      reply.header('x-trace-id', HEADERS_TEST.responseHeaders['x-trace-id'])
+      reply.header('x-response-id', HEADERS_TEST.responseHeaders['x-response-id'])
+      reply.header('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][0])
+      reply.header('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
+      reply.code(200).send(HEADERS_TEST.responseText)
+    })
     fastify.post('/base', async (req) => req.body)
 
     fastify.setNotFoundHandler((req, reply) => reply.code(404).send('Not Found'))
@@ -141,6 +177,15 @@ async function main() {
     const router = async (req, res) => {
       if (req.method === 'GET' && req.url === '/base') {
         return TESTS.get('base').payload
+      }
+
+      if (req.method === 'GET' && req.url === '/headers') {
+        res.setHeader('Content-Type', HEADERS_TEST.responseHeaders['content-type'])
+        res.setHeader('Cache-Control', HEADERS_TEST.responseHeaders['cache-control'])
+        res.setHeader('X-Trace-Id', HEADERS_TEST.responseHeaders['x-trace-id'])
+        res.setHeader('X-Response-Id', HEADERS_TEST.responseHeaders['x-response-id'])
+        res.setHeader('Set-Cookie', HEADERS_TEST.responseHeaders['set-cookie'])
+        return HEADERS_TEST.responseText
       }
 
       if (req.method === 'POST' && req.url === '/base') {

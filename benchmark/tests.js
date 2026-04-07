@@ -32,6 +32,29 @@ const TESTS = new Map([
     }
   ],
   [
+    'headers',
+    {
+      name: 'headers',
+      method: 'GET',
+      path: '/headers',
+      duration: 10,
+      connections: 100,
+      pipelining: 10,
+      description: 'Response headers benchmark with scalar and multi-value Set-Cookie headers',
+      responseText: 'ok',
+      responseHeaders: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-trace-id': 'bench-trace-id',
+        'x-response-id': 'bench-response-id',
+        'set-cookie': [
+          'bench.access=1; Path=/; HttpOnly; SameSite=Lax',
+          'bench.refresh=2; Path=/refresh; HttpOnly; SameSite=Lax'
+        ]
+      }
+    }
+  ],
+  [
     'post-base',
     {
       name: 'post-base',
