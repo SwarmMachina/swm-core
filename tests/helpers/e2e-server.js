@@ -1,5 +1,5 @@
 import Server from '../../src/index.js'
-import { getFreePort } from './ports.js'
+import { getFreePort } from '../../helpers/ports.js'
 
 /**
  * @param {object} opt

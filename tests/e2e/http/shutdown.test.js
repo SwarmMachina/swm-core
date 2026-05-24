@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { startHttpServer } from '../../helpers/e2e-server.js'
 import { reqText } from '../../helpers/http-client.js'
-import delay from '../../../benchmark/helpers/delay.js'
+import delay from '../../../helpers/delay.js'
 
 test('shutdown: rejects all conections while stopping', async () => {
   let inFlightResolve

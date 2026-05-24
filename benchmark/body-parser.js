@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks'
 import BodyParser from '../src/body-parser.js'
 import { fmtBytes, fmtNum } from './helpers/format.js'
+import parseArgs from './helpers/parse-args.js'
 
 class MockRes {
   /** @type {(ab: ArrayBuffer, isLast: boolean) => void} */
@@ -40,42 +41,44 @@ class MockCtx {
  * @param {string[]} argv
  * @returns {object}
  */
-function parseArgs(argv) {
-  const out = {
-    size: 1024 * 1024, // 1 MiB
-    chunk: 16 * 1024, // 16 KiB
-    iters: 10 * 1000,
-    warm: 1000,
-    max: 16 * 1024 * 1024, // 16 MiB
-    verify: true,
-    gc: false
-  }
-
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i]
-    const v = argv[i + 1]
-
-    if (a === '--size') {
-      i++
-      out.size = Number(v)
-    } else if (a === '--chunk') {
-      i++
-      out.chunk = Number(v)
-    } else if (a === '--iters') {
-      i++
-      out.iters = Number(v)
-    } else if (a === '--warm') {
-      i++
-      out.warm = Number(v)
-    } else if (a === '--max') {
-      i++
-      out.max = Number(v)
-    } else if (a === '--no-verify') {
-      out.verify = false
-    } else if (a === '--gc') {
-      out.gc = true
+function parseBodyParserArgs(argv) {
+  const out = parseArgs(
+    argv,
+    {
+      size: 1024 * 1024, // 1 MiB
+      chunk: 16 * 1024, // 16 KiB
+      iters: 10 * 1000,
+      warm: 1000,
+      max: 16 * 1024 * 1024, // 16 MiB
+      verify: true,
+      gc: false
+    },
+    {
+      '--size': (out, v) => {
+        out.size = Number(v)
+      },
+      '--chunk': (out, v) => {
+        out.chunk = Number(v)
+      },
+      '--iters': (out, v) => {
+        out.iters = Number(v)
+      },
+      '--warm': (out, v) => {
+        out.warm = Number(v)
+      },
+      '--max': (out, v) => {
+        out.max = Number(v)
+      },
+      '--no-verify': (out) => {
+        out.verify = false
+        return false
+      },
+      '--gc': (out) => {
+        out.gc = true
+        return false
+      }
     }
-  }
+  )
 
   if (!Number.isFinite(out.size) || out.size < 0) {
     throw new Error('bad --size')
@@ -230,7 +233,7 @@ function printResult(res, { size, chunk, iters, warm }) {
  *
  */
 async function main() {
-  const args = parseArgs(process.argv)
+  const args = parseBodyParserArgs(process.argv)
 
   if (args.gc && !global.gc) {
     console.log('NOTE: --gc задан, но нет global.gc. Запусти с: node --expose-gc bench-body-parser.mjs ...')

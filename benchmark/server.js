@@ -1,6 +1,7 @@
 import http from 'node:http'
 import { TESTS } from './tests.js'
 import Metrics from './helpers/metrics.js'
+import parseArgs from './helpers/parse-args.js'
 
 const METRICS = new Metrics()
 
@@ -23,30 +24,19 @@ if (process.send) {
   })
 }
 
-/**
- * @param {string[]} argv
- * @returns {object}
- */
-function parseArgs(argv) {
-  const out = { fw: 'core', port: 3000 }
-
-  for (let i = 2; i < argv.length; i++) {
-    const a = argv[i]
-    const v = argv[i + 1]
-
-    if (a === '--fw') {
-      i++
+const { fw, port } = parseArgs(
+  process.argv,
+  { fw: 'core', port: 3000 },
+  {
+    '--fw': (out, v) => {
       out.fw = String(v)
-    } else if (a === '--port') {
-      i++
+    },
+    '--port': (out, v) => {
       out.port = Number(v)
     }
   }
+)
 
-  return out
-}
-
-const { fw, port } = parseArgs(process.argv)
 const HEADERS_TEST = TESTS.get('headers')
 
 /**
@@ -212,5 +202,5 @@ async function main() {
 
 main().catch((e) => {
   console.error(e)
-  process.exitCode = 1
+  process.exit(1)
 })
