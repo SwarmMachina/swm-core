@@ -9,13 +9,14 @@
     "framework": "core"
   },
   "calibration": {
-    "status": "initial-portable-guard",
+    "status": "github-actions-calibrated",
     "createdAt": "2026-05-24",
+    "updatedAt": "2026-05-24",
     "node": "24.x",
     "ciRunner": "ubuntu-latest",
     "autocannon": "8.0.0",
-    "uwebsockets": "20.56.0",
-    "note": "Conservative first CI guard. Replace guard values with GitHub Actions medians after 5-10 stable runs."
+    "uwebsockets": "20.67.0",
+    "note": "Initial GitHub Actions calibration. Guard thresholds keep headroom for shared runner variance while still catching large regressions."
   },
   "parameters": {
     "runs": 3,
@@ -58,9 +59,13 @@
       "method": "GET",
       "path": "/base",
       "pipelining": 10,
-      "guard": "portable smoke-regression threshold until CI medians are collected",
-      "rpsMin": 210000,
-      "latencyP99MaxMs": 10,
+      "guard": "GitHub Actions calibrated smoke-regression threshold",
+      "observedGithubActionsMedian": {
+        "rps": 96107,
+        "latencyP99Ms": 17
+      },
+      "rpsMin": 70000,
+      "latencyP99MaxMs": 35,
       "errorsMax": 0,
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB", "heapMB"]
     },
@@ -69,9 +74,13 @@
       "method": "GET",
       "path": "/headers",
       "pipelining": 10,
-      "guard": "portable smoke-regression threshold until CI medians are collected",
-      "rpsMin": 180000,
-      "latencyP99MaxMs": 8,
+      "guard": "GitHub Actions calibrated smoke-regression threshold",
+      "observedGithubActionsMedian": {
+        "rps": 87381,
+        "latencyP99Ms": 21
+      },
+      "rpsMin": 65000,
+      "latencyP99MaxMs": 40,
       "errorsMax": 0,
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB", "heapMB"]
     },
@@ -81,9 +90,13 @@
       "path": "/base",
       "pipelining": 1,
       "body": "small JSON object",
-      "guard": "portable smoke-regression threshold until CI medians are collected",
-      "rpsMin": 50000,
-      "latencyP99MaxMs": 5,
+      "guard": "GitHub Actions calibrated smoke-regression threshold",
+      "observedGithubActionsMedian": {
+        "rps": 32019,
+        "latencyP99Ms": 6
+      },
+      "rpsMin": 24000,
+      "latencyP99MaxMs": 15,
       "errorsMax": 0,
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB", "heapMB"]
     }
