@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "regression-ci-baseline/v1",
+  "suite": "http",
+  "benchmark": {
+    "name": "http-core-ci",
+    "packageName": "@swarmmachina/swm-core",
+    "packageVersion": "1.2.0",
+    "runner": "benchmark/regression-ci.js",
+    "script": "npm run profile:ci -- --suite http",
+    "framework": "core"
+  },
+  "calibration": {
+    "status": "github-actions-calibrated",
+    "createdAt": "2026-05-24",
+    "updatedAt": "2026-06-14",
+    "node": "24.x",
+    "ciRunner": "ubuntu-latest",
+    "autocannon": "8.0.0",
+    "uwebsockets": "20.67.0",
+    "note": "rps/latency calibrated on GitHub Actions. Memory ceilings are bootstrap values with wide headroom; tighten after a few CI runs. rssMB is report-only."
+  },
+  "parameters": {
+    "runs": 3,
+    "warmupSec": 2,
+    "durationSec": 6,
+    "connections": 100,
+    "sampleMs": 250,
+    "cpuProfile": true
+  },
+  "metrics": {
+    "rps": { "label": "RPS", "unit": "req/s" },
+    "latencyP99Ms": { "label": "p99", "unit": "ms" },
+    "errors": { "label": "errors", "unit": "" },
+    "heapMB": { "label": "heap peak", "unit": "MB" },
+    "externalMB": { "label": "external peak", "unit": "MB" },
+    "arrayBuffersMB": { "label": "arrayBuffers peak", "unit": "MB" },
+    "rssMB": { "label": "rss peak", "unit": "MB" }
+  },
+  "tests": {
+    "base": {
+      "description": "GET /base JSON response hot path",
+      "observedGithubActionsMedian": { "rps": 96107, "latencyP99Ms": 17 },
+      "guards": {
+        "rps": { "min": 70000 },
+        "latencyP99Ms": { "max": 35 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 48 },
+        "externalMB": { "max": 32 },
+        "arrayBuffersMB": { "max": 16 }
+      },
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
+    "headers": {
+      "description": "GET /headers response header staging and repeated Set-Cookie path",
+      "observedGithubActionsMedian": { "rps": 87381, "latencyP99Ms": 21 },
+      "guards": {
+        "rps": { "min": 65000 },
+        "latencyP99Ms": { "max": 40 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 48 },
+        "externalMB": { "max": 32 },
+        "arrayBuffersMB": { "max": 16 }
+      },
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
+    "post-base": {
+      "description": "POST /base JSON body parsing hot path",
+      "observedGithubActionsMedian": { "rps": 32019, "latencyP99Ms": 6 },
+      "guards": {
+        "rps": { "min": 24000 },
+        "latencyP99Ms": { "max": 15 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 48 },
+        "externalMB": { "max": 32 },
+        "arrayBuffersMB": { "max": 16 }
+      },
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    }
+  },
+  "cpuProfileGuard": {
+    "profileRequired": true,
+    "minTotalTicks": 100,
+    "maxGcPct": 10,
+    "maxUnaccountedPct": 25,
+    "note": "Sanity check only."
+  }
+}

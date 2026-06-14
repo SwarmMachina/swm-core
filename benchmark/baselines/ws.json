@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "regression-ci-baseline/v1",
+  "suite": "ws",
+  "benchmark": {
+    "name": "ws-core-ci",
+    "packageName": "@swarmmachina/swm-core",
+    "packageVersion": "1.2.0",
+    "runner": "benchmark/regression-ci.js",
+    "script": "npm run profile:ci -- --suite ws",
+    "framework": "core"
+  },
+  "calibration": {
+    "status": "bootstrap-uncalibrated",
+    "createdAt": "2026-06-14",
+    "node": "24.x",
+    "ciRunner": "ubuntu-latest",
+    "note": "Bootstrap values. errors is the primary signal; msgPerSec is a loose floor (client-bound). Tighten after a few CI runs. rssMB is report-only."
+  },
+  "parameters": {
+    "runs": 3,
+    "warmupSec": 2,
+    "durationSec": 6,
+    "connections": 50,
+    "msgSize": 64,
+    "sampleMs": 250,
+    "cpuProfile": true
+  },
+  "metrics": {
+    "msgPerSec": { "label": "messages", "unit": "msg/s" },
+    "latencyP99Ms": { "label": "p99 round-trip", "unit": "ms" },
+    "errors": { "label": "errors", "unit": "" },
+    "heapMB": { "label": "heap peak", "unit": "MB" },
+    "externalMB": { "label": "external peak", "unit": "MB" },
+    "arrayBuffersMB": { "label": "arrayBuffers peak", "unit": "MB" },
+    "rssMB": { "label": "rss peak", "unit": "MB" }
+  },
+  "tests": {
+    "echo": {
+      "description": "WebSocket echo round-trip (ping-pong)",
+      "guards": {
+        "errors": { "max": 0 },
+        "msgPerSec": { "min": 10000 },
+        "heapMB": { "max": 48 },
+        "externalMB": { "max": 32 },
+        "arrayBuffersMB": { "max": 16 }
+      },
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "latencyP99Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    }
+  },
+  "cpuProfileGuard": {
+    "profileRequired": true,
+    "minTotalTicks": 100,
+    "maxGcPct": 15,
+    "maxUnaccountedPct": 30,
+    "note": "Sanity check only."
+  }
+}
