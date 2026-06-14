@@ -958,6 +958,62 @@ npm test
 npm test:coverage
 ```
 
+## Regression profiling (CI)
+
+`npm run profile:ci` runs the regression-profiling suites (HTTP, body-parser and
+WebSocket), records CPU profiles and memory peaks, and fails on a guard breach.
+In CI it runs only on push to `master` and `workflow_dispatch` (see
+`.github/workflows/ci.yml`) and uploads the `regression-profiles` artifact.
+Thresholds live in `benchmark/baselines/*.json`.
+
+GitHub's shared runners are noisy — throughput can swing 30–40% between runs — so
+absolute thresholds there only catch large regressions. Running the profiling job
+on a quiet self-hosted runner removes that noise and lets the thresholds be
+tightened enough to catch small regressions.
+
+### Self-hosted runner
+
+Only the gated `regression-profile` job uses the self-hosted runner; the `test`
+job stays on `ubuntu-latest`.
+
+> **Public-repository note.** The `regression-profile` job is gated to
+> `push`/`workflow_dispatch`, so fork pull requests never reach the self-hosted
+> machine — they only run `test` on `ubuntu-latest`. Anything merged to `master`
+> still executes on the runner, so treat the host as exposed: dedicated
+> unprivileged user, firewalled, no production secrets, ephemeral runner.
+
+**1. Register the runner** (repo Settings → Actions → Runners → New self-hosted
+runner). The connection is outbound-only — no inbound ports, works behind NAT:
+
+```bash
+./config.sh --url https://github.com/<owner>/<repo> --token <RUNNER_TOKEN> --labels bench --ephemeral
+sudo ./svc.sh install <user>
+sudo ./svc.sh start
+```
+
+**2. Harden the host.**
+
+- Run the runner as a dedicated unprivileged user, never root.
+- Keep the host firewalled; allow only outbound HTTPS to GitHub.
+- Do not expose repository or production secrets to the runner.
+- `--ephemeral` de-registers the runner after each job, limiting persistence.
+
+**3. Tune for low noise** (otherwise the variance returns):
+
+```bash
+sudo cpupower frequency-set -g performance
+```
+
+Keep the host idle during a run; optionally pin the runner to dedicated cores.
+
+**4. Point the job at the runner.** In `.github/workflows/ci.yml`, set the
+`regression-profile` job to `runs-on: [self-hosted, Linux, bench]`.
+
+**5. Recalibrate.** Throughput and memory numbers differ per machine, so recalibrate
+`benchmark/baselines/*.json` on the self-hosted runner: collect a few green runs,
+then set each guard just past the observed noise floor (throughput `min` ≈ observed
+low × 0.9; latency and memory `max` ≈ observed high × 1.15).
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
