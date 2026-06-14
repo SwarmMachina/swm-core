@@ -156,7 +156,6 @@ export function createMockRes(options = {}) {
 }
 
 /**
- * Creates a mock readable stream object
  * @returns {object}
  */
 export function createMockReadable() {
@@ -219,7 +218,6 @@ export function createMockReadable() {
 }
 
 /**
- * Creates a mock HTTP request object
  * @param {object} options
  * @param {string} [options.method]
  * @param {string} [options.url]

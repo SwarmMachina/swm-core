@@ -700,11 +700,11 @@ describe('BodyParser', () => {
 
       const promise = parser.text()
 
-      res.pushData('привет 🚀', true)
+      res.pushData('hello 🚀', true)
 
       const result = await promise
 
-      strictEqual(result, 'привет 🚀')
+      strictEqual(result, 'hello 🚀')
     })
 
     test('should propagate errors from body()', async () => {
