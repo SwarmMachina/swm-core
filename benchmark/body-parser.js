@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { performance } from 'node:perf_hooks'
 import BodyParser from '../src/body-parser.js'
 import { fmtBytes, fmtNum } from './helpers/format.js'
@@ -51,7 +53,8 @@ function parseBodyParserArgs(argv) {
       warm: 1000,
       max: 16 * 1024 * 1024, // 16 MiB
       verify: true,
-      gc: false
+      gc: false,
+      jsonOut: null
     },
     {
       '--size': (out, v) => {
@@ -76,6 +79,9 @@ function parseBodyParserArgs(argv) {
       '--gc': (out) => {
         out.gc = true
         return false
+      },
+      '--json-out': (out, v) => {
+        out.jsonOut = String(v)
       }
     }
   )
@@ -179,6 +185,22 @@ async function benchMode({ mode, parser, size, chunk, iters, warm, max, verify, 
     global.gc()
   }
 
+  const peak = { rss: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }
+  const sampleMem = () => {
+    const mu = process.memoryUsage()
+
+    if (mu.rss > peak.rss) peak.rss = mu.rss
+    if (mu.heapUsed > peak.heapUsed) peak.heapUsed = mu.heapUsed
+    if (mu.external > peak.external) peak.external = mu.external
+
+    const ab = mu.arrayBuffers || 0
+
+    if (ab > peak.arrayBuffers) peak.arrayBuffers = ab
+  }
+  const sampleEvery = Math.max(1, Math.floor(iters / 256))
+
+  sampleMem()
+
   const t0 = performance.now()
 
   let bytes = 0
@@ -190,14 +212,21 @@ async function benchMode({ mode, parser, size, chunk, iters, warm, max, verify, 
       throw new Error(`${mode}: bad length ${buf.length} != ${size}`)
     }
     bytes += buf.length
+
+    if (i % sampleEvery === 0) {
+      sampleMem()
+    }
   }
 
   const t1 = performance.now()
   const ms = t1 - t0
 
+  sampleMem()
+
   const itersPerSec = (iters / ms) * 1000
   const mbPerSec = bytes / (1024 * 1024) / (ms / 1000)
   const nsPerByte = (ms * 1e6) / bytes // ms -> ns
+  const toMb = (b) => b / 1024 / 1024
 
   return {
     mode,
@@ -205,12 +234,17 @@ async function benchMode({ mode, parser, size, chunk, iters, warm, max, verify, 
     itersPerSec,
     mbPerSec,
     nsPerByte,
-    bytes
+    bytes,
+    memMB: {
+      rssPeak: toMb(peak.rss),
+      heapUsedPeak: toMb(peak.heapUsed),
+      externalPeak: toMb(peak.external),
+      arrayBuffersPeak: toMb(peak.arrayBuffers)
+    }
   }
 }
 
 /**
- *
  * @param {object} res
  * @param {object} opt
  * @param {number} opt.size
@@ -236,7 +270,7 @@ async function main() {
   const args = parseBodyParserArgs(process.argv)
 
   if (args.gc && !global.gc) {
-    console.log('NOTE: --gc задан, но нет global.gc. Запусти с: node --expose-gc bench-body-parser.mjs ...')
+    console.log('NOTE: --gc set but global.gc is unavailable. Run with: node --expose-gc benchmark/body-parser.js ...')
   }
 
   console.log('BodyParser benchmark')
@@ -263,6 +297,40 @@ async function main() {
 
   printResult(known, args)
   printResult(unknown, args)
+
+  if (args.jsonOut) {
+    const toCase = (r) => ({
+      itersPerSec: r.itersPerSec,
+      mbPerSec: r.mbPerSec,
+      nsPerByte: r.nsPerByte,
+      rssMB: r.memMB.rssPeak,
+      heapMB: r.memMB.heapUsedPeak,
+      externalMB: r.memMB.externalPeak,
+      arrayBuffersMB: r.memMB.arrayBuffersPeak
+    })
+
+    const summary = {
+      createdAt: new Date().toISOString(),
+      node: process.version,
+      parameters: {
+        size: args.size,
+        chunk: args.chunk,
+        iters: args.iters,
+        warm: args.warm,
+        max: args.max,
+        verify: args.verify,
+        gc: args.gc
+      },
+      results: {
+        known: toCase(known),
+        unknown: toCase(unknown)
+      }
+    }
+
+    await fs.mkdir(path.dirname(args.jsonOut), { recursive: true })
+    await fs.writeFile(args.jsonOut, `${JSON.stringify(summary, null, 2)}\n`)
+    console.log(`\n[body-parser] wrote json summary: ${args.jsonOut}`)
+  }
 }
 
 main().catch((e) => {
