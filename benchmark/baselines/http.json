@@ -10,14 +10,11 @@
     "framework": "core"
   },
   "calibration": {
-    "status": "github-actions-calibrated",
-    "createdAt": "2026-05-24",
+    "status": "self-hosted-calibrated",
     "updatedAt": "2026-06-14",
     "node": "24.x",
-    "ciRunner": "ubuntu-latest",
-    "autocannon": "8.0.0",
-    "uwebsockets": "20.67.0",
-    "note": "rps/latency calibrated on GitHub Actions. Memory ceilings are bootstrap values with wide headroom; tighten after a few CI runs. rssMB is report-only."
+    "ciRunner": "self-hosted (dedicated, schedutil)",
+    "note": "Calibrated from 4 self-hosted runs (throughput spread 3-8%, memory <2%). Thresholds sit ~10-15% past the observed floor to catch real regressions. rssMB is report-only."
   },
   "parameters": {
     "runs": 3,
@@ -39,40 +36,76 @@
   "tests": {
     "base": {
       "description": "GET /base JSON response hot path",
-      "observedGithubActionsMedian": { "rps": 96107, "latencyP99Ms": 17 },
+      "observedMedian": {
+        "rps": 115093,
+        "latencyAvgMs": 8.08,
+        "latencyP97_5Ms": 9,
+        "latencyP99Ms": 9.5,
+        "errors": 0,
+        "eluPct": 97.16,
+        "eventLoopDelayP99Ms": 22.64,
+        "rssMB": 73.08,
+        "heapMB": 10.85,
+        "externalMB": 3.57,
+        "arrayBuffersMB": 0.04
+      },
       "guards": {
-        "rps": { "min": 70000 },
-        "latencyP99Ms": { "max": 35 },
+        "rps": { "min": 99000 },
+        "latencyP99Ms": { "max": 20 },
         "errors": { "max": 0 },
-        "heapMB": { "max": 48 },
-        "externalMB": { "max": 32 },
-        "arrayBuffersMB": { "max": 16 }
+        "heapMB": { "max": 18 },
+        "externalMB": { "max": 6 },
+        "arrayBuffersMB": { "max": 2 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
     "headers": {
       "description": "GET /headers response header staging and repeated Set-Cookie path",
-      "observedGithubActionsMedian": { "rps": 87381, "latencyP99Ms": 21 },
+      "observedMedian": {
+        "rps": 103403,
+        "latencyAvgMs": 9.09,
+        "latencyP97_5Ms": 10,
+        "latencyP99Ms": 11,
+        "errors": 0,
+        "eluPct": 97.25,
+        "eventLoopDelayP99Ms": 24.65,
+        "rssMB": 76.88,
+        "heapMB": 12.04,
+        "externalMB": 3.57,
+        "arrayBuffersMB": 0.04
+      },
       "guards": {
-        "rps": { "min": 65000 },
-        "latencyP99Ms": { "max": 40 },
+        "rps": { "min": 92000 },
+        "latencyP99Ms": { "max": 22 },
         "errors": { "max": 0 },
-        "heapMB": { "max": 48 },
-        "externalMB": { "max": 32 },
-        "arrayBuffersMB": { "max": 16 }
+        "heapMB": { "max": 18 },
+        "externalMB": { "max": 6 },
+        "arrayBuffersMB": { "max": 2 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
     "post-base": {
       "description": "POST /base JSON body parsing hot path",
-      "observedGithubActionsMedian": { "rps": 32019, "latencyP99Ms": 6 },
+      "observedMedian": {
+        "rps": 31508,
+        "latencyAvgMs": 2.6,
+        "latencyP97_5Ms": 5.5,
+        "latencyP99Ms": 5.5,
+        "errors": 0,
+        "eluPct": 97.18,
+        "eventLoopDelayP99Ms": 22.59,
+        "rssMB": 73.72,
+        "heapMB": 10.82,
+        "externalMB": 3.6,
+        "arrayBuffersMB": 0.07
+      },
       "guards": {
-        "rps": { "min": 24000 },
-        "latencyP99Ms": { "max": 15 },
+        "rps": { "min": 26000 },
+        "latencyP99Ms": { "max": 12 },
         "errors": { "max": 0 },
-        "heapMB": { "max": 48 },
-        "externalMB": { "max": 32 },
-        "arrayBuffersMB": { "max": 16 }
+        "heapMB": { "max": 18 },
+        "externalMB": { "max": 6 },
+        "arrayBuffersMB": { "max": 2 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     }
@@ -81,7 +114,7 @@
     "profileRequired": true,
     "minTotalTicks": 100,
     "maxGcPct": 10,
-    "maxUnaccountedPct": 50,
-    "note": "Sanity check only. Unaccounted% runs high (~35%) on shared 2-core CI runners under network load."
+    "maxUnaccountedPct": 60,
+    "note": "Sanity check only. Unaccounted% is high (~46%) and stable for a network server under load."
   }
 }

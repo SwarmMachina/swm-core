@@ -10,11 +10,11 @@
     "framework": "core"
   },
   "calibration": {
-    "status": "bootstrap-uncalibrated",
-    "createdAt": "2026-06-14",
+    "status": "self-hosted-calibrated",
+    "updatedAt": "2026-06-14",
     "node": "24.x",
-    "ciRunner": "ubuntu-latest",
-    "note": "Bootstrap values. nsPerByte is the primary guard; memory ceilings catch leaks. Tighten after a few CI runs. rssMB is report-only."
+    "ciRunner": "self-hosted (dedicated, schedutil)",
+    "note": "Calibrated from 4 self-hosted runs. nsPerByte is the primary guard; memory ceilings catch leaks/bloat. rssMB is report-only."
   },
   "parameters": {
     "size": 1048576,
@@ -35,21 +35,39 @@
   "tests": {
     "known": {
       "description": "BodyParser with known Content-Length",
+      "observedMedian": {
+        "itersPerSec": 5470,
+        "mbPerSec": 5470,
+        "nsPerByte": 0.1744,
+        "rssMB": 175.98,
+        "heapMB": 4.39,
+        "externalMB": 110.82,
+        "arrayBuffersMB": 109.04
+      },
       "guards": {
-        "nsPerByte": { "max": 0.5 },
-        "heapMB": { "max": 64 },
-        "externalMB": { "max": 256 },
-        "arrayBuffersMB": { "max": 256 }
+        "nsPerByte": { "max": 0.25 },
+        "heapMB": { "max": 12 },
+        "externalMB": { "max": 150 },
+        "arrayBuffersMB": { "max": 150 }
       },
       "reportOnly": ["itersPerSec", "mbPerSec", "rssMB"]
     },
     "unknown": {
       "description": "BodyParser with unknown Content-Length (streamed)",
+      "observedMedian": {
+        "itersPerSec": 2864,
+        "mbPerSec": 2864,
+        "nsPerByte": 0.333,
+        "rssMB": 148.3,
+        "heapMB": 4.11,
+        "externalMB": 88.41,
+        "arrayBuffersMB": 84.4
+      },
       "guards": {
-        "nsPerByte": { "max": 0.6 },
-        "heapMB": { "max": 64 },
-        "externalMB": { "max": 256 },
-        "arrayBuffersMB": { "max": 256 }
+        "nsPerByte": { "max": 0.42 },
+        "heapMB": { "max": 12 },
+        "externalMB": { "max": 150 },
+        "arrayBuffersMB": { "max": 150 }
       },
       "reportOnly": ["itersPerSec", "mbPerSec", "rssMB"]
     }
