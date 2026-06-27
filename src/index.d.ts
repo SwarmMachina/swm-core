@@ -15,6 +15,8 @@ export interface Route {
   method: HttpMethod
   path: string
   handler: Handler
+  /** One handler or a chain, run before `handler`. Replying short-circuits the chain. Native `routes` only. */
+  preHandler?: Handler | Handler[]
 }
 
 /** Metadata passed to `ws.onUpgrade`. */
@@ -130,3 +132,37 @@ export default class Server {
   /** Number of subscribers for a topic. */
   getSubscribersCount(topic: string): number
 }
+
+export interface CorsOptions {
+  /** @default '*' */
+  origin?: string
+  methods?: string
+  allowedHeaders?: string
+  /** @default false */
+  credentials?: boolean
+  /** Preflight cache lifetime in seconds. */
+  maxAge?: number
+}
+
+/**
+ * Build a CORS applier. Call it at the top of a handler; it returns `true` when it
+ * already replied to a preflight (`OPTIONS`) request. Throws if `credentials` is set
+ * together with the wildcard `origin` `'*'`.
+ */
+export function cors(options?: CorsOptions): (ctx: HttpContext) => boolean
+
+export interface ServeStaticOptions {
+  /** Fall back to the index file for unmatched paths. @default false */
+  spa?: boolean
+  /** @default 'index.html' */
+  index?: string
+  /** In-memory content cache. @default true */
+  cache?: boolean
+  /** Max number of cached files (FIFO eviction). @default 128 */
+  cacheLimit?: number
+  /** `Cache-Control: public, max-age=<seconds>`. */
+  maxAge?: number
+}
+
+/** Build a handler that serves files from `root`, intended for a wildcard `/*` route. */
+export function serveStatic(root: string, options?: ServeStaticOptions): (ctx: HttpContext) => Promise<void>
