@@ -6,6 +6,7 @@ import ContextPool from './context-pool.js'
 import { STATUS_TEXT } from './constants.js'
 
 export { default as cors } from './cors.js'
+export { default as serveStatic } from './serve-static.js'
 
 const WS_CONTEXT_SYMBOL = Symbol('WS_CONTEXT')
 

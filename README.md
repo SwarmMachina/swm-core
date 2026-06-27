@@ -1006,6 +1006,35 @@ Options: `origin` (default `'*'`), `methods`, `allowedHeaders`, `credentials`,
 `maxAge`. A non-`'*'` `origin` appends `Vary: Origin`; `credentials` requires an
 explicit `origin`.
 
+### Serving Static Files
+
+`serveStatic(root, options)` returns a handler for a wildcard `/*` route (specific
+routes still take precedence). It guards against path traversal, sets Content-Type
+by extension, and caches file contents in memory.
+
+```javascript
+import Server, { serveStatic } from '@swarmmachina/swm-core'
+
+const server = new Server({
+  routes: [
+    { method: 'get', path: '/api/health', handler: () => ({ ok: true }) },
+    {
+      method: 'get',
+      path: '/*',
+      handler: serveStatic('./public', {
+        spa: true, // fall back to index.html for unmatched paths (default false)
+        maxAge: 3600 // optional Cache-Control: public, max-age=<seconds>
+      })
+    }
+  ]
+})
+```
+
+Options: `spa` (fall back to `index`), `index` (default `'index.html'`), `cache`
+(default `true`; set `false` in dev to pick up edits), `cacheLimit` (max cached
+files, default `128`), `maxAge` (`Cache-Control` seconds). Misses return `404`,
+traversal `403`, non-`GET`/`HEAD` `405`.
+
 ### Backpressure Handling
 
 ```javascript
