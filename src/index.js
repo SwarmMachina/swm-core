@@ -8,8 +8,6 @@ import { STATUS_TEXT } from './constants.js'
 export { default as cors } from './cors.js'
 export { default as serveStatic } from './serve-static.js'
 
-const WS_CONTEXT_SYMBOL = Symbol('WS_CONTEXT')
-
 const isPromise = (v) => v != null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function'
 
 /**
@@ -42,6 +40,11 @@ export default class Server {
 
   #activeHttp = 0
   #activeWs = 0
+
+  // Per-connection WS context, keyed by the uWS `ws` wrapper (stable across
+  // open/message/close callbacks). Keeps ws.getUserData() off the message hot
+  // path.
+  #wsContexts = new WeakMap()
 
   /**
    * @param {object} opt
@@ -268,21 +271,17 @@ export default class Server {
    * @returns {WSContext}
    */
   createWsContext(ws) {
-    const userData = ws.getUserData()
+    const existing = this.#wsContexts.get(ws)
 
-    if (userData[WS_CONTEXT_SYMBOL]) {
-      return userData[WS_CONTEXT_SYMBOL]
+    if (existing) {
+      return existing
     }
 
     this.#activeWs++
 
-    const ctx = this.wsContextPool.acquire().reset(this, ws, userData)
+    const ctx = this.wsContextPool.acquire().reset(this, ws, ws.getUserData())
 
-    Object.defineProperty(userData, WS_CONTEXT_SYMBOL, {
-      enumerable: false,
-      configurable: true,
-      value: ctx
-    })
+    this.#wsContexts.set(ws, ctx)
 
     return ctx
   }
@@ -292,26 +291,18 @@ export default class Server {
    * @returns {WSContext}
    */
   getWsContext(ws) {
-    const wsMeta = ws.getUserData()
-
-    if (wsMeta[WS_CONTEXT_SYMBOL]) {
-      return wsMeta[WS_CONTEXT_SYMBOL]
-    }
-
-    return this.createWsContext(ws)
+    return this.#wsContexts.get(ws) ?? this.createWsContext(ws)
   }
 
   /**
    * @param {import('uwebsockets.js').WebSocket} ws
    */
   deleteWsContext(ws) {
-    const wsMeta = ws.getUserData()
+    const ctx = this.#wsContexts.get(ws)
 
-    if (wsMeta[WS_CONTEXT_SYMBOL]) {
-      const ctx = wsMeta[WS_CONTEXT_SYMBOL]
-
+    if (ctx) {
       ctx.release()
-      delete wsMeta[WS_CONTEXT_SYMBOL]
+      this.#wsContexts.delete(ws)
       this.#activeWs--
     }
   }

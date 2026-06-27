@@ -610,6 +610,31 @@ describe('Server', () => {
       strictEqual(ctx1.ws, ws)
     })
 
+    test('should keep contexts isolated per connection', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true }
+      })
+
+      const wsA = createMockWebSocket()
+      const wsB = createMockWebSocket()
+
+      const ctxA = server.getWsContext(wsA)
+      const ctxB = server.getWsContext(wsB)
+
+      strictEqual(ctxA !== ctxB, true)
+      strictEqual(ctxA.ws, wsA)
+      strictEqual(ctxB.ws, wsB)
+      strictEqual(server.getWsContext(wsA), ctxA)
+      strictEqual(server.getWsContext(wsB), ctxB)
+
+      // removing A must not disturb B
+      server.deleteWsContext(wsA)
+
+      strictEqual(server.getWsContext(wsB), ctxB)
+      strictEqual(ctxB.ws, wsB)
+    })
+
     test('should create new context after delete', () => {
       const server = new Server({
         router: () => {},
@@ -618,19 +643,13 @@ describe('Server', () => {
 
       const ws = createMockWebSocket()
       const ctx1 = server.getWsContext(ws)
-      const userData = ws.getUserData()
 
       strictEqual(server.getWsContext(ws), ctx1)
 
-      const symbolsBefore = Object.getOwnPropertySymbols(userData)
-
-      strictEqual(symbolsBefore.length, 1)
-
       server.deleteWsContext(ws)
 
-      const symbolsAfter = Object.getOwnPropertySymbols(userData)
-
-      strictEqual(symbolsAfter.length, 0)
+      // release() clears the context on delete
+      strictEqual(ctx1.ws, null)
 
       const ctx2 = server.getWsContext(ws)
 
@@ -1295,18 +1314,16 @@ describe('Server', () => {
       const ws = createMockWebSocket()
 
       server.onOpen(ws)
-      const userData = ws.getUserData()
-      const symbolsBefore = Object.getOwnPropertySymbols(userData)
+      const ctx = server.getWsContext(ws)
 
-      strictEqual(symbolsBefore.length, 1)
+      strictEqual(ctx.ws, ws)
 
       server.onClose(ws, 1000, new Uint8Array([1]).buffer)
 
       await Promise.resolve()
 
-      const symbolsAfter = Object.getOwnPropertySymbols(userData)
-
-      strictEqual(symbolsAfter.length, 0)
+      // context deleted (and cleared) after the close handler throws
+      strictEqual(ctx.ws, null)
       strictEqual(errorCalled, 1)
     })
 
@@ -1327,24 +1344,20 @@ describe('Server', () => {
       const ws = createMockWebSocket()
 
       server.onOpen(ws)
-      const userData = ws.getUserData()
-      const symbolsBefore = Object.getOwnPropertySymbols(userData)
+      const ctx = server.getWsContext(ws)
 
-      strictEqual(symbolsBefore.length, 1)
+      strictEqual(ctx.ws, ws)
 
       server.onClose(ws, 1000, new Uint8Array([1]).buffer)
 
-      const symbolsImmediate = Object.getOwnPropertySymbols(userData)
-
-      strictEqual(symbolsImmediate.length, 1)
+      // still registered while the async close handler is pending
+      strictEqual(ctx.ws, ws)
 
       resolveFn()
 
       await new Promise((resolve) => setImmediate(resolve))
 
-      const symbolsAfter = Object.getOwnPropertySymbols(userData)
-
-      strictEqual(symbolsAfter.length, 0)
+      strictEqual(ctx.ws, null)
     })
 
     test('shutdown should close app only after activeWs becomes 0 (finishShutdownIfNeed)', async () => {
