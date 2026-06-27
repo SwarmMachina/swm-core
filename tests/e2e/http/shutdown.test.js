@@ -56,3 +56,31 @@ test('shutdown: rejects all conections while stopping', async () => {
 
   await closeP
 })
+
+test('shutdown: finalizes context after async handler replies itself (no leak)', async () => {
+  const server = await startHttpServer({
+    routes: [
+      {
+        method: 'get',
+        path: '/self-reply',
+        handler: async (ctx) => {
+          ctx.status(401).send('nope')
+        }
+      }
+    ]
+  })
+
+  const { status } = await reqText(`${server.baseUrl}/self-reply`)
+
+  assert.strictEqual(status, 401)
+
+  const startedAt = Date.now()
+
+  await server.close()
+
+  // A leaked context keeps #activeHttp > 0, so graceful shutdown would hang until
+  // the 1000ms force-close timeout. A finalized context lets it resolve promptly.
+  const elapsed = Date.now() - startedAt
+
+  assert.ok(elapsed < 500, `graceful shutdown took ${elapsed}ms (context leaked)`)
+})

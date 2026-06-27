@@ -36,12 +36,14 @@ export default class HttpContext {
   }
 
   onResolve = (result) => {
-    if (this.done || this.aborted || this.replied) {
+    if (this.done || this.aborted) {
       return
     }
 
     try {
-      this.send(result)
+      if (!this.replied) {
+        this.send(result)
+      }
     } catch (err) {
       if (!this.replied) {
         try {
@@ -60,14 +62,16 @@ export default class HttpContext {
   }
 
   onReject = (err) => {
-    if (this.done || this.aborted || this.replied) {
+    if (this.done || this.aborted) {
       return
     }
 
-    try {
-      this.sendError(err)
-    } catch {
-      //
+    if (!this.replied) {
+      try {
+        this.sendError(err)
+      } catch {
+        //
+      }
     }
 
     void this.server.safeHttpError(this, err)

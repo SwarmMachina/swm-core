@@ -2116,7 +2116,7 @@ describe('HttpContext', () => {
       strictEqual(finalizeCount, 0)
     })
 
-    test('onResolve/onReject should no-op if already replied OR aborted OR done', () => {
+    test('onResolve/onReject finalize when already replied, but no-op when aborted or done', () => {
       let finalizeCount = 0
       const server = {
         finalizeHttpContext() {
@@ -2132,14 +2132,21 @@ describe('HttpContext', () => {
       const res3 = createMockRes()
       const req = createMockReq()
 
+      // Already replied: must not write again, but MUST finalize, otherwise the
+      // context leaks (active counter never decremented -> graceful shutdown hangs).
       ctx.reset(res1, req, server)
       ctx.replied = true
       ctx.onResolve('x')
-      ctx.onReject(new Error('y'))
 
       strictEqual(res1.calls.length, 0)
-      strictEqual(finalizeCount, 0)
+      strictEqual(finalizeCount, 1)
 
+      // onResolve already finalized (done=true), so onReject is now a no-op.
+      ctx.onReject(new Error('y'))
+      strictEqual(finalizeCount, 1)
+
+      // Aborted: full no-op (the abort path owns finalization).
+      finalizeCount = 0
       ctx.reset(res2, req, server)
       ctx.aborted = true
       ctx.onResolve('x')
@@ -2148,6 +2155,8 @@ describe('HttpContext', () => {
       strictEqual(res2.calls.length, 0)
       strictEqual(finalizeCount, 0)
 
+      // Done: full no-op.
+      finalizeCount = 0
       ctx.reset(res3, req, server)
       ctx.done = true
       ctx.onResolve('x')
