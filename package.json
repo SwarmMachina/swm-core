@@ -51,6 +51,7 @@
     "bench:headers": "node ./benchmark/bench.js --test headers --runs 1 --warmup 10 --sample-ms 250 --v8prof true",
     "bench:headers:core": "node ./benchmark/bench.js --test headers --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
     "bench:ws": "node ./benchmark/ws-bench.js --fw core,ws --runs 1 --warmup 2 --v8prof true",
+    "bench:prehandler": "node ./benchmark/prehandler-bench.js",
     "profile:ci": "node ./benchmark/regression-ci.js",
     "profile:compare": "node ./benchmark/compare-ci.js",
     "prepublishOnly": "npm run fix && npm test",
