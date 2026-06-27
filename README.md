@@ -162,6 +162,7 @@ await server.listen()
 - **URL Parameters** - Built-in support for `:param` syntax
 - **Cleaner Code** - Declarative route definitions
 - **Method-specific** - Automatic HTTP method routing
+- **Wildcard catch-all** - A `{ method: 'any', path: '/*' }` route matches anything not matched by a more specific route (useful as a 404 handler or static-file fallback). Specific routes always win over `/*`.
 
 ### WebSocket Server
 
@@ -227,7 +228,7 @@ new Server(options)
 | Property  | Type       | Description                                                                                    |
 | --------- | ---------- | ---------------------------------------------------------------------------------------------- |
 | `method`  | `String`   | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`, `'patch'`, `'options'`, `'head'`, `'any'` |
-| `path`    | `String`   | URL path pattern (supports `:param` syntax)                                                    |
+| `path`    | `String`   | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                     |
 | `handler` | `Function` | Handler function `(ctx) => any \| Promise<any>`                                                |
 
 **WebSocket Options (`ws` object):**
