@@ -54,6 +54,8 @@
     "bench:prehandler": "node ./benchmark/prehandler-bench.js",
     "profile:ci": "node ./benchmark/regression-ci.js",
     "profile:compare": "node ./benchmark/compare-ci.js",
+    "profile:compare:http": "node ./benchmark/compare-ci.js --suite http",
+    "profile:compare:ws": "node ./benchmark/compare-ci.js --suite ws",
     "prepublishOnly": "npm run fix && npm test",
     "release": "npm run check && npm test && npm publish"
   },

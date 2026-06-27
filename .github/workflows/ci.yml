@@ -55,15 +55,69 @@ jobs:
       - name: Regression profile
         run: npm run profile:ci
 
-      - name: Framework comparison
-        if: always()
-        run: npm run profile:compare
-
       - name: Upload regression profiles
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: regression-profiles
-          path: |
-            benchmark/profiles/regression-ci/
-            benchmark/profiles/compare-ci/
+          path: benchmark/profiles/regression-ci/
+
+  compare-http:
+    runs-on: [self-hosted, Linux, bench]
+    needs: regression-profile
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Framework comparison (http)
+        run: npm run profile:compare:http
+
+      - name: Upload http comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compare-http
+          path: benchmark/profiles/compare-ci/
+
+  compare-ws:
+    runs-on: [self-hosted, Linux, bench]
+    needs: compare-http
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Framework comparison (ws)
+        run: npm run profile:compare:ws
+
+      - name: Upload ws comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compare-ws
+          path: benchmark/profiles/compare-ci/

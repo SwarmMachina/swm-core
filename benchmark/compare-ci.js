@@ -107,14 +107,33 @@ function renderComparison(title, metricHeader, metricKey, order, bench) {
   ].join('\n')
 }
 
+const SUITES = ['http', 'ws', 'all']
+
 /**
- *
+ * @param {string[]} argv
+ * @returns {string}
  */
-async function main() {
-  const outDir = path.join(__dirname, 'profiles', 'compare-ci')
+function parseSuite(argv) {
+  const i = argv.indexOf('--suite')
 
-  await fs.mkdir(outDir, { recursive: true })
+  if (i === -1) {
+    return 'all'
+  }
 
+  const v = argv[i + 1]
+
+  if (!SUITES.includes(v)) {
+    throw new Error(`Unknown --suite=${v} (expected: ${SUITES.join(', ')})`)
+  }
+
+  return v
+}
+
+/**
+ * @param {string} outDir
+ * @returns {Promise<string[]>}
+ */
+async function runHttp(outDir) {
   const sections = []
 
   for (const test of HTTP_TESTS) {
@@ -152,6 +171,15 @@ async function main() {
     }
   }
 
+  return sections
+}
+
+/**
+ * @param {string} outDir
+ * @returns {Promise<string[]>}
+ */
+async function runWs(outDir) {
+  const sections = []
   const wsJsonOut = path.join(outDir, 'ws-echo.json')
 
   try {
@@ -183,6 +211,28 @@ async function main() {
   } catch (e) {
     sections.push(`## Framework comparison — ws / echo\n\n⚠️ run failed: ${e.message}\n`)
     console.error('[compare-ci] ws/echo failed:', e.message)
+  }
+
+  return sections
+}
+
+/**
+ *
+ */
+async function main() {
+  const suite = parseSuite(process.argv.slice(2))
+  const outDir = path.join(__dirname, 'profiles', 'compare-ci')
+
+  await fs.mkdir(outDir, { recursive: true })
+
+  const sections = []
+
+  if (suite === 'http' || suite === 'all') {
+    sections.push(...(await runHttp(outDir)))
+  }
+
+  if (suite === 'ws' || suite === 'all') {
+    sections.push(...(await runWs(outDir)))
   }
 
   await appendStepSummary(sections.join('\n'))
