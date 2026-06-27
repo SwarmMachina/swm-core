@@ -8,6 +8,7 @@ import shuffle from './helpers/shuffle.js'
 import timed from './helpers/timed-fn.js'
 import waitForMessage from './helpers/wait-for-message.js'
 import wsLoad from './helpers/ws-load.js'
+import wsLoadOpen from './helpers/ws-load-open.js'
 import { startServer, stopServer } from './helpers/server-proc.js'
 import { processV8Profile } from './helpers/v8-prof-run.js'
 
@@ -30,6 +31,8 @@ function parseWsBenchArgs(argv) {
       connections: 50,
       sampleMs: 250,
       msgSize: 64,
+      mode: 'closed',
+      depth: 16,
       v8prof: false,
       jsonOut: null
     },
@@ -58,6 +61,12 @@ function parseWsBenchArgs(argv) {
       '--msg-size': (out, v) => {
         out.msgSize = Number(v)
       },
+      '--mode': (out, v) => {
+        out.mode = String(v)
+      },
+      '--depth': (out, v) => {
+        out.depth = Number(v)
+      },
       '--v8prof': (out, v) => {
         out.v8prof = v == null ? true : v === '1' || v === 'true' || v === 'on'
       },
@@ -72,10 +81,27 @@ function parseWsBenchArgs(argv) {
  * @param {object} params
  * @returns {Promise<object>}
  */
-async function runOne({ fw, warmupSec, durationSec, connections, msgSize, runIndex, sampleMs, v8prof, runStamp }) {
+async function runOne({
+  fw,
+  warmupSec,
+  durationSec,
+  connections,
+  msgSize,
+  mode,
+  depth,
+  runIndex,
+  sampleMs,
+  v8prof,
+  runStamp
+}) {
   console.log(`\n[ws-bench] ${fw}: start (run=${runIndex + 1})`)
 
   const tAll0 = performance.now()
+
+  const runLoad = (durationSecArg) =>
+    mode === 'open'
+      ? wsLoadOpen({ url, connections, durationSec: durationSecArg, payloadBytes: msgSize, depth })
+      : wsLoad({ url, connections, durationSec: durationSecArg, payloadBytes: msgSize })
 
   const { proc, port, profileDir } = await startServer({
     benchDir: __dirname,
@@ -92,7 +118,7 @@ async function runOne({ fw, warmupSec, durationSec, connections, msgSize, runInd
   let warmupMs = 0
 
   if (warmupSec > 0) {
-    const w = await timed(() => wsLoad({ url, connections, durationSec: warmupSec, payloadBytes: msgSize }))
+    const w = await timed(() => runLoad(warmupSec))
 
     warmupMs = w.ms
     console.log(`[ws-bench] ${fw}: warmup done in ${msToHuman(warmupMs)}`)
@@ -100,7 +126,7 @@ async function runOne({ fw, warmupSec, durationSec, connections, msgSize, runInd
 
   proc.send?.({ type: 'metrics:start', sampleMs })
 
-  const runTimed = await timed(() => wsLoad({ url, connections, durationSec, payloadBytes: msgSize }))
+  const runTimed = await timed(() => runLoad(durationSec))
 
   proc.send?.({ type: 'metrics:stop' })
   const metricsMsg = await waitForMessage(proc, (m) => m && m.type === 'metrics', 15_000)
@@ -149,12 +175,18 @@ async function main() {
     }
   }
 
+  if (args.mode !== 'closed' && args.mode !== 'open') {
+    throw new Error(`Unknown --mode=${args.mode} (ws-bench supports: closed, open)`)
+  }
+
   const runStamp = formatYmdHms()
   const perFw = Object.fromEntries(args.frameworks.map((fw) => [fw, []]))
   const runRows = []
 
+  const modeLabel = args.mode === 'open' ? `open(depth=${args.depth})` : 'closed'
+
   console.log(
-    `Run ws-echo: frameworks:${args.frameworks.join(',')}, connections:${args.connections}, duration:${args.duration}, msgSize:${args.msgSize}`
+    `Run ws-echo: frameworks:${args.frameworks.join(',')}, mode:${modeLabel}, connections:${args.connections}, duration:${args.duration}, msgSize:${args.msgSize}`
   )
 
   for (let i = 0; i < args.runs; i++) {
@@ -170,6 +202,8 @@ async function main() {
         durationSec: args.duration,
         connections: args.connections,
         msgSize: args.msgSize,
+        mode: args.mode,
+        depth: args.depth,
         runIndex: i,
         sampleMs: args.sampleMs,
         v8prof: args.v8prof,
@@ -231,6 +265,8 @@ async function main() {
       runs: args.runs,
       warmup: args.warmup,
       sampleMs: args.sampleMs,
+      mode: args.mode,
+      depth: args.depth,
       v8prof: args.v8prof,
       frameworks: args.frameworks
     },
