@@ -26,6 +26,22 @@ on [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js).
 npm install @swarmmachina/swm-core
 ```
 
+### Runtime requirements
+
+This package depends on the native [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js)
+addon, which imposes a few constraints on the install/runtime environment:
+
+- **Node.js 22+** — required by both this package and the bundled uWS prebuilt.
+- **glibc, not musl** — the prebuilt binaries target glibc. Use a `bookworm`/`slim`
+  (Debian) base image rather than `alpine` (musl), otherwise the native module fails to load.
+- **Architecture-specific prebuilt** — the loaded binary must match the host CPU
+  architecture and Node ABI. When building container images, build for the same
+  platform you deploy to (e.g. `--platform linux/amd64`); a binary built on
+  arm64 will not run on an amd64 server.
+- **Network access to GitHub at install time** — uWS is pulled from a GitHub tag
+  (`uNetworking/uWebSockets.js#v20.67.0`), so `npm install` needs outbound access
+  to GitHub. Offline/air-gapped installs require a pre-populated cache or mirror.
+
 ## Quick Start
 
 ### Basic HTTP Server
@@ -505,10 +521,14 @@ ctx.sendError(err)
 Send response with full control over status, headers, and body. Header values may be strings or arrays of strings. Array values are written as separate header lines.
 
 ```javascript
-ctx.reply(200, {
-  'content-type': 'application/json',
-  'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
-}, '{"ok":true}')
+ctx.reply(
+  200,
+  {
+    'content-type': 'application/json',
+    'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+  },
+  '{"ok":true}'
+)
 ```
 
 ##### `ctx.stream(readable, [status], [headers])`
