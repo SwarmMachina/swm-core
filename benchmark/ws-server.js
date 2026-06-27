@@ -73,7 +73,27 @@ async function main() {
     return
   }
 
-  throw new Error(`Unknown --fw=${fw} (ws-server supports: core)`)
+  if (fw === 'ws') {
+    const { WebSocketServer } = await import('ws')
+
+    const wss = new WebSocketServer({ port, perMessageDeflate: false })
+
+    wss.on('connection', (socket) => {
+      socket.on('message', (data, isBinary) => socket.send(data, { binary: isBinary }))
+    })
+
+    wss.on('listening', () => sendReady(wss.address().port))
+
+    const shutdown = () => new Promise((resolve) => wss.close(() => resolve()))
+
+    process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
+
+    process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+
+    return
+  }
+
+  throw new Error(`Unknown --fw=${fw} (ws-server supports: core, ws)`)
 }
 
 main().catch((e) => {
