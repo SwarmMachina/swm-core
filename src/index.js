@@ -27,6 +27,7 @@ const isPromise = (v) => v != null && (typeof v === 'object' || typeof v === 'fu
  * @property {'get'|'post'|'put'|'delete'|'del'|'patch'|'options'|'head'|'any'} method
  * @property {string} path - '/users/:id','/*'
  * @property {(ctx: HttpContext) => any|Promise<any>} handler
+ * @property {((ctx: HttpContext) => any|Promise<any>)|((ctx: HttpContext) => any|Promise<any>)[]} [preHandler]
  */
 
 export default class Server {
@@ -138,7 +139,7 @@ export default class Server {
 
       if (this.useNativeRouting) {
         for (const route of this.routes) {
-          const { method, path, handler } = route
+          const { method, path, handler, preHandler } = route
           const methodName = method === 'delete' ? 'del' : method
 
           if (typeof this.app[methodName] !== 'function') {
@@ -149,7 +150,9 @@ export default class Server {
             throw new TypeError(`Invalid Path in route, method: ${method}, path: ${path}`)
           }
 
-          this.app[methodName](path, (res, req) => this.handleWithContext(res, req, handler))
+          const routeHandler = this.#composeRouteHandler(handler, preHandler)
+
+          this.app[methodName](path, (res, req) => this.handleWithContext(res, req, routeHandler))
         }
       } else {
         this.app.any('/*', (res, req) => this.handleWithContext(res, req, this.router))
@@ -184,6 +187,42 @@ export default class Server {
     })
 
     return this.#listenPromise
+  }
+
+  /**
+   * @param {(ctx: HttpContext) => any|Promise<any>} handler
+   * @param {((ctx: HttpContext) => any|Promise<any>)|((ctx: HttpContext) => any|Promise<any>)[]} [preHandler]
+   * @returns {(ctx: HttpContext) => any|Promise<any>}
+   */
+  #composeRouteHandler(handler, preHandler) {
+    if (preHandler == null) {
+      return handler
+    }
+
+    const chain = Array.isArray(preHandler) ? preHandler : [preHandler]
+
+    for (let i = 0; i < chain.length; i++) {
+      if (typeof chain[i] !== 'function') {
+        throw new TypeError('Route preHandler must be a function or an array of functions')
+      }
+    }
+
+    if (chain.length === 0) {
+      return handler
+    }
+
+    return async (ctx) => {
+      for (let i = 0; i < chain.length; i++) {
+        await chain[i](ctx)
+
+        if (ctx.replied || ctx.aborted) {
+          ctx.finalize()
+          return
+        }
+      }
+
+      return handler(ctx)
+    }
   }
 
   /**

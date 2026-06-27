@@ -225,11 +225,12 @@ new Server(options)
 
 **Route Definition (for `routes` array):**
 
-| Property  | Type       | Description                                                                                    |
-| --------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| `method`  | `String`   | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`, `'patch'`, `'options'`, `'head'`, `'any'` |
-| `path`    | `String`   | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                     |
-| `handler` | `Function` | Handler function `(ctx) => any \| Promise<any>`                                                |
+| Property     | Type               | Description                                                                                            |
+| ------------ | ------------------ | ------------------------------------------------------------------------------------------------------ |
+| `method`     | `String`           | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`, `'patch'`, `'options'`, `'head'`, `'any'`         |
+| `path`       | `String`           | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                             |
+| `handler`    | `Function`         | Handler function `(ctx) => any \| Promise<any>`                                                        |
+| `preHandler` | `Function`/`Array` | Optional. One function or an array, run before `handler` (see [Route preHandlers](#route-prehandlers)) |
 
 **WebSocket Options (`ws` object):**
 
@@ -921,6 +922,34 @@ process.on('SIGINT', () => {
   server.shutdown(10000)
 })
 ```
+
+### Route preHandlers
+
+A route may declare a `preHandler` — one function or an array — run before its
+`handler` (auth, logging, validation).
+
+```javascript
+const requireAuth = (ctx) => {
+  if (ctx.header('authorization') !== 'Bearer secret') {
+    ctx.status(401).send('Unauthorized') // replying short-circuits the chain
+  }
+}
+
+const server = new Server({
+  routes: [
+    {
+      method: 'get',
+      path: '/admin',
+      preHandler: requireAuth,
+      handler: () => ({ ok: true })
+    }
+  ]
+})
+```
+
+- Run in order, sync or async (awaited); replying (`ctx.replied`) stops the chain.
+- Composed once at registration — zero per-request cost for routes without one.
+- Native `routes` API only (not the `router` function).
 
 ### Custom Response Headers
 

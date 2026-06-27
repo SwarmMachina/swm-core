@@ -393,6 +393,38 @@ describe('Server', () => {
       )
     })
 
+    test('should throw on invalid preHandler (not a function)', async () => {
+      const routes = [{ method: 'get', path: '/x', handler: () => {}, preHandler: 'nope' }]
+      const server = new Server({ routes })
+
+      await rejects(
+        (async () => {
+          await server.listen()
+        })(),
+        (err) => {
+          return (
+            err.name === 'TypeError' && err.message === 'Route preHandler must be a function or an array of functions'
+          )
+        }
+      )
+    })
+
+    test('should throw when a preHandler array contains a non-function', async () => {
+      const routes = [{ method: 'get', path: '/x', handler: () => {}, preHandler: [() => {}, 42] }]
+      const server = new Server({ routes })
+
+      await rejects(
+        (async () => {
+          await server.listen()
+        })(),
+        (err) => {
+          return (
+            err.name === 'TypeError' && err.message === 'Route preHandler must be a function or an array of functions'
+          )
+        }
+      )
+    })
+
     test('should register WebSocket when wsEnabled is true', async () => {
       const server = new Server({
         router: () => {},
