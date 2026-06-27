@@ -15,12 +15,16 @@
   "author": "SwarmMachina Team",
   "license": "MPL-2.0",
   "main": "src/index.js",
+  "types": "./src/index.d.ts",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
   },
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
   },
   "files": [
     "src/",
