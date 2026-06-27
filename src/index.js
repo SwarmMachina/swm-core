@@ -5,6 +5,8 @@ import WSContext from './ws-context.js'
 import ContextPool from './context-pool.js'
 import { STATUS_TEXT } from './constants.js'
 
+export { default as cors } from './cors.js'
+
 const WS_CONTEXT_SYMBOL = Symbol('WS_CONTEXT')
 
 const isPromise = (v) => v != null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function'

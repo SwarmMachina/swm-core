@@ -971,6 +971,41 @@ const server = new Server({
 })
 ```
 
+### CORS
+
+`cors(options)` stages CORS headers and replies to preflight (`OPTIONS`) requests.
+Call it at the top of a handler; it returns `true` when it handled the preflight.
+
+```javascript
+import Server, { cors } from '@swarmmachina/swm-core'
+
+const applyCors = cors({
+  origin: 'https://app.example', // default '*'
+  credentials: true, // default false
+  maxAge: 600 // optional, preflight cache seconds
+})
+
+const server = new Server({
+  routes: [
+    {
+      method: 'any',
+      path: '/*',
+      handler: (ctx) => {
+        if (applyCors(ctx)) {
+          return // preflight handled (204)
+        }
+
+        return { ok: true }
+      }
+    }
+  ]
+})
+```
+
+Options: `origin` (default `'*'`), `methods`, `allowedHeaders`, `credentials`,
+`maxAge`. A non-`'*'` `origin` appends `Vary: Origin`; `credentials` requires an
+explicit `origin`.
+
 ### Backpressure Handling
 
 ```javascript
