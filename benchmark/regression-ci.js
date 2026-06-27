@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import parseArgs from './helpers/parse-args.js'
+import { appendStepSummary, fmt, mdTable, round } from './helpers/step-summary.js'
 import runBodyParserSuite from './suites/body-parser.js'
 import runHttpSuite from './suites/http.js'
 import runWsSuite from './suites/ws.js'
@@ -32,50 +33,6 @@ function parseDriverArgs(argv) {
       }
     }
   )
-}
-
-/**
- * @param {string} md
- * @returns {Promise<void>}
- */
-async function appendStepSummary(md) {
-  const file = process.env.GITHUB_STEP_SUMMARY
-
-  if (file) {
-    await fs.appendFile(file, `${md}\n`)
-  } else {
-    console.log(md)
-  }
-}
-
-/**
- * @param {number} v
- * @returns {number}
- */
-function round(v) {
-  return Number.isFinite(v) ? Math.round(v * 100) / 100 : v
-}
-
-/**
- * @param {number} v
- * @param {string} [unit]
- * @returns {string}
- */
-function fmt(v, unit = '') {
-  return Number.isFinite(v) ? `${round(v)}${unit}` : 'n/a'
-}
-
-/**
- * @param {string[]} headers
- * @param {Array<Array<string|number>>} rows
- * @returns {string}
- */
-function mdTable(headers, rows) {
-  const head = `| ${headers.join(' | ')} |`
-  const sep = `| ${headers.map(() => '---').join(' | ')} |`
-  const body = rows.map((r) => `| ${r.join(' | ')} |`).join('\n')
-
-  return [head, sep, body].join('\n')
 }
 
 /**
