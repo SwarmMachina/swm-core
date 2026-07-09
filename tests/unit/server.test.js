@@ -14,6 +14,11 @@ import {
 } from '../helpers/mock-uws-module.js'
 import { STATUS_TEXT } from '../../src/constants.js'
 
+// These unit tests exercise the Server against the uWS mock (installed via the
+// loader hook), so they pin the uws backend. The backend-selection describe
+// block below uses `new Server` directly to test the default and validation.
+const makeServer = (opt) => new Server({ backend: 'uws', ...opt })
+
 describe('Server', () => {
   beforeEach(() => {
     resetMockApp()
@@ -26,7 +31,7 @@ describe('Server', () => {
   describe('constructor', () => {
     test('should create server with router option', () => {
       const router = () => {}
-      const server = new Server({ router })
+      const server = makeServer({ router })
 
       strictEqual(server.router, router)
       strictEqual(server.routes, null)
@@ -38,7 +43,7 @@ describe('Server', () => {
 
     test('should create server with routes option', () => {
       const routes = [{ method: 'get', path: '/', handler: () => {} }]
-      const server = new Server({ routes })
+      const server = makeServer({ routes })
 
       strictEqual(server.router, null)
       strictEqual(server.routes, routes)
@@ -49,129 +54,129 @@ describe('Server', () => {
     })
 
     test('should use custom port', () => {
-      const server = new Server({ router: () => {}, port: 3000 })
+      const server = makeServer({ router: () => {}, port: 3000 })
 
       strictEqual(server.port, 3000)
     })
 
     test('should use custom maxBodySize', () => {
-      const server = new Server({ router: () => {}, maxBodySize: 5 })
+      const server = makeServer({ router: () => {}, maxBodySize: 5 })
 
       strictEqual(server.maxBodyBytes, 5 * 1024 * 1024)
     })
 
     test('should use custom onHttpError handler', () => {
       const onHttpError = () => {}
-      const server = new Server({ router: () => {}, onHttpError })
+      const server = makeServer({ router: () => {}, onHttpError })
 
       strictEqual(server.onHttpError, onHttpError)
     })
 
     test('should use default onHttpError when not provided', () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       strictEqual(typeof server.onHttpError, 'function')
     })
 
     test('should throw error when both router and routes are provided', () => {
-      throws(() => new Server({ router: () => {}, routes: [] }), {
+      throws(() => makeServer({ router: () => {}, routes: [] }), {
         name: 'TypeError',
         message: 'Cannot use both "router" and "routes" options. Choose one.'
       })
     })
 
     test('should throw error when neither router nor routes are provided', () => {
-      throws(() => new Server({}), {
+      throws(() => makeServer({}), {
         name: 'TypeError',
         message: 'Either "router" or "routes" option must be provided'
       })
     })
 
     test('should throw error when router is not a function', () => {
-      throws(() => new Server({ router: 'not a function' }), {
+      throws(() => makeServer({ router: 'not a function' }), {
         name: 'TypeError',
         message: 'Router must be a function'
       })
     })
 
     test('should throw error when routes is not an array', () => {
-      throws(() => new Server({ routes: 'not an array' }), {
+      throws(() => makeServer({ routes: 'not an array' }), {
         name: 'TypeError',
         message: 'Routes must be an array'
       })
     })
 
     test('should throw error when port is not a number', () => {
-      throws(() => new Server({ router: () => {}, port: '3000' }), {
+      throws(() => makeServer({ router: () => {}, port: '3000' }), {
         name: 'TypeError',
         message: 'Http port must be in range 1 - 65535'
       })
     })
 
     test('should throw error when port is 0', () => {
-      throws(() => new Server({ router: () => {}, port: 0 }), {
+      throws(() => makeServer({ router: () => {}, port: 0 }), {
         name: 'TypeError',
         message: 'Http port must be in range 1 - 65535'
       })
     })
 
     test('should throw error when port is negative', () => {
-      throws(() => new Server({ router: () => {}, port: -1 }), {
+      throws(() => makeServer({ router: () => {}, port: -1 }), {
         name: 'TypeError',
         message: 'Http port must be in range 1 - 65535'
       })
     })
 
     test('should throw error when port is greater than 65535', () => {
-      throws(() => new Server({ router: () => {}, port: 65536 }), {
+      throws(() => makeServer({ router: () => {}, port: 65536 }), {
         name: 'TypeError',
         message: 'Http port must be in range 1 - 65535'
       })
     })
 
     test('should accept valid port range', () => {
-      const server1 = new Server({ router: () => {}, port: 1 })
+      const server1 = makeServer({ router: () => {}, port: 1 })
 
       strictEqual(server1.port, 1)
 
-      const server2 = new Server({ router: () => {}, port: 65535 })
+      const server2 = makeServer({ router: () => {}, port: 65535 })
 
       strictEqual(server2.port, 65535)
     })
 
     test('should throw error when maxBodySize is not a number', () => {
-      throws(() => new Server({ router: () => {}, maxBodySize: '1' }), {
+      throws(() => makeServer({ router: () => {}, maxBodySize: '1' }), {
         name: 'TypeError',
         message: 'Max body size must be in range 1 - 64'
       })
     })
 
     test('should throw error when maxBodySize is less than 1', () => {
-      throws(() => new Server({ router: () => {}, maxBodySize: 0 }), {
+      throws(() => makeServer({ router: () => {}, maxBodySize: 0 }), {
         name: 'TypeError',
         message: 'Max body size must be in range 1 - 64'
       })
     })
 
     test('should throw error when maxBodySize is greater than 64', () => {
-      throws(() => new Server({ router: () => {}, maxBodySize: 65 }), {
+      throws(() => makeServer({ router: () => {}, maxBodySize: 65 }), {
         name: 'TypeError',
         message: 'Max body size must be in range 1 - 64'
       })
     })
 
     test('should accept valid maxBodySize range', () => {
-      const server1 = new Server({ router: () => {}, maxBodySize: 1 })
+      const server1 = makeServer({ router: () => {}, maxBodySize: 1 })
 
       strictEqual(server1.maxBodyBytes, 1024 * 1024)
 
-      const server2 = new Server({ router: () => {}, maxBodySize: 64 })
+      const server2 = makeServer({ router: () => {}, maxBodySize: 64 })
 
       strictEqual(server2.maxBodyBytes, 64 * 1024 * 1024)
     })
 
     test('should enable WebSocket when ws.enabled is true', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -181,7 +186,7 @@ describe('Server', () => {
     })
 
     test('should enable WebSocket when ws handlers are provided', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { onMessage: () => {} }
       })
@@ -190,13 +195,13 @@ describe('Server', () => {
     })
 
     test('should disable WebSocket when ws is not provided', () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       strictEqual(server.wsEnabled, false)
     })
 
     test('should disable WebSocket when ws.enabled is false', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: false, onMessage: () => {} }
       })
@@ -205,7 +210,7 @@ describe('Server', () => {
     })
 
     test('should use custom wsIdleTimeoutSec', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, wsIdleTimeoutSec: 30 }
       })
@@ -216,7 +221,7 @@ describe('Server', () => {
     test('should throw error when wsIdleTimeoutSec is less than 5', () => {
       throws(
         () =>
-          new Server({
+          makeServer({
             router: () => {},
             ws: { enabled: true, wsIdleTimeoutSec: 4 }
           }),
@@ -236,7 +241,7 @@ describe('Server', () => {
       const onSubscription = () => {}
       const onUpgrade = () => Promise.resolve({ isAllowed: true })
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -260,14 +265,14 @@ describe('Server', () => {
     })
 
     test('should initialize context pools', () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       strictEqual(server.httpContextPool !== null, true)
       strictEqual(server.wsContextPool !== null, true)
     })
 
     test('should initialize internal state', () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       strictEqual(server.app, null)
       strictEqual(server.socket, null)
@@ -275,16 +280,18 @@ describe('Server', () => {
   })
 
   describe('backend selection', () => {
-    test('should default to the uws backend', () => {
+    // This block tests the backend option itself, so it uses `new Server`
+    // directly (not the uws-pinning makeServer helper).
+    test('should default to the node backend', () => {
       const server = new Server({ router: () => {} })
 
-      strictEqual(server.backend, 'uws')
+      strictEqual(server.backend, 'node')
     })
 
-    test('should accept the node backend', () => {
-      const server = new Server({ router: () => {}, backend: 'node' })
+    test('should accept the uws backend', () => {
+      const server = new Server({ router: () => {}, backend: 'uws' })
 
-      strictEqual(server.backend, 'node')
+      strictEqual(server.backend, 'uws')
     })
 
     test('should throw on an unknown backend', () => {
@@ -297,18 +304,17 @@ describe('Server', () => {
     test('keeps the node backend when combined with WebSocket options', () => {
       const server = new Server({
         router: () => {},
-        backend: 'node',
         ws: { onMessage: () => {} }
       })
 
-      // The node backend serves WebSocket natively now; no fallback to uws.
+      // The node backend serves WebSocket natively; no fallback to uws.
       strictEqual(server.backend, 'node')
       strictEqual(server.wsEnabled, true)
     })
 
     test('should load the backend lazily via listen(), not in the constructor', () => {
       // Constructing must not touch the uws module at all.
-      new Server({ router: () => {} })
+      new Server({ router: () => {}, backend: 'uws' })
 
       strictEqual(getCurrentMockApp(), null)
     })
@@ -317,7 +323,7 @@ describe('Server', () => {
   describe('listen()', () => {
     test('should register router handler with app.any', async () => {
       const router = () => {}
-      const server = new Server({ router, port: 7000 })
+      const server = makeServer({ router, port: 7000 })
 
       await server.listen()
 
@@ -333,7 +339,7 @@ describe('Server', () => {
     })
 
     test('should return server instance on successful listen', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       const result = await server.listen()
 
@@ -342,7 +348,7 @@ describe('Server', () => {
     })
 
     test('should return same promise for concurrent listen calls', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       setListenCallback((cb) => {
         setTimeout(() => cb({ sock: 1 }), 0)
@@ -358,7 +364,7 @@ describe('Server', () => {
     })
 
     test('should return resolved promise if socket already exists', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       await server.listen()
 
@@ -368,7 +374,7 @@ describe('Server', () => {
     })
 
     test('should reject on listen failure', async () => {
-      const server = new Server({ router: () => {}, port: 8000 })
+      const server = makeServer({ router: () => {}, port: 8000 })
 
       setListenCallback((cb) => {
         cb(null)
@@ -389,7 +395,7 @@ describe('Server', () => {
         { method: 'delete', path: '/d', handler: handler2 },
         { method: 'post', path: '/p', handler: handler1 }
       ]
-      const server = new Server({ routes })
+      const server = makeServer({ routes })
 
       await server.listen()
 
@@ -420,7 +426,7 @@ describe('Server', () => {
           }
         }
       ]
-      const server = new Server({ routes })
+      const server = makeServer({ routes })
 
       await server.listen()
 
@@ -445,7 +451,7 @@ describe('Server', () => {
 
     test('should throw on invalid HTTP method', async () => {
       const routes = [{ method: 'trace', path: '/x', handler: () => {} }]
-      const server = new Server({ routes })
+      const server = makeServer({ routes })
 
       await rejects(
         (async () => {
@@ -459,7 +465,7 @@ describe('Server', () => {
 
     test('should throw on invalid path (not starting with /)', async () => {
       const routes = [{ method: 'get', path: 'x', handler: () => {} }]
-      const server = new Server({ routes })
+      const server = makeServer({ routes })
 
       await rejects(
         (async () => {
@@ -487,7 +493,7 @@ describe('Server', () => {
           }
         }
       ]
-      const server = new Server({ routes })
+      const server = makeServer({ routes })
 
       await server.listen()
 
@@ -505,7 +511,7 @@ describe('Server', () => {
 
     test('should throw on invalid preHandler (not a function)', async () => {
       const routes = [{ method: 'get', path: '/x', handler: () => {}, preHandler: 'nope' }]
-      const server = new Server({ routes })
+      const server = makeServer({ routes })
 
       await rejects(
         (async () => {
@@ -521,7 +527,7 @@ describe('Server', () => {
 
     test('should throw when a preHandler array contains a non-function', async () => {
       const routes = [{ method: 'get', path: '/x', handler: () => {}, preHandler: [() => {}, 42] }]
-      const server = new Server({ routes })
+      const server = makeServer({ routes })
 
       await rejects(
         (async () => {
@@ -536,7 +542,7 @@ describe('Server', () => {
     })
 
     test('should register WebSocket when wsEnabled is true', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, wsIdleTimeoutSec: 20 }
       })
@@ -559,7 +565,7 @@ describe('Server', () => {
     })
 
     test('should use default wsIdleTimeoutSec when not provided', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -575,7 +581,7 @@ describe('Server', () => {
 
   describe('safeCall()', () => {
     test('should call function and swallow errors', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
       let called = 0
 
       await server.safeCall(() => {
@@ -587,7 +593,7 @@ describe('Server', () => {
     })
 
     test('should handle async functions', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
       let called = 0
 
       await server.safeCall(async () => {
@@ -599,7 +605,7 @@ describe('Server', () => {
     })
 
     test('should do nothing for non-function', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       await server.safeCall(null)
       await server.safeCall(undefined)
@@ -608,7 +614,7 @@ describe('Server', () => {
     })
 
     test('should pass arguments correctly', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
       let receivedArgs = null
 
       await server.safeCall(
@@ -630,7 +636,7 @@ describe('Server', () => {
       let receivedCtx = null
       let receivedErr = null
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -653,7 +659,7 @@ describe('Server', () => {
     })
 
     test('should swallow errors from onWsError', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -673,7 +679,7 @@ describe('Server', () => {
       let receivedCtx = null
       let receivedErr = null
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         onHttpError: (ctx, err) => {
           called = true
@@ -693,7 +699,7 @@ describe('Server', () => {
     })
 
     test('should swallow errors from onHttpError', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         onHttpError: () => {
           throw new Error('handler error')
@@ -706,7 +712,7 @@ describe('Server', () => {
 
   describe('WebSocket context lifecycle', () => {
     test('should create and cache WS context', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -721,7 +727,7 @@ describe('Server', () => {
     })
 
     test('should keep contexts isolated per connection', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -746,7 +752,7 @@ describe('Server', () => {
     })
 
     test('should create new context after delete', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -769,7 +775,7 @@ describe('Server', () => {
     })
 
     test('should call release on context when deleted', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -791,7 +797,7 @@ describe('Server', () => {
     })
 
     test('should handle deleteWsContext when no context exists', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -806,21 +812,21 @@ describe('Server', () => {
     const noise = new ArrayBuffer(0)
 
     test('should throw when connectionKey is not a function', () => {
-      throws(() => new Server({ router: () => {}, ws: { enabled: true, connectionKey: 'nope' } }), {
+      throws(() => makeServer({ router: () => {}, ws: { enabled: true, connectionKey: 'nope' } }), {
         name: 'TypeError',
         message: 'ws.connectionKey must be a function'
       })
     })
 
     test('should throw for invalid connectionKey even when ws is disabled', () => {
-      throws(() => new Server({ router: () => {}, ws: { enabled: false, connectionKey: 'nope' } }), {
+      throws(() => makeServer({ router: () => {}, ws: { enabled: false, connectionKey: 'nope' } }), {
         name: 'TypeError',
         message: 'ws.connectionKey must be a function'
       })
     })
 
     test('should auto-enable WS when connectionKey is the only ws option', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { connectionKey: (ctx) => ctx.data.userId }
       })
@@ -834,7 +840,7 @@ describe('Server', () => {
     })
 
     test('should not register a connection that connectionKey closed synchronously', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -865,7 +871,7 @@ describe('Server', () => {
     test('should not invoke onOpen when connectionKey closed the connection', () => {
       const opened = []
       const closed = []
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -892,7 +898,7 @@ describe('Server', () => {
     })
 
     test('should not register when connectionKey returns NaN', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: () => NaN }
       })
@@ -905,7 +911,7 @@ describe('Server', () => {
     })
 
     test('should not maintain a registry when connectionKey is unset', () => {
-      const server = new Server({ router: () => {}, ws: { enabled: true } })
+      const server = makeServer({ router: () => {}, ws: { enabled: true } })
       const ws = createMockWebSocket({ userId: 'u1' })
 
       server.onOpen(ws)
@@ -916,7 +922,7 @@ describe('Server', () => {
     })
 
     test('should register a connection on open and expose it via the registry API', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
       })
@@ -931,7 +937,7 @@ describe('Server', () => {
     })
 
     test('should send directly to a registered connection', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
       })
@@ -949,7 +955,7 @@ describe('Server', () => {
     })
 
     test('should default isBinary from payload type in sendTo', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
       })
@@ -968,7 +974,7 @@ describe('Server', () => {
     })
 
     test('should return false from sendTo when uWS reports the message dropped', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
       })
@@ -982,7 +988,7 @@ describe('Server', () => {
     })
 
     test('should return false from sendTo/hasConnection for unknown key', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
       })
@@ -993,7 +999,7 @@ describe('Server', () => {
     })
 
     test('should not register when connectionKey returns nullish', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: () => null }
       })
@@ -1008,7 +1014,7 @@ describe('Server', () => {
     test('should route connectionKey errors to onError and skip registration', () => {
       const errors = []
       const boom = new Error('key boom')
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1029,7 +1035,7 @@ describe('Server', () => {
 
     test('should unregister before onClose runs so sendTo cannot hit the closing socket', () => {
       let sendToResult = null
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1050,7 +1056,7 @@ describe('Server', () => {
 
     test('should unregister during async onClose before its promise settles', async () => {
       let resolveClose = null
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1077,7 +1083,7 @@ describe('Server', () => {
     })
 
     test('should remove the connection from the registry on close', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
       })
@@ -1093,7 +1099,7 @@ describe('Server', () => {
     })
 
     test('should clear ctx.key of the displaced connection on same-key reconnect', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
       })
@@ -1108,7 +1114,7 @@ describe('Server', () => {
     })
 
     test('should let a reconnect with the same key win, and not be evicted by the old socket closing', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
       })
@@ -1137,19 +1143,19 @@ describe('Server', () => {
 
   describe('getSubscribersCount() and publish()', () => {
     test('should return 0 when WS disabled', () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       strictEqual(server.getSubscribersCount('topic'), 0)
     })
 
     test('should return false when WS disabled', () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       strictEqual(server.publish('topic', 'message'), false)
     })
 
     test('should return 0 when app not created', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -1159,7 +1165,7 @@ describe('Server', () => {
     })
 
     test('should call app.numSubscribers after listen', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -1178,7 +1184,7 @@ describe('Server', () => {
     })
 
     test('should call app.publish with correct parameters', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -1199,7 +1205,7 @@ describe('Server', () => {
     })
 
     test('should detect binary for ArrayBuffer', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -1217,7 +1223,7 @@ describe('Server', () => {
     })
 
     test('should use explicit isBinary parameter', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -1236,7 +1242,7 @@ describe('Server', () => {
 
   describe('stopAccepting()', () => {
     test('should call us_listen_socket_close and clear socket', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       await server.listen()
       const socket = server.socket
@@ -1249,7 +1255,7 @@ describe('Server', () => {
     })
 
     test('should do nothing when socket is null', () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       server.stopAccepting()
 
@@ -1259,7 +1265,7 @@ describe('Server', () => {
 
   describe('shutdown() and close()', () => {
     test('should resolve immediately when no active connections', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       await server.shutdown(0)
 
@@ -1268,7 +1274,7 @@ describe('Server', () => {
     })
 
     test('should call stopAccepting on shutdown', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       await server.listen()
 
@@ -1279,7 +1285,7 @@ describe('Server', () => {
     })
 
     test('should call app.close eventually', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       await server.listen()
       const mockApp = getCurrentMockApp()
@@ -1292,7 +1298,7 @@ describe('Server', () => {
     })
 
     test('should be idempotent', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       await server.listen()
       const mockApp = getCurrentMockApp()
@@ -1304,7 +1310,7 @@ describe('Server', () => {
     })
 
     test('should resolve shutdown promise after close', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       await server.listen()
 
@@ -1318,7 +1324,7 @@ describe('Server', () => {
     })
 
     test('should return same promise for concurrent shutdown calls', async () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       const promise1 = server.shutdown(0)
       const promise2 = server.shutdown(0)
@@ -1332,7 +1338,7 @@ describe('Server', () => {
 
   describe('onUpgrade()', () => {
     test('should return 503 when draining', () => {
-      const server = new Server({ router: () => {} })
+      const server = makeServer({ router: () => {} })
 
       server.shutdown(0)
 
@@ -1354,7 +1360,7 @@ describe('Server', () => {
 
     test('should upgrade when allowed (sync)', () => {
       const userData = { a: 1 }
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1388,7 +1394,7 @@ describe('Server', () => {
     })
 
     test('should return 403 when denied (sync)', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1413,7 +1419,7 @@ describe('Server', () => {
       let errorCtx = null
       let errorErr = null
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1450,7 +1456,7 @@ describe('Server', () => {
         resolveFn = resolve
       })
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1492,7 +1498,7 @@ describe('Server', () => {
         resolveFn = resolve
       })
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1527,7 +1533,7 @@ describe('Server', () => {
 
   describe('onOpen()', () => {
     test('should end WebSocket with 1001 when draining', () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })
@@ -1549,7 +1555,7 @@ describe('Server', () => {
 
   describe('handleWithContext()', () => {
     test('should respond 503 and close connection when draining', () => {
-      const server = new Server({ router: () => 'ok' })
+      const server = makeServer({ router: () => 'ok' })
 
       server.shutdown(0)
 
@@ -1564,7 +1570,7 @@ describe('Server', () => {
     })
 
     test('should register onAborted with ctx.onAbort', () => {
-      const server = new Server({ router: () => 'ok' })
+      const server = makeServer({ router: () => 'ok' })
       const res = createMockHttpResponse()
       const req = createMockHttpRequest()
 
@@ -1577,7 +1583,7 @@ describe('Server', () => {
     })
 
     test('aborted async request must not deliver its late result to a reused context', async () => {
-      const server = new Server({ router: () => 'ok' })
+      const server = makeServer({ router: () => 'ok' })
 
       let resolveFirst = null
       const res1 = createMockHttpResponse()
@@ -1612,7 +1618,7 @@ describe('Server', () => {
       let safeErrCalled = 0
       let finalizeCalled = 0
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {
           throw Object.assign(new Error('bad'), { status: 400 })
         },
@@ -1645,7 +1651,7 @@ describe('Server', () => {
       let safeErrCalled = 0
       let finalizeCalled = 0
 
-      const server = new Server({
+      const server = makeServer({
         router: (ctx) => {
           ctx.streaming = true
           throw new Error('x')
@@ -1676,7 +1682,7 @@ describe('Server', () => {
     test('should handle promise resolve via ctx.onResolve and finalize if not streaming', async () => {
       let finalizeCalled = 0
 
-      const server = new Server({
+      const server = makeServer({
         router: () => Promise.resolve('ok')
       })
 
@@ -1703,7 +1709,7 @@ describe('Server', () => {
       let safeErrCalled = 0
       let finalizeCalled = 0
 
-      const server = new Server({
+      const server = makeServer({
         router: () => Promise.reject(Object.assign(new Error('no'), { status: 401 })),
         onHttpError: (ctx, err) => {
           safeErrCalled++
@@ -1733,7 +1739,7 @@ describe('Server', () => {
     test('when promise resolves but ctx.send throws, it should sendError(500) and safeHttpError called', async () => {
       let safeErrCalled = 0
 
-      const server = new Server({
+      const server = makeServer({
         router: () =>
           Promise.resolve({
             toJSON() {
@@ -1762,7 +1768,7 @@ describe('Server', () => {
     test('onMessage: should call handler and swallow errors into safeWsError when handler throws', async () => {
       let errorCalled = 0
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1788,7 +1794,7 @@ describe('Server', () => {
     test('onMessage: async reject should call safeWsError', async () => {
       let errorCalled = 0
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1815,7 +1821,7 @@ describe('Server', () => {
     test('onClose: must deleteWsContext and decrement activeWs even if onClose throws', async () => {
       let errorCalled = 0
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1847,7 +1853,7 @@ describe('Server', () => {
     test('onClose: async onClose should deleteWsContext only after promise settles', async () => {
       let resolveFn
 
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: {
           enabled: true,
@@ -1878,7 +1884,7 @@ describe('Server', () => {
     })
 
     test('shutdown should close app only after activeWs becomes 0 (finishShutdownIfNeed)', async () => {
-      const server = new Server({
+      const server = makeServer({
         router: () => {},
         ws: { enabled: true }
       })

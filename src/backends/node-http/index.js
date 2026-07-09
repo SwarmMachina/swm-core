@@ -15,13 +15,14 @@ export function App() {
   const router = new Router()
   const state = { server: null, listening: false, wsLayer: null }
 
+  /**
+   *
+   */
   function stopAccepting() {
     if (state.server && state.listening) {
       state.listening = false
 
       try {
-        // Stops accepting new connections; existing ones drain (uWS
-        // us_listen_socket_close semantics).
         state.server.close()
       } catch {
         // Already closing/closed.

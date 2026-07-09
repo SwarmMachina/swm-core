@@ -78,7 +78,7 @@ export default class Server {
    * @param {number} [opt.port]
    * @param {number} [opt.maxBodySize] - in mb
    * @param {WSOptions} [opt.ws]
-   * @param {'uws'|'node'} [opt.backend] - Transport backend. 'uws' (default) is the native turbo engine; 'node' is the zero-dependency node:http backend.
+   * @param {'uws'|'node'} [opt.backend] - Transport backend. 'uws' (default) is the native turbo engine (requires the optional uwebsockets.js peer dependency); 'node' is the zero-dependency node:http backend.
    */
   constructor({ router, routes, onHttpError, port = 6000, maxBodySize = 1, ws, backend = 'uws' }) {
     if (router && routes) {
@@ -183,8 +183,7 @@ export default class Server {
     const promise = this.#doListen()
 
     this.#listenPromise = promise
-    // Keep listen() retryable after a setup/bind failure, matching the previous
-    // synchronous behavior where a throw left #listenPromise unset.
+
     promise.catch(() => {
       if (this.#listenPromise === promise) {
         this.#listenPromise = null

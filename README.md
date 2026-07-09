@@ -2,17 +2,19 @@
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)](https://nodejs.org/)
-[![dependencies](https://img.shields.io/badge/dependencies-1-brightgreen.svg)](#)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#)
 [![stability](https://img.shields.io/badge/stability-experimental-yellow.svg)](#)
 
-A zero-dependency, high-performance HTTP/WebSocket server built
-on [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js).
+A zero-dependency, high-performance HTTP/WebSocket server. Runs on a pure-JS
+`node:http` backend out of the box, with an optional
+[uWebSockets.js](https://github.com/uNetworking/uWebSockets.js) turbo backend
+for maximum throughput.
 
 ## Features
 
-- **Zero dependencies** - Only uses uWebSockets.js for maximum performance
+- **Zero dependencies** - Pure `node:http` + a pure-JS RFC 6455 WebSocket layer; nothing to install
+- **Optional native turbo** - Opt into the uWebSockets.js backend for the highest throughput
 - **HTTP + WebSocket** - Both protocols in a single server instance
-- **High performance** - Built on the fastest WebSocket server available
 - **Context pooling** - Minimizes garbage collection overhead
 - **Graceful shutdown** - Cleanly closes active connections
 - **Streaming support** - Efficient handling of large payloads
@@ -22,16 +24,25 @@ on [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js).
 ## Installation
 
 ```bash
-# Install the package
+# Install the package (no native addon, no build step)
 npm install @swarmmachina/swm-core
 ```
 
-### Runtime requirements
+That's it — the default `node` backend has no runtime dependencies and needs
+**Node.js 22+** only.
 
-This package depends on the native [uWebSockets.js](https://github.com/uNetworking/uWebSockets.js)
-addon, which imposes a few constraints on the install/runtime environment:
+### Optional: the uWebSockets.js turbo backend
 
-- **Node.js 22+** — required by both this package and the bundled uWS prebuilt.
+For maximum throughput, install the optional native backend and select it with
+`backend: 'uws'`:
+
+```bash
+npm install uwebsockets.js@uNetworking/uWebSockets.js#v20.67.0
+```
+
+The native addon imposes a few constraints on the install/runtime environment
+(they apply **only** when you use `backend: 'uws'`):
+
 - **glibc, not musl** — the prebuilt binaries target glibc. Use a `bookworm`/`slim`
   (Debian) base image rather than `alpine` (musl), otherwise the native module fails to load.
 - **Architecture-specific prebuilt** — the loaded binary must match the host CPU
@@ -39,7 +50,7 @@ addon, which imposes a few constraints on the install/runtime environment:
   platform you deploy to (e.g. `--platform linux/amd64`); a binary built on
   arm64 will not run on an amd64 server.
 - **Network access to GitHub at install time** — uWS is pulled from a GitHub tag
-  (`uNetworking/uWebSockets.js#v20.67.0`), so `npm install` needs outbound access
+  (`uNetworking/uWebSockets.js#v20.67.0`), so the install needs outbound access
   to GitHub. Offline/air-gapped installs require a pre-populated cache or mirror.
 
 ## Backends
@@ -47,22 +58,29 @@ addon, which imposes a few constraints on the install/runtime environment:
 The server runs on a selectable transport backend, chosen with the `backend`
 option:
 
-| `backend`         | Transport      | Status                                                            |
-| ----------------- | -------------- | ----------------------------------------------------------------- |
-| `'uws'` (default) | uWebSockets.js | Native turbo engine. HTTP + WebSocket. Highest throughput.        |
-| `'node'`          | `node:http`    | Experimental, zero-dependency. HTTP + WebSocket (no compression). |
+| `backend`          | Transport      | Notes                                                                  |
+| ------------------ | -------------- | ---------------------------------------------------------------------- |
+| `'node'` (default) | `node:http`    | Zero-dependency. HTTP + WebSocket (no `permessage-deflate`).           |
+| `'uws'`            | uWebSockets.js | Native turbo engine — highest throughput. Requires the optional addon. |
 
 ```js
-// Zero-dependency node:http backend (no native addon)
-const server = new Server({ backend: 'node', port: 6000, router })
+// Default: zero-dependency node:http backend (no native addon)
+const server = new Server({ port: 6000, router })
+
+// Opt into the native turbo backend (after installing uwebsockets.js)
+const turbo = new Server({ backend: 'uws', port: 6000, router })
 ```
 
-The `'node'` backend serves the full HTTP and WebSocket API on `node:http` plus a
-pure-JS RFC 6455 implementation — no native addon, so it is not subject to the
-glibc/architecture/prebuilt constraints listed above. It does not implement the
-`permessage-deflate` compression extension. WebSocket conformance is verified
-against the [Autobahn TestSuite](https://github.com/crossbario/autobahn-testsuite)
+The default `'node'` backend serves the full HTTP and WebSocket API on
+`node:http` plus a pure-JS RFC 6455 implementation — no native addon, so it is
+not subject to the glibc/architecture/prebuilt constraints listed above. It does
+not implement the `permessage-deflate` compression extension. WebSocket
+conformance is verified against the
+[Autobahn TestSuite](https://github.com/crossbario/autobahn-testsuite)
 (`npm run test:autobahn`, requires docker).
+
+Selecting `backend: 'uws'` without the `uwebsockets.js` peer dependency installed
+throws a clear error at `listen()`.
 
 ## Quick Start
 

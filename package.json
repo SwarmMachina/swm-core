@@ -62,8 +62,13 @@
     "prepublishOnly": "npm run fix && npm test",
     "release": "npm run check && npm test && npm publish"
   },
-  "dependencies": {
+  "peerDependencies": {
     "uwebsockets.js": "uNetworking/uWebSockets.js#v20.67.0"
+  },
+  "peerDependenciesMeta": {
+    "uwebsockets.js": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@swarmmachina/standards": "^1.0.3",
@@ -71,6 +76,7 @@
     "express": "^5.2.1",
     "fastify": "^5.8.5",
     "micro": "^10.0.1",
+    "uwebsockets.js": "uNetworking/uWebSockets.js#v20.67.0",
     "ws": "^8.21.0"
   }
 }

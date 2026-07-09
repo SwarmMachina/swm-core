@@ -1,5 +1,4 @@
 import type { Readable } from 'node:stream'
-import type { WebSocket as UwsWebSocket } from 'uwebsockets.js'
 
 export type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'del' | 'patch' | 'options' | 'head' | 'any'
 
@@ -72,9 +71,9 @@ export interface ServerOptions {
   ws?: WSOptions
   /**
    * Transport backend. `'uws'` (default) is the native uWebSockets.js turbo
-   * engine; `'node'` is the zero-dependency node:http backend (HTTP only —
-   * enabling WebSocket options currently falls back to `'uws'`).
-   * @default 'uws'
+   * engine and requires the optional `uwebsockets.js` peer dependency.
+   * `'node'` is the zero-dependency node:http backend (HTTP + WebSocket).
+   * @default 'node'
    */
   backend?: 'uws' | 'node'
 }
@@ -130,11 +129,22 @@ export class HttpContext {
 export type WSSendStatus = 0 | 1 | 2
 
 /**
- * Raw uWebSockets.js WebSocket handle exposed as {@link WSContext.ws},
- * derived from the dependency's own typings. Its identity is stable for the
- * connection's lifetime; invalid after close.
+ * Raw per-connection WebSocket handle exposed as {@link WSContext.ws}. Backed
+ * by the native uWebSockets.js socket (`'uws'` backend) or the node:http
+ * WebSocket (`'node'` backend). Its identity is stable for the connection's
+ * lifetime; invalid after close. Typed as an opaque interface so the package
+ * has no compile-time dependency on the optional uWebSockets.js typings.
  */
-export type UWebSocket = UwsWebSocket<any>
+export interface RawWebSocket {
+  getUserData(): any
+  send(data: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): WSSendStatus
+  end(code?: number, reason?: string): void
+  subscribe(topic: string): boolean
+  unsubscribe(topic: string): boolean
+}
+
+/** @deprecated Use {@link RawWebSocket}. */
+export type UWebSocket = RawWebSocket
 
 /**
  * Per-connection WebSocket context.
@@ -150,10 +160,10 @@ export class WSContext {
   data: any
 
   /**
-   * Raw uWebSockets.js socket handle.
+   * Raw per-connection WebSocket handle (backend-specific).
    * Stable for the connection lifetime; invalid after close.
    */
-  ws: UWebSocket
+  ws: RawWebSocket
 
   /** Registered connection key, or `null` when unset. */
   readonly key: string | number | null
@@ -194,7 +204,7 @@ export default class Server {
   /** Whether a live connection is registered under `key`. */
   hasConnection(key: string | number): boolean
   /** Raw registered socket, or `undefined`. Escape hatch for low-level control. */
-  getConnection(key: string | number): UWebSocket | undefined
+  getConnection(key: string | number): RawWebSocket | undefined
   /** Number of registered addressable connections. */
   readonly connectionCount: number
 }
