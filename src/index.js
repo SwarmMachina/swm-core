@@ -21,6 +21,7 @@ const isPromise = (v) => v != null && (typeof v === 'object' || typeof v === 'fu
  * @property {(ctx: WSContext, code: number, reason: ArrayBuffer) => any} [onClose]
  * @property {(ctx: WSContext, msg: ArrayBuffer, isBinary: boolean) => any} [onMessage]
  * @property {(ctx: WSContext, topic: ArrayBuffer, newCount: number, oldCount: number) => any} [onSubscription]
+ * @property {(ctx: WSContext) => (string|number|null|undefined)} [connectionKey] - Opt-in. Derive a stable key for the connection (e.g. a user id) so it can be addressed via server.sendTo(). Computed once in onOpen.
  */
 
 /**
@@ -45,6 +46,11 @@ export default class Server {
   // open/message/close callbacks). Keeps ws.getUserData() off the message hot
   // path.
   #wsContexts = new WeakMap()
+
+  // Opt-in connection registry: user-supplied key -> raw uWS `ws` handle.
+  // Populated in onOpen and cleaned in onClose (never on the message hot path)
+  // only when `ws.connectionKey` is configured. Backs server.sendTo().
+  #connections = new Map()
 
   /**
    * @param {object} opt
@@ -80,6 +86,10 @@ export default class Server {
       throw new TypeError('Max body size must be in range 1 - 64')
     }
 
+    if (ws?.connectionKey != null && typeof ws.connectionKey !== 'function') {
+      throw new TypeError('ws.connectionKey must be a function')
+    }
+
     this.port = port
     this.router = router || null
     this.routes = routes || null
@@ -94,6 +104,7 @@ export default class Server {
     this.onWsDrain = () => {}
     this.onWsSubscription = () => {}
     this.onWsUpgrade = () => Promise.resolve({ isAllowed: true })
+    this.wsConnectionKey = null
 
     const hasHandlers =
       typeof ws?.onMessage === 'function' ||
@@ -102,7 +113,8 @@ export default class Server {
       typeof ws?.onError === 'function' ||
       typeof ws?.onDrain === 'function' ||
       typeof ws?.onUpgrade === 'function' ||
-      typeof ws?.onSubscription === 'function'
+      typeof ws?.onSubscription === 'function' ||
+      typeof ws?.connectionKey === 'function'
 
     this.wsEnabled = !!(ws && (ws?.enabled ?? hasHandlers))
 
@@ -122,13 +134,17 @@ export default class Server {
       this.onWsDrain = typeof ws.onDrain === 'function' ? ws.onDrain : () => {}
       this.onWsSubscription = typeof ws.onSubscription === 'function' ? ws.onSubscription : () => {}
       this.onWsUpgrade = typeof ws.onUpgrade === 'function' ? ws.onUpgrade : () => Promise.resolve({ isAllowed: true })
+      this.wsConnectionKey = ws.connectionKey ?? null
     }
 
     this.app = null
     this.socket = null
 
     this.httpContextPool = new ContextPool((pool) => new HttpContext(pool), 1000)
-    this.wsContextPool = new ContextPool((pool) => new WSContext(pool), 1000)
+    // maxSize 0 is deliberate: WSContext instances are never reused across
+    // connections, which guarantees a retained post-close reference fails
+    // loudly instead of silently acting on another connection's socket.
+    this.wsContextPool = new ContextPool((pool) => new WSContext(pool), 0)
   }
 
   listen() {
@@ -157,8 +173,9 @@ export default class Server {
           }
 
           const routeHandler = this.#composeRouteHandler(handler, preHandler)
+          const paramNames = path.match(/:[^/]+/g)?.map((name) => name.slice(1)) ?? []
 
-          this.app[methodName](path, (res, req) => this.handleWithContext(res, req, routeHandler))
+          this.app[methodName](path, (res, req) => this.handleWithContext(res, req, routeHandler, paramNames))
         }
       } else {
         this.app.any('/*', (res, req) => this.handleWithContext(res, req, this.router))
@@ -221,7 +238,7 @@ export default class Server {
       for (let i = 0; i < chain.length; i++) {
         await chain[i](ctx)
 
-        if (ctx.replied || ctx.aborted) {
+        if ((ctx.replied && !ctx.streaming) || ctx.aborted) {
           ctx.finalize()
           return
         }
@@ -295,12 +312,65 @@ export default class Server {
   }
 
   /**
+   * @param {WSContext} ctx
+   * @param {import('uwebsockets.js').WebSocket} ws
+   */
+  #registerConnection(ctx, ws) {
+    if (!this.wsConnectionKey) {
+      return
+    }
+
+    let key
+
+    try {
+      key = this.wsConnectionKey(ctx)
+    } catch (err) {
+      void this.safeWsError(ctx, err)
+      return
+    }
+
+    if (key == null || Number.isNaN(key)) {
+      return
+    }
+
+    if (this.#wsContexts.get(ws) !== ctx) {
+      return
+    }
+
+    const prev = this.#connections.get(key)
+
+    if (prev && prev !== ws) {
+      const prevCtx = this.#wsContexts.get(prev)
+
+      if (prevCtx) {
+        prevCtx.key = null
+      }
+    }
+
+    // noinspection JSConstantReassignment
+    ctx.key = key
+    this.#connections.set(key, ws)
+  }
+
+  /**
+   * @param {WSContext} ctx
+   * @param {import('uwebsockets.js').WebSocket} ws
+   */
+  #unregisterConnection(ctx, ws) {
+    if (ctx.key != null && this.#connections.get(ctx.key) === ws) {
+      this.#connections.delete(ctx.key)
+    }
+  }
+
+  /**
    * @param {import('uwebsockets.js').WebSocket} ws
    */
   deleteWsContext(ws) {
     const ctx = this.#wsContexts.get(ws)
 
     if (ctx) {
+      this.#unregisterConnection(ctx, ws)
+
       ctx.release()
       this.#wsContexts.delete(ws)
       this.#activeWs--
@@ -308,7 +378,12 @@ export default class Server {
   }
 
   finalizeHttpContext(ctx) {
-    ctx.release()
+    if (ctx.asyncPending) {
+      ctx.releasePending = true
+    } else {
+      ctx.release()
+    }
+
     this.#activeHttp--
 
     if (this.#draining) {
@@ -320,9 +395,10 @@ export default class Server {
    * @param {import('uwebsockets.js').HttpResponse} res
    * @param {import('uwebsockets.js').HttpRequest} req
    * @param {(ctx: HttpContext) => any|Promise<any>} handler
+   * @param {string[]} [paramNames] - route :param names, in path order (native routing only)
    * @returns {void}
    */
-  handleWithContext(res, req, handler) {
+  handleWithContext(res, req, handler, paramNames) {
     if (this.#draining) {
       res.cork(() => {
         res.writeStatus(STATUS_TEXT[503])
@@ -362,6 +438,9 @@ export default class Server {
       ctx.url()
       ctx.cacheQuery()
       ctx.cacheHeaders()
+      ctx.cacheParams(paramNames)
+
+      ctx.asyncPending = true
 
       // eslint-disable-next-line promise/catch-or-return
       result.then(ctx.onResolve, ctx.onReject)
@@ -400,6 +479,10 @@ export default class Server {
 
       return
     }
+
+    const secWebSocketKey = req.getHeader('sec-websocket-key')
+    const secWebSocketProtocol = req.getHeader('sec-websocket-protocol')
+    const secWebSocketExtensions = req.getHeader('sec-websocket-extensions')
 
     const meta = {
       url: () => req.getUrl(),
@@ -450,13 +533,7 @@ export default class Server {
 
           if (result?.isAllowed) {
             res.cork(() => {
-              res.upgrade(
-                result.userData || {},
-                req.getHeader('sec-websocket-key'),
-                req.getHeader('sec-websocket-protocol'),
-                req.getHeader('sec-websocket-extensions'),
-                context
-              )
+              res.upgrade(result.userData || {}, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
             })
 
             return
@@ -487,13 +564,7 @@ export default class Server {
 
       if (result?.isAllowed) {
         res.cork(() => {
-          res.upgrade(
-            result.userData || {},
-            req.getHeader('sec-websocket-key'),
-            req.getHeader('sec-websocket-protocol'),
-            req.getHeader('sec-websocket-extensions'),
-            context
-          )
+          res.upgrade(result.userData || {}, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
         })
       } else {
         res.cork(() => {
@@ -514,6 +585,12 @@ export default class Server {
     }
 
     const ctx = this.createWsContext(ws)
+
+    this.#registerConnection(ctx, ws)
+
+    if (this.#wsContexts.get(ws) !== ctx) {
+      return
+    }
 
     let result
     let error
@@ -630,6 +707,8 @@ export default class Server {
   onClose(ws, code, message) {
     const ctx = this.getWsContext(ws)
 
+    this.#unregisterConnection(ctx, ws)
+
     let result
     let error
     let isAsync = false
@@ -688,6 +767,45 @@ export default class Server {
     const bin = isBinary ?? typeof message !== 'string'
 
     return this.app.publish(topic, message, bin)
+  }
+
+  /**
+   * @param {string | number} key
+   * @param {string | ArrayBuffer | ArrayBufferView} message
+   * @param {boolean} [isBinary]
+   * @returns {boolean}
+   */
+  sendTo(key, message, isBinary) {
+    const ws = this.#connections.get(key)
+
+    if (!ws) {
+      return false
+    }
+
+    return ws.send(message, isBinary ?? typeof message !== 'string') !== 2
+  }
+
+  /**
+   * @param {string | number} key
+   * @returns {boolean}
+   */
+  hasConnection(key) {
+    return this.#connections.has(key)
+  }
+
+  /**
+   * @param {string | number} key
+   * @returns {import('uwebsockets.js').WebSocket | undefined}
+   */
+  getConnection(key) {
+    return this.#connections.get(key)
+  }
+
+  /**
+   * @returns {number}
+   */
+  get connectionCount() {
+    return this.#connections.size
   }
 
   stopAccepting() {
@@ -774,6 +892,7 @@ export default class Server {
       //
     }
 
+    this.#connections.clear()
     this.#draining = false
 
     this.#resolveShutdownIfNeeded()

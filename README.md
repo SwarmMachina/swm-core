@@ -234,17 +234,18 @@ new Server(options)
 
 **WebSocket Options (`ws` object):**
 
-| Option             | Type       | Default                                            | Description                                                                                                                                                                                                         |
-| ------------------ | ---------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`          | `Boolean`  | `false`                                            | Enable WebSocket support. If not set and at least one ws handler is provided, WS will be enabled automatically.                                                                                                     |
-| `wsIdleTimeoutSec` | `Number`   | `15`                                               | Idle timeout in seconds (min: 5)                                                                                                                                                                                    |
-| `onOpen`           | `Function` | `(ctx) => {}`                                      | Called when client connects                                                                                                                                                                                         |
-| `onMessage`        | `Function` | `(ctx, message, isBinary) => {}`                   | Called when message received                                                                                                                                                                                        |
-| `onClose`          | `Function` | `(ctx, code, message) => {}`                       | Called when client disconnects                                                                                                                                                                                      |
-| `onDrain`          | `Function` | `(ctx) => {}`                                      | Called when socket is writable again                                                                                                                                                                                |
-| `onError`          | `Function` | `(ctx, error) => {}`                               | Called on WebSocket error                                                                                                                                                                                           |
-| `onUpgrade`        | `Function` | `(meta) => ({isAllowed: true, userData?: object})` | Validate WebSocket upgrade. Receives `meta` object with: `url()`, `ip()`, `getHeader(name)`, `getQuery(key)`, `getParameter(indexOrName)`, `aborted` boolean. Return `userData` to make it available via `ctx.data` |
-| `onSubscription`   | `Function` | `(ctx, topic, newCount, oldCount) => {}`           | Called on topic subscription change                                                                                                                                                                                 |
+| Option             | Type       | Default                                            | Description                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------ | ---------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enabled`          | `Boolean`  | `false`                                            | Enable WebSocket support. If not set and at least one ws handler is provided, WS will be enabled automatically.                                                                                                                                                                                                                                                    |
+| `wsIdleTimeoutSec` | `Number`   | `15`                                               | Idle timeout in seconds (min: 5)                                                                                                                                                                                                                                                                                                                                   |
+| `onOpen`           | `Function` | `(ctx) => {}`                                      | Called when client connects                                                                                                                                                                                                                                                                                                                                        |
+| `onMessage`        | `Function` | `(ctx, message, isBinary) => {}`                   | Called when message received                                                                                                                                                                                                                                                                                                                                       |
+| `onClose`          | `Function` | `(ctx, code, message) => {}`                       | Called when client disconnects                                                                                                                                                                                                                                                                                                                                     |
+| `onDrain`          | `Function` | `(ctx) => {}`                                      | Called when socket is writable again                                                                                                                                                                                                                                                                                                                               |
+| `onError`          | `Function` | `(ctx, error) => {}`                               | Called on WebSocket error                                                                                                                                                                                                                                                                                                                                          |
+| `onUpgrade`        | `Function` | `(meta) => ({isAllowed: true, userData?: object})` | Validate WebSocket upgrade. Receives `meta` object with: `url()`, `ip()`, `getHeader(name)`, `getQuery(key)`, `getParameter(indexOrName)`, `aborted` boolean. Return `userData` to make it available via `ctx.data`. Call the `meta` getters synchronously, before any `await` — the underlying request is only valid for the duration of the synchronous callback |
+| `onSubscription`   | `Function` | `(ctx, topic, newCount, oldCount) => {}`           | Called on topic subscription change                                                                                                                                                                                                                                                                                                                                |
+| `connectionKey`    | `Function` | `undefined`                                        | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead).                                                                                           |
 
 ### Server Methods
 
@@ -291,6 +292,38 @@ const count = server.getSubscribersCount('news')
 ```
 
 **Returns:** `number` - Subscriber count
+
+#### `server.sendTo(key, message, [isBinary])`
+
+Send a message directly to the single connection registered under `key` (the
+value returned from `ws.connectionKey`). For 1:1 messaging where topic pub/sub
+would be overkill. Requires `ws.connectionKey` to be configured.
+
+```javascript
+server.sendTo('user-42', 'private message')
+```
+
+**Returns:** `boolean` - `true` if a live connection was found and the message
+was not dropped; `false` when the key is unknown or uWS reported DROPPED
+(backpressure limit exceeded).
+
+Keys are matched with strict `Map` identity: `42` and `'42'` are different keys.
+Pick one type for `connectionKey` return values and `sendTo()` arguments.
+
+#### `server.hasConnection(key)` / `server.getConnection(key)` / `server.connectionCount`
+
+Inspect the connection registry. `hasConnection` returns a `boolean`;
+`getConnection` returns the raw uWS handle (or `undefined`) as an escape hatch
+for advanced use (backpressure via `getBufferedAmount()`, etc.); `connectionCount`
+is the number of registered connections.
+
+```javascript
+if (server.hasConnection('user-42')) {
+  /* ... */
+}
+const raw = server.getConnection('user-42') // uWS handle or undefined
+console.log(server.connectionCount)
+```
 
 ### HttpContext API
 
@@ -622,10 +655,11 @@ The `ctx` object passed to WebSocket handlers:
 
 #### Properties
 
-| Property   | Type        | Description                                                |
-| ---------- | ----------- | ---------------------------------------------------------- |
-| `ctx.data` | `Object`    | User data from `onUpgrade` return value (`userData` field) |
-| `ctx.ws`   | `WebSocket` | Raw uWS WebSocket object                                   |
+| Property   | Type              | Description                                                                                                                                                                                   |
+| ---------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.data` | `Object`          | User data from `onUpgrade` return value (`userData` field)                                                                                                                                    |
+| `ctx.ws`   | `WebSocket`       | Raw uWS WebSocket handle. Identity-stable for the connection; the handle to retain to address this connection from elsewhere (see [Context lifetime & pooling](#wscontext-lifetime--pooling)) |
+| `ctx.key`  | `string`/`number` | Key this connection is registered under (from `connectionKey`), or `null`. Read-only.                                                                                                         |
 
 #### Methods
 
@@ -638,7 +672,9 @@ ctx.send('Hello client!')
 ctx.send(Buffer.from([1, 2, 3]), true) // binary
 ```
 
-**Returns:** `number` - Send status
+**Returns:** `number` — uWS send status: `1` success, `0` backpressure (queued
+behind backpressure), `2` dropped (not sent — backpressure limit exceeded).
+Check it to react to backpressure.
 
 ##### `ctx.end([code], [reason])`
 
@@ -677,6 +713,51 @@ ctx.publish('news', 'Breaking news!')
 ```
 
 **Returns:** `boolean` - Success status
+
+##### `ctx.decode(message)`
+
+Decode a received binary message to a UTF-8 string — an opt-in convenience for
+the common `Buffer.from(message).toString()`. Not called automatically, so
+handlers that work with raw bytes pay nothing.
+
+```javascript
+onMessage: (ctx, message) => {
+  const text = ctx.decode(message)
+}
+```
+
+**Returns:** `string`
+
+Call it synchronously inside the handler: uWS neuters the `message`
+`ArrayBuffer` at the first `await`/return, so decoding it later throws. Unlike
+`ctx`, the `message` argument does **not** survive `await` — decode first, then
+await.
+
+#### WSContext lifetime & pooling
+
+`HttpContext` is pooled and reused across requests to minimize GC overhead;
+`WSContext` is allocated fresh per connection and **never reused** — that is
+what guarantees the fail-loud behavior below. Do not reason about `WSContext`
+by analogy to `HttpContext`.
+
+| Context       | Allocated per…            | Valid for…                    | Safe to retain?                              |
+| ------------- | ------------------------- | ----------------------------- | -------------------------------------------- |
+| `HttpContext` | request (pooled, reused)  | a single request/response     | No — released when the response is finalized |
+| `WSContext`   | connection (never reused) | the whole connection lifetime | Yes, for the connection; not past `onClose`  |
+
+- **One instance per connection.** The _same_ `WSContext` is passed to every
+  callback of a given connection (`onOpen`, `onMessage`, `onClose`, `onDrain`,
+  `onSubscription`). Instances are **not** shared between connections, so `ctx`
+  never silently switches sockets — you can hold it across an `await` and use it
+  as a stable per-connection identity.
+- **Don't use it past `onClose`.** After close the instance is cleared, so a
+  retained reference fails loudly (`ws is null`) instead of acting on a stale
+  socket. Don't stash `ctx` in a structure that outlives the connection.
+- **Address other connections by key, not by `ctx`.** To reach a _different_
+  connection (from another handler, a timer, an HTTP route), set `connectionKey`
+  and use [`server.sendTo()`](#serversendtokey-message-isbinary), or keep the raw
+  `ctx.ws` handle yourself. See
+  [Direct messaging between connections](#direct-messaging-between-connections).
 
 ## Examples
 
@@ -900,6 +981,61 @@ const server = new Server({
 
 await server.listen()
 ```
+
+### Direct messaging between connections
+
+To send a message to a **specific** other connection (1:1), topic pub/sub is
+overkill. Set `connectionKey` to give each connection a stable address, then use
+`server.sendTo(key, …)`. The registry is maintained automatically (populated in
+`onOpen`, cleaned in `onClose`) and only exists when `connectionKey` is set —
+nothing happens on the message hot path.
+
+```javascript
+import Server from '@swarmmachina/swm-core'
+
+const server = new Server({
+  port: 3000,
+  router: (ctx) => ({ ok: true }),
+  ws: {
+    enabled: true,
+    onUpgrade: (meta) => ({
+      isAllowed: true,
+      userData: { userId: meta.getQuery('userId') }
+    }),
+    // Address each connection by its user id.
+    connectionKey: (ctx) => ctx.data.userId,
+    onMessage: (ctx, message) => {
+      const { to, text } = JSON.parse(ctx.decode(message))
+
+      // Direct 1:1 message to another connection.
+      server.sendTo(to, JSON.stringify({ from: ctx.key, text }))
+    }
+  }
+})
+
+await server.listen()
+```
+
+Notes:
+
+- **The key must come from verified identity** (a session, a signed token
+  checked in `onUpgrade`) — never from an attacker-controlled value like a raw
+  query parameter. With last-write-wins semantics, anyone who can claim an
+  arbitrary key can silently take over that address and receive its 1:1
+  messages. The example above trusts `userId` only for brevity.
+- If two live connections yield the same key, the newer one wins; the older
+  socket closing will not evict the newer entry, and the displaced connection's
+  `ctx.key` is reset to `null`.
+- Keys are compared with strict `Map` identity — `42` and `'42'` are different
+  addresses; stick to one type.
+- Need the raw handle (e.g. to check backpressure via `getBufferedAmount()`)?
+  Use `server.getConnection(key)`.
+- Prefer managing your own `Map` instead? Store `ctx.ws` (identity-stable for the
+  connection) rather than `ctx`, and delete it in `onClose`.
+
+For 1-to-many fan-out (rooms, channels, broadcasts) prefer topic pub/sub
+(`ctx.subscribe` / `ctx.publish` / `server.publish`) instead of addressing
+connections individually.
 
 ## Advanced Usage
 

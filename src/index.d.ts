@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream'
+import type { WebSocket as UwsWebSocket } from 'uwebsockets.js'
 
 export type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'del' | 'patch' | 'options' | 'head' | 'any'
 
@@ -19,7 +20,11 @@ export interface Route {
   preHandler?: Handler | Handler[]
 }
 
-/** Metadata passed to `ws.onUpgrade`. */
+/**
+ * Metadata passed to `ws.onUpgrade`. Call these getters synchronously, before
+ * any `await` — the underlying request is only valid for the duration of the
+ * synchronous callback.
+ */
 export interface UpgradeMeta {
   url(): string
   ip(): string
@@ -44,6 +49,14 @@ export interface WSOptions {
   onError?: (ctx: WSContext | null, err: Error) => any
   onUpgrade?: (meta: UpgradeMeta) => UpgradeResult | Promise<UpgradeResult>
   onSubscription?: (ctx: WSContext, topic: ArrayBuffer, newCount: number, oldCount: number) => any
+  /**
+   * Optional connection key for `Server.sendTo`.
+   *
+   * Called once on open. Return `null`/`undefined` to skip registration.
+   * Duplicate keys are replaced by the newest live connection; the displaced
+   * connection's `ctx.key` resets to `null`.
+   */
+  connectionKey?: (ctx: WSContext) => string | number | null | undefined
 }
 
 export interface ServerOptions {
@@ -102,18 +115,48 @@ export class HttpContext {
   getWriteOffset(): number
 }
 
-/** Per-connection context passed to WebSocket handlers. Instances are pooled and reused. */
-export class WSContext {
-  /** User data returned from `ws.onUpgrade` (`userData` field). */
-  data: any
-  /** Raw uWebSockets.js WebSocket object. */
-  ws: any
+/**
+ * Result of a WebSocket send, mirroring uWebSockets.js `SendStatus`:
+ * `0` BACKPRESSURE (queued behind backpressure), `1` SUCCESS, `2` DROPPED
+ * (not sent — backpressure limit exceeded). Check it to react to backpressure.
+ */
+export type WSSendStatus = 0 | 1 | 2
 
-  send(data: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): number
+/**
+ * Raw uWebSockets.js WebSocket handle exposed as {@link WSContext.ws},
+ * derived from the dependency's own typings. Its identity is stable for the
+ * connection's lifetime; invalid after close.
+ */
+export type UWebSocket = UwsWebSocket<any>
+
+/**
+ * Per-connection WebSocket context.
+ *
+ * `WSContext` is reused for all callbacks of one connection and remains valid
+ * until `onClose`. It is safe across `await`, but must not be used after close.
+ *
+ * For cross-connection sends, use `connectionKey` + `Server.sendTo`, or store
+ * the raw `ws` handle and remove it on close.
+ */
+export class WSContext {
+  /** User data returned from `ws.onUpgrade`. */
+  data: any
+
+  /**
+   * Raw uWebSockets.js socket handle.
+   * Stable for the connection lifetime; invalid after close.
+   */
+  ws: UWebSocket
+
+  /** Registered connection key, or `null` when unset. */
+  readonly key: string | number | null
+
+  send(data: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): WSSendStatus
   end(code?: number, reason?: string): void
   subscribe(topic: string): boolean
   unsubscribe(topic: string): boolean
   publish(topic: string, message: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): boolean
+  decode(message: ArrayBuffer | ArrayBufferView): string
 }
 
 export default class Server {
@@ -131,6 +174,20 @@ export default class Server {
   publish(topic: string, message: string | ArrayBuffer | Uint8Array | Buffer, isBinary?: boolean): boolean
   /** Number of subscribers for a topic. */
   getSubscribersCount(topic: string): number
+  /**
+   * Send a message directly to the single connection registered under `key`
+   * (from `ws.connectionKey`). For 1:1 messaging where topic pub/sub is overkill.
+   * @returns `true` if a live connection was found and the message was not
+   * dropped; `false` when the key is unknown or uWS reported DROPPED
+   * (backpressure limit exceeded).
+   */
+  sendTo(key: string | number, message: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): boolean
+  /** Whether a live connection is registered under `key`. */
+  hasConnection(key: string | number): boolean
+  /** Raw registered socket, or `undefined`. Escape hatch for low-level control. */
+  getConnection(key: string | number): UWebSocket | undefined
+  /** Number of registered addressable connections. */
+  readonly connectionCount: number
 }
 
 export interface CorsOptions {

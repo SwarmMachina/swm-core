@@ -315,6 +315,24 @@ describe('HttpContext', () => {
       strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
     })
 
+    test('header(name) — lowercases the lookup name (uWS stores header names lowercase)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { authorization: 'Bearer abc' } })
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.header('Authorization'), 'Bearer abc')
+    })
+
+    test('query()/param()/header() should return a safe default instead of throwing when req is null', () => {
+      const ctx = new HttpContext(null)
+
+      strictEqual(ctx.query('id'), undefined)
+      strictEqual(ctx.param(0), undefined)
+      strictEqual(ctx.header('content-type'), '')
+    })
+
     test('cacheHeaders() preloads headers and avoids getHeader()', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -524,14 +542,15 @@ describe('HttpContext', () => {
       strictEqual(ctx.getStatus(null), STATUS_TEXT[500])
     })
 
-    test('getStatus should return 500 for unknown status codes', () => {
+    test('getStatus should return "<code> Unknown" for an unlisted but explicit status code', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
 
       ctx.reset(res, req)
 
-      strictEqual(ctx.getStatus(599), '500 Internal Server Error')
+      strictEqual(ctx.getStatus(599), '599 Unknown')
+      strictEqual(ctx.getStatus(431), '431 Unknown')
     })
   })
 
@@ -557,6 +576,19 @@ describe('HttpContext', () => {
       throws(() => ctx.setHeader(123, '1'), {
         name: 'TypeError',
         message: 'Header name must be a string'
+      })
+    })
+
+    test('setHeader should reject a value containing CRLF (header injection)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.setHeader('x-name', 'ok\r\nSet-Cookie: evil=1'), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
       })
     })
 
@@ -599,6 +631,19 @@ describe('HttpContext', () => {
         ['set-cookie', 'b=2; Path=/refresh']
       ])
       strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('appendHeader should reject a value containing CRLF (header injection)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.appendHeader('x-name', 'ok\r\nSet-Cookie: evil=1'), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
+      })
     })
 
     test('appendHeader should throw TypeError for non-string header name', () => {
@@ -708,6 +753,32 @@ describe('HttpContext', () => {
         true
       )
       strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeaders should reject a scalar value containing CRLF (header injection)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.setHeaders({ 'x-name': 'ok\r\nSet-Cookie: evil=1' }), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
+      })
+    })
+
+    test('setHeaders should reject a CRLF value inside a string[] header', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.setHeaders({ 'set-cookie': ['a=1; Path=/', 'ok\r\nSet-Cookie: evil=1'] }), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
+      })
     })
 
     test('setHeader before sendJson should not warn and header should be present', () => {

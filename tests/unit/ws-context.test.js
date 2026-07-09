@@ -6,7 +6,7 @@ import WSContext from '../../src/ws-context.js'
 
 describe('WSContext', () => {
   describe('constructor', () => {
-    test('should save pool and initialize server/ws/data to null', () => {
+    test('should save pool and initialize server/ws/data/key to null', () => {
       const pool = { release: () => {} }
       const ctx = new WSContext(pool)
 
@@ -14,6 +14,7 @@ describe('WSContext', () => {
       strictEqual(ctx.server, null)
       strictEqual(ctx.ws, null)
       strictEqual(ctx.data, null)
+      strictEqual(ctx.key, null)
     })
 
     test('should handle null pool', () => {
@@ -80,7 +81,7 @@ describe('WSContext', () => {
   })
 
   describe('clear', () => {
-    test('should reset server/ws/data to null but keep pool', () => {
+    test('should reset server/ws/data/key to null but keep pool', () => {
       const pool = { release: () => {} }
       const server = { publish: () => {} }
       const ws = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
@@ -89,6 +90,7 @@ describe('WSContext', () => {
       const ctx = new WSContext(pool)
 
       ctx.reset(server, ws, userData)
+      ctx.key = 'user-789'
 
       ctx.clear()
 
@@ -96,6 +98,7 @@ describe('WSContext', () => {
       strictEqual(ctx.server, null)
       strictEqual(ctx.ws, null)
       strictEqual(ctx.data, null)
+      strictEqual(ctx.key, null)
     })
 
     test('should work on already cleared context', () => {
@@ -999,6 +1002,49 @@ describe('WSContext', () => {
       strictEqual(publishCalls[1].topic, 't')
       strictEqual(publishCalls[1].msg, uint8Array)
       strictEqual(publishCalls[1].isBinary, undefined)
+    })
+  })
+
+  describe('decode', () => {
+    test('should decode an ArrayBuffer to a UTF-8 string', () => {
+      const ctx = new WSContext({ release: () => {} })
+      const bytes = new TextEncoder().encode('héllo')
+
+      strictEqual(ctx.decode(bytes.buffer), 'héllo')
+    })
+
+    test('should decode an ArrayBufferView (Uint8Array) to a UTF-8 string', () => {
+      const ctx = new WSContext({ release: () => {} })
+      const bytes = new TextEncoder().encode('world')
+
+      strictEqual(ctx.decode(bytes), 'world')
+    })
+
+    test('should not require reset (pure helper, independent of ws/server)', () => {
+      const ctx = new WSContext(null)
+
+      strictEqual(ctx.decode(new TextEncoder().encode('x')), 'x')
+    })
+
+    test('should decode a non-Uint8Array view via its underlying bytes', () => {
+      const ctx = new WSContext(null)
+      const bytes = new TextEncoder().encode('hi!!')
+
+      strictEqual(ctx.decode(new Uint16Array(bytes.buffer, 0, 2)), 'hi!!')
+    })
+
+    test('should decode a DataView via its underlying bytes', () => {
+      const ctx = new WSContext(null)
+      const bytes = new TextEncoder().encode('world')
+
+      strictEqual(ctx.decode(new DataView(bytes.buffer)), 'world')
+    })
+
+    test('should respect byteOffset/length of a subarray view', () => {
+      const ctx = new WSContext(null)
+      const bytes = new TextEncoder().encode('xxhello')
+
+      strictEqual(ctx.decode(bytes.subarray(2)), 'hello')
     })
   })
 })

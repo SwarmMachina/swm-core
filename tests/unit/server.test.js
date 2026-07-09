@@ -365,6 +365,44 @@ describe('Server', () => {
       strictEqual(routeCalls[2].path, '/p')
     })
 
+    test('should pre-cache route params so async handlers see them after await, not a stale req', async () => {
+      let paramById
+      let paramByIndex
+
+      const routes = [
+        {
+          method: 'get',
+          path: '/users/:id',
+          handler: async (ctx) => {
+            await Promise.resolve()
+            paramById = ctx.param('id')
+            paramByIndex = ctx.param(0)
+          }
+        }
+      ]
+      const server = new Server({ routes })
+
+      await server.listen()
+
+      const mockApp = getCurrentMockApp()
+      const routeCall = mockApp.calls.find((c) => c.method !== 'ws')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setParameter(0, 'sync-id')
+
+      routeCall.handler(res, req)
+
+      // Real uWS invalidates `req` once the synchronous callback returns;
+      // simulate that by mutating the value a real req could no longer hold.
+      req.setParameter(0, 'STALE-after-return')
+
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(paramById, 'sync-id')
+      strictEqual(paramByIndex, 'sync-id')
+    })
+
     test('should throw on invalid HTTP method', async () => {
       const routes = [{ method: 'trace', path: '/x', handler: () => {} }]
       const server = new Server({ routes })
@@ -391,6 +429,38 @@ describe('Server', () => {
           return err.name === 'TypeError' && err.message === 'Invalid Path in route, method: get, path: x'
         }
       )
+    })
+
+    test('should not finalize the context or skip the chain when a preHandler starts streaming', async () => {
+      let mainHandlerCalled = false
+
+      const routes = [
+        {
+          method: 'get',
+          path: '/x',
+          preHandler: (ctx) => {
+            ctx.startStreaming(200)
+          },
+          handler: (ctx) => {
+            mainHandlerCalled = true
+            ctx.end('done')
+          }
+        }
+      ]
+      const server = new Server({ routes })
+
+      await server.listen()
+
+      const mockApp = getCurrentMockApp()
+      const routeCall = mockApp.calls.find((c) => c.method !== 'ws')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      routeCall.handler(res, req)
+
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(mainHandlerCalled, true)
     })
 
     test('should throw on invalid preHandler (not a function)', async () => {
@@ -689,6 +759,339 @@ describe('Server', () => {
       const ws = createMockWebSocket()
 
       server.deleteWsContext(ws)
+    })
+  })
+
+  describe('WebSocket connection registry (connectionKey / sendTo)', () => {
+    const noise = new ArrayBuffer(0)
+
+    test('should throw when connectionKey is not a function', () => {
+      throws(() => new Server({ router: () => {}, ws: { enabled: true, connectionKey: 'nope' } }), {
+        name: 'TypeError',
+        message: 'ws.connectionKey must be a function'
+      })
+    })
+
+    test('should throw for invalid connectionKey even when ws is disabled', () => {
+      throws(() => new Server({ router: () => {}, ws: { enabled: false, connectionKey: 'nope' } }), {
+        name: 'TypeError',
+        message: 'ws.connectionKey must be a function'
+      })
+    })
+
+    test('should auto-enable WS when connectionKey is the only ws option', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      strictEqual(server.wsEnabled, true)
+
+      server.onOpen(ws)
+
+      strictEqual(server.hasConnection('u1'), true)
+    })
+
+    test('should not register a connection that connectionKey closed synchronously', () => {
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          connectionKey: (ctx) => {
+            const key = ctx.data.userId
+
+            ctx.end(4001, 'rejected')
+
+            return key
+          }
+        }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+      // Real uWS fires the close callback synchronously inside end()
+      const plainEnd = ws.end.bind(ws)
+
+      ws.end = (code, reason) => {
+        plainEnd(code, reason)
+        server.onClose(ws, code, noise)
+      }
+
+      server.onOpen(ws)
+
+      strictEqual(server.connectionCount, 0)
+      strictEqual(server.hasConnection('u1'), false)
+    })
+
+    test('should not invoke onOpen when connectionKey closed the connection', () => {
+      const opened = []
+      const closed = []
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          connectionKey: (ctx) => {
+            ctx.end(4001, 'rejected')
+            return 'u1'
+          },
+          onOpen: (ctx) => opened.push(ctx),
+          onClose: () => closed.push(1)
+        }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+      const plainEnd = ws.end.bind(ws)
+
+      ws.end = (code, reason) => {
+        plainEnd(code, reason)
+        server.onClose(ws, code, noise)
+      }
+
+      server.onOpen(ws)
+
+      strictEqual(opened.length, 0)
+      strictEqual(closed.length, 1)
+    })
+
+    test('should not register when connectionKey returns NaN', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: () => NaN }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      strictEqual(server.connectionCount, 0)
+      strictEqual(server.getWsContext(ws).key, null)
+    })
+
+    test('should not maintain a registry when connectionKey is unset', () => {
+      const server = new Server({ router: () => {}, ws: { enabled: true } })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      strictEqual(server.connectionCount, 0)
+      strictEqual(server.hasConnection('u1'), false)
+      strictEqual(server.sendTo('u1', 'hi'), false)
+    })
+
+    test('should register a connection on open and expose it via the registry API', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      strictEqual(server.connectionCount, 1)
+      strictEqual(server.hasConnection('u1'), true)
+      strictEqual(server.getConnection('u1'), ws)
+      strictEqual(server.getWsContext(ws).key, 'u1')
+    })
+
+    test('should send directly to a registered connection', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      strictEqual(server.sendTo('u1', 'hello'), true)
+
+      const sent = ws.calls.filter((c) => c.method === 'send')
+
+      strictEqual(sent.length, 1)
+      strictEqual(sent[0].data, 'hello')
+      strictEqual(sent[0].isBinary, false)
+    })
+
+    test('should default isBinary from payload type in sendTo', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      const buf = Buffer.from('x')
+
+      server.sendTo('u1', buf)
+
+      const sent = ws.calls.filter((c) => c.method === 'send')
+
+      strictEqual(sent[0].data, buf)
+      strictEqual(sent[0].isBinary, true)
+    })
+
+    test('should return false from sendTo when uWS reports the message dropped', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      ws.send = () => 2 // uWS DROPPED: backpressure limit exceeded, not sent
+
+      server.onOpen(ws)
+
+      strictEqual(server.sendTo('u1', 'x'), false)
+    })
+
+    test('should return false from sendTo/hasConnection for unknown key', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
+      })
+
+      strictEqual(server.sendTo('missing', 'x'), false)
+      strictEqual(server.hasConnection('missing'), false)
+      strictEqual(server.getConnection('missing'), undefined)
+    })
+
+    test('should not register when connectionKey returns nullish', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: () => null }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      strictEqual(server.connectionCount, 0)
+      strictEqual(server.getWsContext(ws).key, null)
+    })
+
+    test('should route connectionKey errors to onError and skip registration', () => {
+      const errors = []
+      const boom = new Error('key boom')
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          connectionKey: () => {
+            throw boom
+          },
+          onError: (ctx, err) => errors.push(err)
+        }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      strictEqual(server.connectionCount, 0)
+      strictEqual(errors.length, 1)
+      strictEqual(errors[0], boom)
+    })
+
+    test('should unregister before onClose runs so sendTo cannot hit the closing socket', () => {
+      let sendToResult = null
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          connectionKey: (ctx) => ctx.data.userId,
+          onClose: () => {
+            sendToResult = server.sendTo('u1', 'bye')
+          }
+        }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+      server.onClose(ws, 1000, noise)
+
+      strictEqual(sendToResult, false)
+      strictEqual(server.connectionCount, 0)
+    })
+
+    test('should unregister during async onClose before its promise settles', async () => {
+      let resolveClose = null
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          connectionKey: (ctx) => ctx.data.userId,
+          onClose: () =>
+            new Promise((resolve) => {
+              resolveClose = resolve
+            })
+        }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+      server.onClose(ws, 1000, noise)
+
+      // close promise is still pending — the registry must already be clean
+      strictEqual(server.hasConnection('u1'), false)
+      strictEqual(server.sendTo('u1', 'x'), false)
+
+      resolveClose()
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(server.connectionCount, 0)
+    })
+
+    test('should remove the connection from the registry on close', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+      strictEqual(server.connectionCount, 1)
+
+      server.onClose(ws, 1000, noise)
+
+      strictEqual(server.connectionCount, 0)
+      strictEqual(server.hasConnection('u1'), false)
+    })
+
+    test('should clear ctx.key of the displaced connection on same-key reconnect', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
+      })
+      const wsOld = createMockWebSocket({ userId: 'u1' })
+      const wsNew = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(wsOld)
+      server.onOpen(wsNew)
+
+      strictEqual(server.getWsContext(wsOld).key, null)
+      strictEqual(server.getWsContext(wsNew).key, 'u1')
+    })
+
+    test('should let a reconnect with the same key win, and not be evicted by the old socket closing', () => {
+      const server = new Server({
+        router: () => {},
+        ws: { enabled: true, connectionKey: (ctx) => ctx.data.userId }
+      })
+      const wsOld = createMockWebSocket({ userId: 'u1' })
+      const wsNew = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(wsOld)
+      server.onOpen(wsNew)
+
+      // newer connection owns the key
+      strictEqual(server.getConnection('u1'), wsNew)
+      strictEqual(server.connectionCount, 1)
+
+      // old socket closing must not evict the newer connection
+      server.onClose(wsOld, 1000, noise)
+
+      strictEqual(server.getConnection('u1'), wsNew)
+      strictEqual(server.connectionCount, 1)
+
+      // closing the newer socket clears it
+      server.onClose(wsNew, 1000, noise)
+
+      strictEqual(server.connectionCount, 0)
     })
   })
 
@@ -1001,6 +1404,48 @@ describe('Server', () => {
       strictEqual(errorErr, error)
     })
 
+    test('should snapshot sec-websocket-* headers synchronously, not read them after an async onUpgrade resolves', async () => {
+      let resolveFn
+      const upgradePromise = new Promise((resolve) => {
+        resolveFn = resolve
+      })
+
+      const server = new Server({
+        router: () => {},
+        ws: {
+          enabled: true,
+          onUpgrade: () => upgradePromise
+        }
+      })
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      req.setHeader('sec-websocket-key', 'sync-key')
+      req.setHeader('sec-websocket-protocol', 'sync-protocol')
+      req.setHeader('sec-websocket-extensions', 'sync-extensions')
+      const context = {}
+
+      server.onUpgrade(res, req, context)
+
+      // Real uWS invalidates `req` once the synchronous handler call returns;
+      // simulate that by mutating the headers a real req could no longer hold.
+      req.setHeader('sec-websocket-key', 'STALE-after-return')
+      req.setHeader('sec-websocket-protocol', 'STALE-after-return')
+      req.setHeader('sec-websocket-extensions', 'STALE-after-return')
+
+      resolveFn({ isAllowed: true, userData: {} })
+
+      await Promise.resolve()
+
+      const upgradeCall = res.calls.find((c) => c.method === 'upgrade')
+
+      strictEqual(upgradeCall !== undefined, true)
+      strictEqual(upgradeCall.secKey, 'sync-key')
+      strictEqual(upgradeCall.protocol, 'sync-protocol')
+      strictEqual(upgradeCall.extensions, 'sync-extensions')
+    })
+
     test('should not upgrade when aborted before async resolve', async () => {
       let resolveFn
       const upgradePromise = new Promise((resolve) => {
@@ -1089,6 +1534,38 @@ describe('Server', () => {
 
       strictEqual(onAbortedCall !== undefined, true)
       strictEqual(typeof onAbortedCall.callback, 'function')
+    })
+
+    test('aborted async request must not deliver its late result to a reused context', async () => {
+      const server = new Server({ router: () => 'ok' })
+
+      let resolveFirst = null
+      const res1 = createMockHttpResponse()
+      const req1 = createMockHttpRequest()
+
+      server.handleWithContext(
+        res1,
+        req1,
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          })
+      )
+
+      // client 1 disconnects while its handler is still awaiting
+      res1.triggerAborted()
+
+      // a new request acquires the released context instance from the pool
+      const res2 = createMockHttpResponse()
+      const req2 = createMockHttpRequest()
+
+      server.handleWithContext(res2, req2, () => new Promise(() => {}))
+
+      // the late result of the aborted request must go nowhere
+      resolveFirst('secret for client 1')
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(res2.isEnded(), false)
     })
 
     test('should sendError and safeHttpError when handler throws (sync), and finalize when not streaming', async () => {

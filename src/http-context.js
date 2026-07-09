@@ -36,7 +36,14 @@ export default class HttpContext {
   }
 
   onResolve = (result) => {
+    this.asyncPending = false
+
     if (this.done || this.aborted) {
+      if (this.releasePending) {
+        this.releasePending = false
+        this.release()
+      }
+
       return
     }
 
@@ -62,7 +69,14 @@ export default class HttpContext {
   }
 
   onReject = (err) => {
+    this.asyncPending = false
+
     if (this.done || this.aborted) {
+      if (this.releasePending) {
+        this.releasePending = false
+        this.release()
+      }
+
       return
     }
 
@@ -96,6 +110,8 @@ export default class HttpContext {
     this.aborted = false
     this.streaming = false
     this.streamingStarted = false
+    this.asyncPending = false
+    this.releasePending = false
     this.onWritableCallback = null
   }
 
@@ -116,6 +132,8 @@ export default class HttpContext {
     this.aborted = false
     this.streaming = false
     this.streamingStarted = false
+    this.asyncPending = false
+    this.releasePending = false
     this.onWritableCallback = null
 
     this.#statusOverride = null
@@ -151,6 +169,8 @@ export default class HttpContext {
     this.aborted = false
     this.streaming = false
     this.streamingStarted = false
+    this.asyncPending = false
+    this.releasePending = false
     this.onWritableCallback = null
 
     this.#statusOverride = null
@@ -340,6 +360,10 @@ export default class HttpContext {
       return undefined
     }
 
+    if (!this.req) {
+      return undefined
+    }
+
     const value = this.req.getQuery(name)
 
     this.#query[name] = value
@@ -355,6 +379,10 @@ export default class HttpContext {
       return this.#params[i]
     }
 
+    if (!this.req) {
+      return undefined
+    }
+
     const value = this.req.getParameter(i)
 
     this.#params[i] = value
@@ -362,21 +390,39 @@ export default class HttpContext {
   }
 
   /**
+   * @param {string[]} [names]
+   */
+  cacheParams(names) {
+    if (!names || !this.req) {
+      return
+    }
+
+    for (let i = 0; i < names.length; i++) {
+      const value = this.req.getParameter(i)
+
+      this.#params[i] = value
+      this.#params[names[i]] = value
+    }
+  }
+
+  /**
    * @param {string} name
    * @returns {string}
    */
   header(name) {
-    if (name in this.#headers) {
-      return this.#headers[name]
+    const headerName = name.toLowerCase()
+
+    if (headerName in this.#headers) {
+      return this.#headers[headerName]
     }
 
-    if (this.#headersCached) {
+    if (this.#headersCached || !this.req) {
       return ''
     }
 
-    const value = this.req.getHeader(name)
+    const value = this.req.getHeader(headerName)
 
-    this.#headers[name] = value
+    this.#headers[headerName] = value
     return value
   }
 
@@ -419,7 +465,11 @@ export default class HttpContext {
   getStatus(status) {
     const finalStatus = this.#statusOverride !== null ? this.#statusOverride : status
 
-    return STATUS_TEXT[finalStatus] || STATUS_TEXT[500]
+    if (finalStatus == null) {
+      return STATUS_TEXT[500]
+    }
+
+    return STATUS_TEXT[finalStatus] || `${finalStatus} Unknown`
   }
 
   /**
@@ -440,10 +490,23 @@ export default class HttpContext {
       return this
     }
 
+    const headerValue = `${value}`
+
+    this.#assertNoCrlf(headerValue)
+
     const headerKey = key.toLowerCase()
 
-    this.#pendingHeaders.set(headerKey, [key, `${value}`])
+    this.#pendingHeaders.set(headerKey, [key, headerValue])
     return this
+  }
+
+  /**
+   * @param {string} value
+   */
+  #assertNoCrlf(value) {
+    if (/[\r\n]/.test(value)) {
+      throw new TypeError('Header value must not contain CR or LF')
+    }
   }
 
   /**
@@ -464,8 +527,11 @@ export default class HttpContext {
       return this
     }
 
-    const headerKey = key.toLowerCase()
     const headerValue = `${value}`
+
+    this.#assertNoCrlf(headerValue)
+
+    const headerKey = key.toLowerCase()
     const pendingHeader = this.#pendingHeaders.get(headerKey)
 
     if (!pendingHeader) {
@@ -518,6 +584,8 @@ export default class HttpContext {
     if (!Array.isArray(value)) {
       const headerValue = `${value}`
 
+      this.#assertNoCrlf(headerValue)
+
       if (!append) {
         this.#pendingHeaders.set(headerKey, [key, headerValue])
         return
@@ -562,6 +630,8 @@ export default class HttpContext {
       }
 
       const headerValue = `${entry}`
+
+      this.#assertNoCrlf(headerValue)
 
       if (!pendingHeader) {
         pendingHeader = [key, headerValue]

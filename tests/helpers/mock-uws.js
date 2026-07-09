@@ -192,6 +192,20 @@ export function createMockHttpResponse() {
         abortedCallback()
       }
     },
+    onWritable(cb) {
+      calls.push({ method: 'onWritable', callback: cb })
+    },
+    getWriteOffset() {
+      return 0
+    },
+    tryEnd(chunk) {
+      calls.push({ method: 'tryEnd', chunk })
+      return [true, true]
+    },
+    write(chunk) {
+      calls.push({ method: 'write', chunk })
+      return true
+    },
     getRemoteAddressAsText() {
       return undefined
     },

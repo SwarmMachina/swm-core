@@ -7,6 +7,7 @@ export default class WSContext {
     this.server = null
     this.ws = null
     this.data = null
+    this.key = null
   }
 
   /**
@@ -28,6 +29,20 @@ export default class WSContext {
     this.server = null
     this.ws = null
     this.data = null
+    // noinspection JSConstantReassignment
+    this.key = null
+  }
+
+  /**
+   * @param {ArrayBuffer | ArrayBufferView} message
+   * @returns {string}
+   */
+  decode(message) {
+    if (ArrayBuffer.isView(message)) {
+      return Buffer.from(message.buffer, message.byteOffset, message.byteLength).toString()
+    }
+
+    return Buffer.from(message).toString()
   }
 
   /**
