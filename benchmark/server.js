@@ -62,43 +62,55 @@ function sendReady(port) {
 }
 
 /**
+ * @param {number} port
+ * @param {'uws'|'node'} backend
+ */
+async function runCore(port, backend) {
+  const { default: Server } = await import('../src/index.js')
+
+  const router = async (ctx) => {
+    const method = ctx.method()
+    const url = ctx.url()
+
+    if (method === 'get' && url === '/base') {
+      return TESTS.get('base').payload
+    }
+
+    if (method === 'get' && url === '/headers') {
+      return sendCoreHeadersBench(ctx)
+    }
+
+    if (method === 'post' && url === '/base') {
+      return await ctx.json()
+    }
+
+    ctx.status(404)
+    return 'Not Found'
+  }
+
+  const server = new Server({ port, onHttpError: console.error, router, backend })
+
+  await server.listen()
+  sendReady(server.port)
+
+  const shutdown = async () => server.shutdown()
+
+  process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
+
+  process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+}
+
+/**
  *
  */
 async function main() {
   if (fw === 'core') {
-    const { default: Server } = await import('../src/index.js')
+    await runCore(port, 'uws')
+    return
+  }
 
-    const router = async (ctx) => {
-      const method = ctx.method()
-      const url = ctx.url()
-
-      if (method === 'get' && url === '/base') {
-        return TESTS.get('base').payload
-      }
-
-      if (method === 'get' && url === '/headers') {
-        return sendCoreHeadersBench(ctx)
-      }
-
-      if (method === 'post' && url === '/base') {
-        return await ctx.json()
-      }
-
-      ctx.status(404)
-      return 'Not Found'
-    }
-
-    const server = new Server({ port, onHttpError: console.error, router })
-
-    await server.listen()
-    sendReady(server.port)
-
-    const shutdown = async () => server.shutdown()
-
-    process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-
-    process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
-
+  if (fw === 'core-node') {
+    await runCore(port, 'node')
     return
   }
 
