@@ -42,6 +42,27 @@ addon, which imposes a few constraints on the install/runtime environment:
   (`uNetworking/uWebSockets.js#v20.67.0`), so `npm install` needs outbound access
   to GitHub. Offline/air-gapped installs require a pre-populated cache or mirror.
 
+## Backends
+
+The server runs on a selectable transport backend, chosen with the `backend`
+option:
+
+| `backend`         | Transport      | Status                                                     |
+| ----------------- | -------------- | ---------------------------------------------------------- |
+| `'uws'` (default) | uWebSockets.js | Native turbo engine. HTTP + WebSocket. Highest throughput. |
+| `'node'`          | `node:http`    | Experimental, zero-dependency. HTTP only for now.          |
+
+```js
+// Zero-dependency node:http backend (no native addon on the HTTP path)
+const server = new Server({ backend: 'node', port: 6000, router })
+```
+
+The `'node'` backend serves the full HTTP API without the native uWS addon, so it
+is not subject to the glibc/architecture/prebuilt constraints listed above.
+WebSocket is not yet implemented on it: passing `ws` options together with
+`backend: 'node'` transparently falls back to the `'uws'` backend, which still
+requires the native addon.
+
 ## Quick Start
 
 ### Basic HTTP Server

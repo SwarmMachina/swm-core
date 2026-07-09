@@ -70,6 +70,13 @@ export interface ServerOptions {
   /** Max request body size in MB (1-64). @default 1 */
   maxBodySize?: number
   ws?: WSOptions
+  /**
+   * Transport backend. `'uws'` (default) is the native uWebSockets.js turbo
+   * engine; `'node'` is the zero-dependency node:http backend (HTTP only —
+   * enabling WebSocket options currently falls back to `'uws'`).
+   * @default 'uws'
+   */
+  backend?: 'uws' | 'node'
 }
 
 /** Per-request context passed to HTTP handlers. Instances are pooled and reused. */
@@ -163,6 +170,8 @@ export default class Server {
   constructor(options: ServerOptions)
 
   readonly port: number
+  /** The selected transport backend. */
+  readonly backend: 'uws' | 'node'
 
   /** Start the server and begin accepting connections. */
   listen(): Promise<this>
