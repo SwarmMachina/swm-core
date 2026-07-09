@@ -130,3 +130,32 @@ jobs:
         with:
           name: compare-ws
           path: benchmark/profiles/compare-ci/
+
+  autobahn:
+    runs-on: [self-hosted, Linux, bench]
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Autobahn RFC 6455 conformance (node backend)
+        run: npm run test:autobahn
+
+      - name: Upload Autobahn report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report
+          path: tests/autobahn/reports/

@@ -47,21 +47,22 @@ addon, which imposes a few constraints on the install/runtime environment:
 The server runs on a selectable transport backend, chosen with the `backend`
 option:
 
-| `backend`         | Transport      | Status                                                     |
-| ----------------- | -------------- | ---------------------------------------------------------- |
-| `'uws'` (default) | uWebSockets.js | Native turbo engine. HTTP + WebSocket. Highest throughput. |
-| `'node'`          | `node:http`    | Experimental, zero-dependency. HTTP only for now.          |
+| `backend`         | Transport      | Status                                                            |
+| ----------------- | -------------- | ----------------------------------------------------------------- |
+| `'uws'` (default) | uWebSockets.js | Native turbo engine. HTTP + WebSocket. Highest throughput.        |
+| `'node'`          | `node:http`    | Experimental, zero-dependency. HTTP + WebSocket (no compression). |
 
 ```js
-// Zero-dependency node:http backend (no native addon on the HTTP path)
+// Zero-dependency node:http backend (no native addon)
 const server = new Server({ backend: 'node', port: 6000, router })
 ```
 
-The `'node'` backend serves the full HTTP API without the native uWS addon, so it
-is not subject to the glibc/architecture/prebuilt constraints listed above.
-WebSocket is not yet implemented on it: passing `ws` options together with
-`backend: 'node'` transparently falls back to the `'uws'` backend, which still
-requires the native addon.
+The `'node'` backend serves the full HTTP and WebSocket API on `node:http` plus a
+pure-JS RFC 6455 implementation — no native addon, so it is not subject to the
+glibc/architecture/prebuilt constraints listed above. It does not implement the
+`permessage-deflate` compression extension. WebSocket conformance is verified
+against the [Autobahn TestSuite](https://github.com/crossbario/autobahn-testsuite)
+(`npm run test:autobahn`, requires docker).
 
 ## Quick Start
 

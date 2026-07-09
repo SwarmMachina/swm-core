@@ -1,0 +1,12 @@
+{
+  "outdir": "/reports",
+  "servers": [
+    {
+      "agent": "swm-core-node",
+      "url": "ws://host.docker.internal:9001"
+    }
+  ],
+  "cases": ["*"],
+  "exclude-cases": ["12.*", "13.*"],
+  "exclude-agent-cases": {}
+}
