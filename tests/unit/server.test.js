@@ -274,6 +274,51 @@ describe('Server', () => {
     })
   })
 
+  describe('backend selection', () => {
+    test('should default to the uws backend', () => {
+      const server = new Server({ router: () => {} })
+
+      strictEqual(server.backend, 'uws')
+    })
+
+    test('should accept the node backend', () => {
+      const server = new Server({ router: () => {}, backend: 'node' })
+
+      strictEqual(server.backend, 'node')
+    })
+
+    test('should throw on an unknown backend', () => {
+      throws(() => new Server({ router: () => {}, backend: 'bogus' }), {
+        name: 'TypeError',
+        message: "backend must be 'uws' or 'node'"
+      })
+    })
+
+    test('should fall back to uws when the node backend is combined with WebSocket options', async () => {
+      const server = new Server({
+        router: () => {},
+        backend: 'node',
+        ws: { onMessage: () => {} }
+      })
+
+      strictEqual(server.wsEnabled, true)
+
+      await server.listen()
+
+      // Falling back means it went through the uws App() path (the mock),
+      // not node:http — proven by a live mock app being created.
+      strictEqual(getCurrentMockApp() !== null, true)
+      strictEqual(server.socket !== null, true)
+    })
+
+    test('should load the backend lazily via listen(), not in the constructor', () => {
+      // Constructing must not touch the uws module at all.
+      new Server({ router: () => {} })
+
+      strictEqual(getCurrentMockApp(), null)
+    })
+  })
+
   describe('listen()', () => {
     test('should register router handler with app.any', async () => {
       const router = () => {}

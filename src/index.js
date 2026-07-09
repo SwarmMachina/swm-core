@@ -1,4 +1,3 @@
-import { App, us_listen_socket_close } from 'uwebsockets.js'
 import HttpContext from './http-context.js'
 
 import WSContext from './ws-context.js'
@@ -9,6 +8,21 @@ export { default as cors } from './cors.js'
 export { default as serveStatic } from './serve-static.js'
 
 const isPromise = (v) => v != null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function'
+
+/**
+ * Resolve a backend module to the uWS-shaped surface `{ App, us_listen_socket_close }`.
+ * @param {'uws'|'node'} name
+ * @returns {Promise<{App: Function, us_listen_socket_close: Function}>}
+ */
+async function loadBackend(name) {
+  if (name === 'node') {
+    return import('./backends/node-http/index.js')
+  }
+
+  const mod = await import('./backends/uws.js')
+
+  return mod.load()
+}
 
 /**
  * @typedef {object} WSOptions
@@ -52,6 +66,10 @@ export default class Server {
   // only when `ws.connectionKey` is configured. Backs server.sendTo().
   #connections = new Map()
 
+  // Resolved backend module `{ App, us_listen_socket_close }`, loaded lazily on
+  // first listen(). Null until then.
+  #backend = null
+
   /**
    * @param {object} opt
    * @param {(ctx: HttpContext) => any|Promise<any>} [opt.router] - Universal router function (micro like API)
@@ -60,8 +78,9 @@ export default class Server {
    * @param {number} [opt.port]
    * @param {number} [opt.maxBodySize] - in mb
    * @param {WSOptions} [opt.ws]
+   * @param {'uws'|'node'} [opt.backend] - Transport backend. 'uws' (default) is the native turbo engine; 'node' is the zero-dependency node:http backend.
    */
-  constructor({ router, routes, onHttpError, port = 6000, maxBodySize = 1, ws }) {
+  constructor({ router, routes, onHttpError, port = 6000, maxBodySize = 1, ws, backend = 'uws' }) {
     if (router && routes) {
       throw new TypeError('Cannot use both "router" and "routes" options. Choose one.')
     }
@@ -90,6 +109,11 @@ export default class Server {
       throw new TypeError('ws.connectionKey must be a function')
     }
 
+    if (backend !== 'uws' && backend !== 'node') {
+      throw new TypeError("backend must be 'uws' or 'node'")
+    }
+
+    this.backend = backend
     this.port = port
     this.router = router || null
     this.routes = routes || null
@@ -156,8 +180,31 @@ export default class Server {
       return this.#listenPromise
     }
 
+    const promise = this.#doListen()
+
+    this.#listenPromise = promise
+    // Keep listen() retryable after a setup/bind failure, matching the previous
+    // synchronous behavior where a throw left #listenPromise unset.
+    promise.catch(() => {
+      if (this.#listenPromise === promise) {
+        this.#listenPromise = null
+      }
+    })
+
+    return promise
+  }
+
+  /**
+   * @returns {Promise<Server>}
+   */
+  async #doListen() {
     if (!this.app) {
-      this.app = App()
+      // WebSocket support currently lives only on the uws backend; the node
+      // backend silently falls back to uws when ws is enabled.
+      const effectiveBackend = this.wsEnabled && this.backend === 'node' ? 'uws' : this.backend
+
+      this.#backend = await loadBackend(effectiveBackend)
+      this.app = this.#backend.App()
 
       if (this.useNativeRouting) {
         for (const route of this.routes) {
@@ -196,7 +243,7 @@ export default class Server {
       }
     }
 
-    this.#listenPromise = new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       this.app.listen(this.port, (socket) => {
         this.#listenPromise = null
 
@@ -208,8 +255,6 @@ export default class Server {
         this.socket = socket
       })
     })
-
-    return this.#listenPromise
   }
 
   /**
@@ -810,7 +855,7 @@ export default class Server {
 
   stopAccepting() {
     if (this.socket) {
-      us_listen_socket_close(this.socket)
+      this.#backend?.us_listen_socket_close(this.socket)
       this.socket = null
     }
   }
