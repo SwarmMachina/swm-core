@@ -10,8 +10,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_TESTS = ['base', 'headers', 'post-base']
 const HTTP_FRAMEWORKS = 'core,core-node,micro,fastify,express'
 const HTTP_ORDER = ['core', 'core-node', 'micro', 'fastify', 'express']
-const WS_FRAMEWORKS = 'core,ws'
-const WS_ORDER = ['core', 'ws']
+const WS_FRAMEWORKS = 'core,core-node,ws'
+const WS_ORDER = ['core', 'core-node', 'ws']
 
 /**
  * @param {string} name

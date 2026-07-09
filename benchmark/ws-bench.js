@@ -14,7 +14,7 @@ import { processV8Profile } from './helpers/v8-prof-run.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const KNOWN_FRAMEWORKS = new Set(['core', 'ws'])
+const KNOWN_FRAMEWORKS = new Set(['core', 'core-node', 'ws'])
 
 /**
  * @param {string[]} argv

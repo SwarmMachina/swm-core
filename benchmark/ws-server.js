@@ -45,31 +45,44 @@ function sendReady(port) {
 }
 
 /**
+ * @param {number} port
+ * @param {'uws'|'node'} backend
+ */
+async function runCore(port, backend) {
+  const { default: Server } = await import('../src/index.js')
+
+  const server = new Server({
+    port,
+    backend,
+    onHttpError: console.error,
+    router: () => 'ok',
+    ws: {
+      enabled: true,
+      onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
+    }
+  })
+
+  await server.listen()
+  sendReady(server.port)
+
+  const shutdown = async () => server.shutdown()
+
+  process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
+
+  process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+}
+
+/**
  *
  */
 async function main() {
   if (fw === 'core') {
-    const { default: Server } = await import('../src/index.js')
+    await runCore(port, 'uws')
+    return
+  }
 
-    const server = new Server({
-      port,
-      onHttpError: console.error,
-      router: () => 'ok',
-      ws: {
-        enabled: true,
-        onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
-      }
-    })
-
-    await server.listen()
-    sendReady(server.port)
-
-    const shutdown = async () => server.shutdown()
-
-    process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-
-    process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
-
+  if (fw === 'core-node') {
+    await runCore(port, 'node')
     return
   }
 
@@ -93,7 +106,7 @@ async function main() {
     return
   }
 
-  throw new Error(`Unknown --fw=${fw} (ws-server supports: core, ws)`)
+  throw new Error(`Unknown --fw=${fw} (ws-server supports: core, core-node, ws)`)
 }
 
 main().catch((e) => {
