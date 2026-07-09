@@ -199,11 +199,7 @@ export default class Server {
    */
   async #doListen() {
     if (!this.app) {
-      // WebSocket support currently lives only on the uws backend; the node
-      // backend silently falls back to uws when ws is enabled.
-      const effectiveBackend = this.wsEnabled && this.backend === 'node' ? 'uws' : this.backend
-
-      this.#backend = await loadBackend(effectiveBackend)
+      this.#backend = await loadBackend(this.backend)
       this.app = this.#backend.App()
 
       if (this.useNativeRouting) {

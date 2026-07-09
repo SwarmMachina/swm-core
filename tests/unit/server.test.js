@@ -294,21 +294,16 @@ describe('Server', () => {
       })
     })
 
-    test('should fall back to uws when the node backend is combined with WebSocket options', async () => {
+    test('keeps the node backend when combined with WebSocket options', () => {
       const server = new Server({
         router: () => {},
         backend: 'node',
         ws: { onMessage: () => {} }
       })
 
+      // The node backend serves WebSocket natively now; no fallback to uws.
+      strictEqual(server.backend, 'node')
       strictEqual(server.wsEnabled, true)
-
-      await server.listen()
-
-      // Falling back means it went through the uws App() path (the mock),
-      // not node:http — proven by a live mock app being created.
-      strictEqual(getCurrentMockApp() !== null, true)
-      strictEqual(server.socket !== null, true)
     })
 
     test('should load the backend lazily via listen(), not in the constructor', () => {

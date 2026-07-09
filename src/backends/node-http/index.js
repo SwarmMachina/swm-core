@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import Router from './router.js'
 import NodeHttpRequest from './request.js'
 import NodeHttpResponse from './response.js'
+import WsLayer from './ws/ws-layer.js'
 
 // Route methods are canonical lowercase HTTP verbs; only `del` needs remapping
 // (uWS/Server name), the rest already match `req.method` lowercased.
@@ -12,7 +13,7 @@ const METHOD_TO_ROUTE = { del: 'delete' }
  */
 export function App() {
   const router = new Router()
-  const state = { server: null, listening: false }
+  const state = { server: null, listening: false, wsLayer: null }
 
   function stopAccepting() {
     if (state.server && state.listening) {
@@ -75,22 +76,27 @@ export function App() {
     head: register('head'),
     any: register('any'),
 
-    ws() {
-      throw new Error('WebSocket support on the node backend is not implemented yet')
+    ws(pattern, behavior) {
+      state.wsLayer = new WsLayer(behavior)
+      return app
     },
 
-    publish() {
-      return false
+    publish(topic, message, isBinary) {
+      return state.wsLayer ? state.wsLayer.publish(topic, message, isBinary) : false
     },
 
-    numSubscribers() {
-      return 0
+    numSubscribers(topic) {
+      return state.wsLayer ? state.wsLayer.numSubscribers(topic) : 0
     },
 
     listen(port, cb) {
       const server = createServer({ noDelay: true }, onRequest)
 
       state.server = server
+
+      if (state.wsLayer) {
+        server.on('upgrade', (req, socket, head) => state.wsLayer.handleUpgrade(req, socket, head))
+      }
 
       let settled = false
 
@@ -114,6 +120,10 @@ export function App() {
 
     close() {
       stopAccepting()
+
+      if (state.wsLayer) {
+        state.wsLayer.close()
+      }
 
       if (state.server) {
         try {

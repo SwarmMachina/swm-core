@@ -99,6 +99,8 @@ export default class NodeWebSocket {
     socket.on('error', this.#onSocketDown)
     socket.on('close', this.#onSocketDown)
     socket.on('drain', this.#onDrain)
+
+    this.lastActivity = Date.now()
   }
 
   /**
@@ -134,6 +136,31 @@ export default class NodeWebSocket {
     }
 
     const ok = this.#socket.write(encode(isBinary ? 0x2 : 0x1, toBuffer(data)))
+
+    if (!ok) {
+      this.#backpressured = true
+      return BACKPRESSURE
+    }
+
+    return SUCCESS
+  }
+
+  /**
+   * Write a pre-serialized frame. Used by pub/sub to broadcast one buffer to
+   * many subscribers without re-encoding per connection.
+   * @param {Buffer} frame
+   * @returns {number}
+   */
+  sendFrame(frame) {
+    if (!this.#open) {
+      return DROPPED
+    }
+
+    if (this.#socket.writableLength >= this.#maxBackpressure) {
+      return DROPPED
+    }
+
+    const ok = this.#socket.write(frame)
 
     if (!ok) {
       this.#backpressured = true
