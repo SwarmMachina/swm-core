@@ -35,6 +35,12 @@ jobs:
       - name: HTTP e2e tests (node backend)
         run: npm run test:e2e:http:node
 
+      - name: WS e2e tests
+        run: npm run test:e2e:ws
+
+      - name: WS e2e tests (node backend)
+        run: npm run test:e2e:ws:node
+
   regression-profile:
     runs-on: [self-hosted, Linux, bench]
     needs: test
