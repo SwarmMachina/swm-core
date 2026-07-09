@@ -45,6 +45,7 @@
     "test:coverage": "node --import ./tests/helpers/register-loader.js --test --experimental-test-coverage tests/unit/*.test.js",
     "test:e2e": "node --test tests/e2e/**/*.test.js",
     "test:e2e:http": "node --test tests/e2e/http/*.test.js",
+    "test:e2e:http:node": "SWM_BACKEND=node node --test tests/e2e/http/*.test.js",
     "test:e2e:ws": "node --test tests/e2e/ws/*.test.js",
     "bench": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true",
     "bench:core": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
