@@ -181,6 +181,21 @@ describe('ws NodeWebSocket', () => {
     strictEqual(closes[0].code, 1000)
   })
 
+  test('ignores frames after a peer close (no pong, no crash) and closes once', () => {
+    const { socket, events } = make()
+
+    // Close then a ping in one chunk: the ping must not be processed.
+    socket.emit('data', Buffer.concat([clientFrame(0x8, Buffer.from([0x03, 0xe8])), clientFrame(0x9, 'late')]))
+
+    const pong = socket.written.map(readServerFrame).find((f) => f.opcode === 0xa)
+    strictEqual(pong, undefined)
+    strictEqual(events.filter((e) => e.type === 'close').length, 1)
+
+    // A post-close socket error must be swallowed, not thrown.
+    socket.emit('error', new Error('EPIPE'))
+    strictEqual(events.filter((e) => e.type === 'close').length, 1)
+  })
+
   test('server-initiated end waits for the peer echo before firing close', () => {
     const { ws, socket, events } = make()
 

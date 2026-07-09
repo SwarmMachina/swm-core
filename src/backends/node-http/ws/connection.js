@@ -89,7 +89,11 @@ export default class NodeWebSocket {
     this.#parser = new FrameParser({
       maxPayload,
       onMessage: (payload, isBinary) => this.#behavior.message(this, payload, isBinary),
-      onPing: (payload) => this.#socket.write(encodePong(payload)),
+      onPing: (payload) => {
+        if (this.#open) {
+          this.#socket.write(encodePong(payload))
+        }
+      },
       onPong: () => {},
       onClose: (code, reason) => this.#handlePeerClose(code, reason),
       onError: (code) => this.#handleProtocolError(code)
@@ -305,9 +309,10 @@ export default class NodeWebSocket {
 
     const socket = this.#socket
 
+    // Stop reading, but keep the guarded 'error'/'close' handlers attached so a
+    // post-close socket error (write-after-end, peer RST) is swallowed rather
+    // than thrown as an unhandled 'error' event.
     socket.removeListener('data', this.#onData)
-    socket.removeListener('error', this.#onSocketDown)
-    socket.removeListener('close', this.#onSocketDown)
     socket.removeListener('drain', this.#onDrain)
 
     try {

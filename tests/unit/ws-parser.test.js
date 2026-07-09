@@ -315,6 +315,18 @@ describe('ws FrameParser', () => {
     strictEqual(events[0].code, 1007)
   })
 
+  test('stops processing frames after a close frame', () => {
+    const { parser, events } = makeParser()
+
+    // Close followed by a text frame in the same buffer: the text must be ignored.
+    parser.push(
+      Buffer.concat([frame({ opcode: 8, payload: Buffer.from([0x03, 0xe8]) }), frame({ opcode: 1, payload: 'after' })])
+    )
+
+    strictEqual(events.length, 1)
+    strictEqual(events[0].type, 'close')
+  })
+
   test('stops emitting after a protocol error', () => {
     const { parser, events } = makeParser()
 

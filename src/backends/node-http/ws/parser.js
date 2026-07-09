@@ -353,6 +353,12 @@ export default class FrameParser {
       }
     }
 
+    // A close frame terminates the stream: stop parsing so trailing frames in
+    // the same chunk are not processed (RFC 6455 - nothing follows a Close).
+    this.#errored = true
+    this.#buffers = []
+    this.#bufferedBytes = 0
+
     this.#onClose(code, reason)
   }
 
