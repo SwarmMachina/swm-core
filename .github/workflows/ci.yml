@@ -1,15 +1,23 @@
 name: CI
 
 on:
-  pull_request:
   push:
-    branches:
-      - master
+    tags:
+      - 'v*'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24']
     permissions:
       contents: read
 
@@ -20,7 +28,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       - name: Install
@@ -42,9 +50,12 @@ jobs:
         run: npm run test:e2e:ws:node
 
   regression-profile:
-    runs-on: [self-hosted, Linux, bench]
+    runs-on:
+      group: swm-ci
+      labels: bench
+    timeout-minutes: 20
     needs: test
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
 
@@ -72,9 +83,11 @@ jobs:
           path: benchmark/profiles/regression-ci/
 
   compare-http:
-    runs-on: [self-hosted, Linux, bench]
+    runs-on:
+      group: swm-ci
+      labels: bench
+    timeout-minutes: 15
     needs: regression-profile
-    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
 
@@ -102,9 +115,11 @@ jobs:
           path: benchmark/profiles/compare-ci/
 
   compare-ws:
-    runs-on: [self-hosted, Linux, bench]
+    runs-on:
+      group: swm-ci
+      labels: bench
+    timeout-minutes: 10
     needs: compare-http
-    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
 
@@ -132,8 +147,11 @@ jobs:
           path: benchmark/profiles/compare-ci/
 
   autobahn:
-    runs-on: [self-hosted, Linux, bench]
-    if: github.event_name == 'workflow_dispatch'
+    runs-on:
+      group: swm-ci
+      labels: bench
+    timeout-minutes: 30
+    needs: compare-ws
     permissions:
       contents: read
 
@@ -159,3 +177,29 @@ jobs:
         with:
           name: autobahn-report
           path: tests/autobahn/reports/
+
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: autobahn
+    if: success() && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install
+        run: npm ci
+
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
