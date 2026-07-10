@@ -15,7 +15,7 @@ export interface Route {
   method: HttpMethod
   path: string
   handler: Handler
-  /** One handler or a chain, run before `handler`. Replying short-circuits the chain. Native `routes` only. */
+  /** One handler or a chain, run before `handler`. Replying short-circuits the chain. Declarative `routes` only. */
   preHandler?: Handler | Handler[]
 }
 
@@ -27,8 +27,9 @@ export interface Route {
 export interface UpgradeMeta {
   url(): string
   ip(): string
-  getParameter(index: number): string
-  getQuery(key?: string): string
+  getParameter(index: number): string | undefined
+  getQuery(): string
+  getQuery(key: string): string | undefined
   getHeader(name: string): string
   aborted: boolean
 }
@@ -65,7 +66,7 @@ export interface WSOptions {
 export interface ServerOptions {
   /** Universal router function (micro-like API). Provide either `router` or `routes`, not both. */
   router?: Handler
-  /** Native routing API: an array of route definitions. Provide either `router` or `routes`, not both. */
+  /** Declarative routing API: an array of route definitions. Provide either `router` or `routes`, not both. */
   routes?: Route[]
   onHttpError?: (ctx: HttpContext, err: Error) => any | Promise<any>
   /** Node backend transport errors emitted after the server has started listening. */
@@ -123,12 +124,13 @@ export class HttpContext {
   write(chunk: HttpBody): boolean
   end(chunk?: HttpBody): void
   onWritable(callback: (offset: number) => void): void
-  tryEnd(chunk: HttpBody, totalSize?: number): [boolean, boolean]
+  /** Finish a streaming response with a known total byte size. `totalSize` is required. */
+  tryEnd(chunk: HttpBody, totalSize: number): [boolean, boolean]
   getWriteOffset(): number
 }
 
 /**
- * Result of a WebSocket send, mirroring uWebSockets.js `SendStatus`:
+ * Backend-neutral WebSocket send result, mirroring uWebSockets.js `SendStatus`:
  * `0` BACKPRESSURE (queued behind backpressure), `1` SUCCESS, `2` DROPPED
  * (not sent — backpressure limit exceeded). Check it to react to backpressure.
  */
@@ -203,13 +205,13 @@ export default class Server {
    * Send a message directly to the single connection registered under `key`
    * (from `ws.connectionKey`). For 1:1 messaging where topic pub/sub is overkill.
    * @returns `true` if a live connection was found and the message was not
-   * dropped; `false` when the key is unknown or uWS reported DROPPED
-   * (backpressure limit exceeded).
+   * dropped; `false` when the key is unknown or the selected backend reported
+   * DROPPED (backpressure limit exceeded).
    */
   sendTo(key: string | number, message: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): boolean
   /** Whether a live connection is registered under `key`. */
   hasConnection(key: string | number): boolean
-  /** Raw registered socket, or `undefined`. Escape hatch for low-level control. */
+  /** Backend-specific raw socket, or `undefined`. Only `RawWebSocket` methods are portable across backends. */
   getConnection(key: string | number): RawWebSocket | undefined
   /** Number of registered addressable connections. */
   readonly connectionCount: number

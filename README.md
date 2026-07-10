@@ -125,9 +125,12 @@ const server = new Server({
 await server.listen()
 ```
 
-### HTTP Server with Native Routing (New API)
+### HTTP Server with Declarative Routing (`routes` API)
 
-For better performance and cleaner code, you can use native uWebSockets.js routing:
+The `routes` API provides method-specific routing, URL parameters and wildcard
+matching on both backends. With the default uWS backend, routes are registered
+directly with uWebSockets.js; the Node backend uses the bundled JavaScript
+router.
 
 ```javascript
 import Server from '@swarmmachina/swm-core'
@@ -187,9 +190,10 @@ const server = new Server({
 await server.listen()
 ```
 
-**Benefits of Native Routing:**
+**Benefits of Declarative Routing:**
 
-- **Better Performance** - Routes are registered at C++ level for faster matching
+- **Direct uWS registration** - On the default uWS backend, routes are registered with the native engine
+- **Node backend support** - The same route definitions are matched by the bundled JavaScript router
 - **URL Parameters** - Built-in support for `:param` syntax
 - **Cleaner Code** - Declarative route definitions
 - **Method-specific** - Automatic HTTP method routing
@@ -246,7 +250,7 @@ new Server(options)
 | Option          | Type       | Default        | Description                                             |
 | --------------- | ---------- | -------------- | ------------------------------------------------------- |
 | `router`        | `Function` | _one required_ | Route handler function `(ctx) => any` (traditional API) |
-| `routes`        | `Array`    | _one required_ | Array of route definitions (native routing API)         |
+| `routes`        | `Array`    | _one required_ | Array of route definitions (declarative routing API)    |
 | `onHttpError`   | `Function` | `() => {}`     | Request error handler `(ctx, error) => void`            |
 | `onServerError` | `Function` | `() => {}`     | Node backend post-listen transport error handler        |
 | `port`          | `Number`   | `6000`         | Server port (1-65535)                                   |
@@ -260,7 +264,7 @@ new Server(options)
 
 | Property     | Type               | Description                                                                                            |
 | ------------ | ------------------ | ------------------------------------------------------------------------------------------------------ |
-| `method`     | `String`           | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`, `'patch'`, `'options'`, `'head'`, `'any'`         |
+| `method`     | `String`           | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'` |
 | `path`       | `String`           | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                             |
 | `handler`    | `Function`         | Handler function `(ctx) => any \| Promise<any>`                                                        |
 | `preHandler` | `Function`/`Array` | Optional. One function or an array, run before `handler` (see [Route preHandlers](#route-prehandlers)) |
@@ -341,9 +345,9 @@ would be overkill. Requires `ws.connectionKey` to be configured.
 server.sendTo('user-42', 'private message')
 ```
 
-**Returns:** `boolean` - `true` if a live connection was found and the message
-was not dropped; `false` when the key is unknown or uWS reported DROPPED
-(backpressure limit exceeded).
+**Returns:** `boolean` - `true` if a live connection was found and the backend
+did not report the message as dropped; `false` when the key is unknown or the
+backpressure limit was exceeded.
 
 Keys are matched with strict `Map` identity: `42` and `'42'` are different keys.
 Pick one type for `connectionKey` return values and `sendTo()` arguments.
@@ -351,15 +355,17 @@ Pick one type for `connectionKey` return values and `sendTo()` arguments.
 #### `server.hasConnection(key)` / `server.getConnection(key)` / `server.connectionCount`
 
 Inspect the connection registry. `hasConnection` returns a `boolean`;
-`getConnection` returns the raw uWS handle (or `undefined`) as an escape hatch
-for advanced use (backpressure via `getBufferedAmount()`, etc.); `connectionCount`
-is the number of registered connections.
+`getConnection` returns the backend-specific raw WebSocket handle (or
+`undefined`); `connectionCount` is the number of registered connections. Only
+the methods declared by the package's `RawWebSocket` type are portable across
+backends. Additional uWS methods are available only when `backend: 'uws'` is
+selected.
 
 ```javascript
 if (server.hasConnection('user-42')) {
   /* ... */
 }
-const raw = server.getConnection('user-42') // uWS handle or undefined
+const raw = server.getConnection('user-42') // backend-specific handle or undefined
 console.log(server.connectionCount)
 ```
 
@@ -414,7 +420,7 @@ Get query parameter value.
 const page = ctx.query('page') // ?page=1
 ```
 
-**Returns:** `string`
+**Returns:** `string | undefined` - `undefined` when the parameter is absent
 
 ##### `ctx.fullQuery()`
 
@@ -428,13 +434,13 @@ const q = ctx.fullQuery() // page=1&limit=20
 
 ##### `ctx.param(indexOrName)`
 
-Get URL parameter by index or name (for pattern matching in native routing).
+Get URL parameter by index or name (for pattern matching in the `routes` API).
 
 ```javascript
 // By index
 const id = ctx.param(0) // First parameter
 
-// By name (native routing only)
+// By name (routes API only)
 const id = ctx.param('id') // /users/:id
 
 // Multiple parameters
@@ -442,7 +448,7 @@ const userId = ctx.param('userId') // /users/:userId/posts/:postId
 const postId = ctx.param('postId')
 ```
 
-**Returns:** `string`
+**Returns:** `string | undefined` - `undefined` when the parameter is absent
 
 ##### `ctx.header(name)`
 
@@ -454,6 +460,17 @@ const auth = ctx.header('authorization')
 
 **Returns:** `string`
 
+##### `ctx.contentLength()`
+
+Get a valid non-negative `Content-Length` value. Returns `null` when the header
+is absent or invalid.
+
+```javascript
+const length = ctx.contentLength()
+```
+
+**Returns:** `number | null`
+
 ##### `ctx.body([maxSize])`
 
 Read request body as Buffer.
@@ -461,6 +478,16 @@ Read request body as Buffer.
 ```javascript
 const buffer = await ctx.body()
 const buffer = await ctx.body(5 * 1024 * 1024) // 5MB limit
+```
+
+**Returns:** `Promise<Buffer>`
+
+##### `ctx.buffer([maxSize])`
+
+Alias for `ctx.body([maxSize])`.
+
+```javascript
+const buffer = await ctx.buffer()
 ```
 
 **Returns:** `Promise<Buffer>`
@@ -547,7 +574,9 @@ ctx.send(Buffer.from('data')) // application/octet-stream
 ctx.send(null) // 204 No Content
 ```
 
-**Supported types:** Object, String, Buffer, null, undefined
+**Supported types:** Objects and arrays (JSON), strings and other primitive
+values (text), `Buffer`/`ArrayBuffer`/typed-array views (binary), and nullish
+values (`204 No Content`).
 
 ##### `ctx.sendJson(data, [status])`
 
@@ -663,13 +692,15 @@ ctx.onWritable((offset) => {
 
 **Returns:** `void`
 
-##### `ctx.tryEnd(chunk)`
+##### `ctx.tryEnd(chunk, totalSize)`
 
-Try to end the streaming response with a final chunk. Calculates `totalSize = getWriteOffset() + chunkLen` and calls
-`res.tryEnd(chunk, totalSize)`.
+Try to finish a streaming response whose total byte size is known. `totalSize`
+is required and is passed to the backend's `tryEnd` implementation.
 
 ```javascript
-const [ok, done] = ctx.tryEnd('final chunk')
+const finalChunk = Buffer.from('final chunk')
+const totalSize = ctx.getWriteOffset() + finalChunk.byteLength
+const [ok, done] = ctx.tryEnd(finalChunk, totalSize)
 if (done) {
   // Response is complete
 }
@@ -693,11 +724,11 @@ The `ctx` object passed to WebSocket handlers:
 
 #### Properties
 
-| Property   | Type              | Description                                                                                                                                                                                   |
-| ---------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.data` | `Object`          | User data from `onUpgrade` return value (`userData` field)                                                                                                                                    |
-| `ctx.ws`   | `WebSocket`       | Raw uWS WebSocket handle. Identity-stable for the connection; the handle to retain to address this connection from elsewhere (see [Context lifetime & pooling](#wscontext-lifetime--pooling)) |
-| `ctx.key`  | `string`/`number` | Key this connection is registered under (from `connectionKey`), or `null`. Read-only.                                                                                                         |
+| Property   | Type              | Description                                                                                                                                                                                                               |
+| ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.data` | `Object`          | User data from `onUpgrade` return value (`userData` field)                                                                                                                                                                |
+| `ctx.ws`   | `RawWebSocket`    | Backend-specific raw WebSocket handle. Identity-stable for the connection; only methods in the exported `RawWebSocket` type are portable across backends (see [Context lifetime & pooling](#wscontext-lifetime--pooling)) |
+| `ctx.key`  | `string`/`number` | Key this connection is registered under (from `connectionKey`), or `null`. Read-only.                                                                                                                                     |
 
 #### Methods
 
@@ -710,9 +741,9 @@ ctx.send('Hello client!')
 ctx.send(Buffer.from([1, 2, 3]), true) // binary
 ```
 
-**Returns:** `number` — uWS send status: `1` success, `0` backpressure (queued
-behind backpressure), `2` dropped (not sent — backpressure limit exceeded).
-Check it to react to backpressure.
+**Returns:** `number` — backend-neutral send status mirroring uWS: `1` success,
+`0` backpressure (queued behind backpressure), `2` dropped (not sent —
+backpressure limit exceeded). Check it to react to backpressure.
 
 ##### `ctx.end([code], [reason])`
 
@@ -1066,8 +1097,9 @@ Notes:
   `ctx.key` is reset to `null`.
 - Keys are compared with strict `Map` identity — `42` and `'42'` are different
   addresses; stick to one type.
-- Need the raw handle (e.g. to check backpressure via `getBufferedAmount()`)?
-  Use `server.getConnection(key)`.
+- Need backend-specific low-level control? Use `server.getConnection(key)` and
+  narrow the handle for the selected backend. Methods beyond `RawWebSocket`
+  (such as uWS `getBufferedAmount()`) are not portable to the Node backend.
 - Prefer managing your own `Map` instead? Store `ctx.ws` (identity-stable for the
   connection) rather than `ctx`, and delete it in `onClose`.
 
@@ -1123,7 +1155,7 @@ const server = new Server({
 
 - Run in order, sync or async (awaited); replying (`ctx.replied`) stops the chain.
 - Composed once at registration — zero per-request cost for routes without one.
-- Native `routes` API only (not the `router` function).
+- Declarative `routes` API only (not the `router` function).
 
 ### Custom Response Headers
 
@@ -1243,7 +1275,7 @@ const server = new Server({
 npm test
 
 # Run tests with coverage
-npm test:coverage
+npm run test:coverage
 ```
 
 ## Regression profiling (CI)
@@ -1261,13 +1293,14 @@ tightened enough to catch small regressions.
 
 ### Self-hosted runner
 
-Only the gated `regression-profile` job uses the self-hosted runner; the `test`
-job stays on `ubuntu-latest`.
+The gated `regression-profile`, `compare-http`, `compare-ws` and `autobahn` jobs
+use self-hosted runners. The regular `test` job stays on `ubuntu-latest`.
 
-> **Public-repository note.** The `regression-profile` job is gated to
-> `push`/`workflow_dispatch`, so fork pull requests never reach the self-hosted
-> machine — they only run `test` on `ubuntu-latest`. Anything merged to `master`
-> still executes on the runner, so treat the host as exposed: dedicated
+> **Public-repository note.** The profiling and comparison jobs are gated to
+> `push`/`workflow_dispatch`, while Autobahn is `workflow_dispatch` only, so fork
+> pull requests never reach a self-hosted machine — they only run `test` on
+> `ubuntu-latest`. Anything merged to `master` still executes profiling and
+> comparison jobs on the runner, so treat the host as exposed: dedicated
 > unprivileged user, firewalled, no production secrets, ephemeral runner.
 
 **1. Register the runner** (repo Settings → Actions → Runners → New self-hosted
