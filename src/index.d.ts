@@ -8,6 +8,18 @@ export type HttpBody = string | ArrayBuffer | ArrayBufferView | Buffer
 /** Response headers map; values may be a single string or repeated as an array. */
 export type HttpHeaders = Record<string, string | string[]>
 
+declare const preparedHeadersBrand: unique symbol
+
+/** Opaque, immutable response-header block validated once by {@link prepareHeaders}. */
+export interface PreparedHeaders {
+  readonly [preparedHeadersBrand]: true
+}
+
+export type ResponseHeaders = HttpHeaders | PreparedHeaders
+
+/** Validate and compile reusable response headers for allocation-free writes on the response hot path. */
+export function prepareHeaders(headers: HttpHeaders): PreparedHeaders
+
 /** HTTP route handler. Its return value is sent via `ctx.send()` unless the response was already written. */
 export type Handler = (ctx: HttpContext) => any | Promise<any>
 
@@ -109,18 +121,18 @@ export class HttpContext {
   status(code: number): this
   setHeader(key: string, value: string | number): this
   appendHeader(key: string, value: string | number): this
-  setHeaders(headers: HttpHeaders | null | undefined): void
-  flushHeaders(headers?: HttpHeaders | null): void
+  setHeaders(headers: ResponseHeaders | null | undefined): void
+  flushHeaders(headers?: ResponseHeaders | null): void
 
   send(data: any): void
   sendJson(data: any, status?: number): void
   sendText(text: string, status?: number): void
   sendBuffer(buffer: Buffer | Uint8Array | ArrayBuffer, status?: number): void
   sendError(error: { status?: number; message?: string } | Error): void
-  reply(status?: number, headers?: HttpHeaders | null, body?: HttpBody | null): void
+  reply(status?: number, headers?: ResponseHeaders | null, body?: HttpBody | null): void
 
-  stream(readable: Readable, status?: number, headers?: HttpHeaders | null): Promise<void>
-  startStreaming(status?: number, headers?: HttpHeaders | null): this
+  stream(readable: Readable, status?: number, headers?: ResponseHeaders | null): Promise<void>
+  startStreaming(status?: number, headers?: ResponseHeaders | null): this
   write(chunk: HttpBody): boolean
   end(chunk?: HttpBody): void
   onWritable(callback: (offset: number) => void): void

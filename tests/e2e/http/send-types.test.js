@@ -1,5 +1,6 @@
 import { test, afterEach } from 'node:test'
 import { strict as assert } from 'node:assert'
+import { prepareHeaders } from '../../../src/index.js'
 import { startHttpServer } from '../../helpers/e2e-server.js'
 import { reqText, reqJson, reqBin } from '../../helpers/http-client.js'
 
@@ -99,4 +100,30 @@ test('send types: ctx.status(201).sendText("ok") => 201', async () => {
 
   assert.strictEqual(status, 201)
   assert.strictEqual(text, 'ok')
+})
+
+test('send types: prepared headers work across backends', async () => {
+  const headers = prepareHeaders({
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-prepared': 'yes'
+  })
+
+  server = await startHttpServer({
+    routes: [
+      {
+        method: 'get',
+        path: '/prepared',
+        handler: (ctx) => ctx.reply(200, headers, 'ok')
+      }
+    ]
+  })
+
+  const response = await reqText(`${server.baseUrl}/prepared`)
+
+  assert.strictEqual(response.status, 200)
+  assert.strictEqual(response.headers.get('content-type'), 'text/plain; charset=utf-8')
+  assert.strictEqual(response.headers.get('cache-control'), 'no-store')
+  assert.strictEqual(response.headers.get('x-prepared'), 'yes')
+  assert.strictEqual(response.text, 'ok')
 })

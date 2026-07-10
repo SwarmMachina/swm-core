@@ -66,7 +66,8 @@ function sendReady(port) {
  * @param {'uws'|'node'} backend
  */
 async function runCore(port, backend) {
-  const { default: Server } = await import('../src/index.js')
+  const { default: Server, prepareHeaders } = await import('../src/index.js')
+  const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
 
   const router = async (ctx) => {
     const method = ctx.method()
@@ -78,6 +79,10 @@ async function runCore(port, backend) {
 
     if (method === 'get' && url === '/headers') {
       return sendCoreHeadersBench(ctx)
+    }
+
+    if (method === 'get' && url === '/headers-prepared') {
+      return ctx.reply(200, preparedHeaders, HEADERS_TEST.responseText)
     }
 
     if (method === 'post' && url === '/base') {
@@ -133,6 +138,10 @@ async function main() {
       res.append('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
       res.status(200).send(HEADERS_TEST.responseText)
     })
+    app.get('/headers-prepared', (req, res) => {
+      res.set(HEADERS_TEST.responseHeaders)
+      res.status(200).send(HEADERS_TEST.responseText)
+    })
     app.post('/base', (req, res) => res.status(200).json(req.body))
     app.use((req, res) => res.status(404).send('Not Found'))
 
@@ -159,6 +168,10 @@ async function main() {
       reply.header('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
       reply.code(200).send(HEADERS_TEST.responseText)
     })
+    fastify.get('/headers-prepared', async (req, reply) => {
+      reply.headers(HEADERS_TEST.responseHeaders)
+      reply.code(200).send(HEADERS_TEST.responseText)
+    })
     fastify.post('/base', async (req) => req.body)
 
     fastify.setNotFoundHandler((req, reply) => reply.code(404).send('Not Found'))
@@ -181,7 +194,7 @@ async function main() {
         return TESTS.get('base').payload
       }
 
-      if (req.method === 'GET' && req.url === '/headers') {
+      if (req.method === 'GET' && (req.url === '/headers' || req.url === '/headers-prepared')) {
         res.setHeader('Content-Type', HEADERS_TEST.responseHeaders['content-type'])
         res.setHeader('Cache-Control', HEADERS_TEST.responseHeaders['cache-control'])
         res.setHeader('X-Trace-Id', HEADERS_TEST.responseHeaders['x-trace-id'])

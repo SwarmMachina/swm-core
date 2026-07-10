@@ -1,6 +1,8 @@
-export const TEXT_PLAIN_HEADER = Object.freeze({ 'content-type': 'text/plain; charset=utf-8' })
-export const JSON_HEADER = Object.freeze({ 'content-type': 'application/json; charset=utf-8' })
-export const OCTET_STREAM_HEADER = Object.freeze({ 'content-type': 'application/octet-stream' })
+import { prepareHeaders } from './prepared-headers.js'
+
+export const TEXT_PLAIN_HEADER = prepareHeaders({ 'content-type': 'text/plain; charset=utf-8' })
+export const JSON_HEADER = prepareHeaders({ 'content-type': 'application/json; charset=utf-8' })
+export const OCTET_STREAM_HEADER = prepareHeaders({ 'content-type': 'application/octet-stream' })
 
 export const STATUS_TEXT = Object.freeze({
   100: '100 Continue',

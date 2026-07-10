@@ -55,6 +55,19 @@ const TESTS = new Map([
     }
   ],
   [
+    'headers-prepared',
+    {
+      name: 'headers-prepared',
+      method: 'GET',
+      path: '/headers-prepared',
+      duration: 10,
+      connections: 100,
+      pipelining: 10,
+      description: 'Prevalidated reusable response headers benchmark',
+      responseText: 'ok'
+    }
+  ],
+  [
     'post-base',
     {
       name: 'post-base',

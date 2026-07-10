@@ -53,6 +53,7 @@
     "bench:core": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
     "bench:headers": "node ./benchmark/bench.js --test headers --runs 1 --warmup 10 --sample-ms 250 --v8prof true",
     "bench:headers:core": "node ./benchmark/bench.js --test headers --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
+    "bench:headers:prepared": "node ./benchmark/bench.js --test headers-prepared --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
     "bench:ws": "node ./benchmark/ws-bench.js --fw core,ws --runs 1 --warmup 2 --v8prof true",
     "bench:prehandler": "node ./benchmark/prehandler-bench.js",
     "profile:ci": "node ./benchmark/regression-ci.js",
@@ -66,7 +67,7 @@
     "uwebsockets.js": "uNetworking/uWebSockets.js#v20.67.0"
   },
   "devDependencies": {
-    "@swarmmachina/standards": "^1.0.3",
+    "@swarmmachina/standards": "^1.0.4",
     "autocannon": "^8.0.0",
     "express": "^5.2.1",
     "fastify": "^5.8.5",

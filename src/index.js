@@ -6,6 +6,7 @@ import { STATUS_TEXT } from './constants.js'
 
 export { default as cors } from './cors.js'
 export { default as serveStatic } from './serve-static.js'
+export { prepareHeaders } from './prepared-headers.js'
 
 const isPromise = (v) => v != null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function'
 const WS_PROTOCOL_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/

@@ -545,7 +545,7 @@ ctx.appendHeader('set-cookie', 'refresh=...; Path=/refresh; HttpOnly')
 
 ##### `ctx.setHeaders(headers)`
 
-Set multiple response headers at once. Equivalent to calling `setHeader()` for each key. Header values may be strings or arrays of strings.
+Set multiple response headers at once. Equivalent to calling `setHeader()` for each key. Header values may be strings or arrays of strings. A block returned by `prepareHeaders()` is also accepted.
 
 ```javascript
 ctx.setHeaders({
@@ -1176,6 +1176,28 @@ const server = new Server({
   }
 })
 ```
+
+For headers reused across requests, validate and compile them once with
+`prepareHeaders()`. The returned opaque block is immutable and can be passed to
+`reply()`, `setHeaders()`, streaming methods, or `flushHeaders()`. Dynamic plain
+objects and individual header setters continue to validate every value.
+
+```javascript
+import Server, { prepareHeaders } from '@swarmmachina/swm-core'
+
+const responseHeaders = prepareHeaders({
+  'content-type': 'application/json',
+  'cache-control': 'no-store',
+  'set-cookie': ['access=...; Path=/; HttpOnly', 'refresh=...; Path=/refresh; HttpOnly']
+})
+
+const server = new Server({
+  router: (ctx) => ctx.reply(200, responseHeaders, JSON.stringify({ ok: true }))
+})
+```
+
+`prepareHeaders()` copies all values and rejects CR or LF before creating the
+trusted block, so later mutation of the source object cannot change responses.
 
 ### CORS
 

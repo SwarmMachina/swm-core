@@ -84,6 +84,17 @@
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
+    "headers-prepared": {
+      "description": "GET /headers-prepared prevalidated reusable response headers",
+      "calibration": "pending self-hosted calibration",
+      "guards": {
+        "errors": { "max": 0 },
+        "heapMB": { "max": 18 },
+        "externalMB": { "max": 6 },
+        "arrayBuffersMB": { "max": 2 }
+      },
+      "reportOnly": ["rps", "latencyAvgMs", "latencyP97_5Ms", "latencyP99Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
     "post-base": {
       "description": "POST /base JSON body parsing hot path",
       "observedMedian": {

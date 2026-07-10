@@ -1,6 +1,7 @@
 import BodyParser from './body-parser.js'
 import ResStreamer from './res-streamer.js'
 import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './constants.js'
+import { assertHeaderValue, getPreparedHeaders } from './prepared-headers.js'
 
 export default class HttpContext {
   #ip = ''
@@ -492,21 +493,12 @@ export default class HttpContext {
 
     const headerValue = `${value}`
 
-    this.#assertNoCrlf(headerValue)
+    assertHeaderValue(headerValue)
 
     const headerKey = key.toLowerCase()
 
     this.#pendingHeaders.set(headerKey, [key, headerValue])
     return this
-  }
-
-  /**
-   * @param {string} value
-   */
-  #assertNoCrlf(value) {
-    if (/[\r\n]/.test(value)) {
-      throw new TypeError('Header value must not contain CR or LF')
-    }
   }
 
   /**
@@ -529,7 +521,7 @@ export default class HttpContext {
 
     const headerValue = `${value}`
 
-    this.#assertNoCrlf(headerValue)
+    assertHeaderValue(headerValue)
 
     const headerKey = key.toLowerCase()
     const pendingHeader = this.#pendingHeaders.get(headerKey)
@@ -584,7 +576,7 @@ export default class HttpContext {
     if (!Array.isArray(value)) {
       const headerValue = `${value}`
 
-      this.#assertNoCrlf(headerValue)
+      assertHeaderValue(headerValue)
 
       if (!append) {
         this.#pendingHeaders.set(headerKey, [key, headerValue])
@@ -631,7 +623,7 @@ export default class HttpContext {
 
       const headerValue = `${entry}`
 
-      this.#assertNoCrlf(headerValue)
+      assertHeaderValue(headerValue)
 
       if (!pendingHeader) {
         pendingHeader = [key, headerValue]
@@ -658,18 +650,17 @@ export default class HttpContext {
       return
     }
 
-    if (headers === TEXT_PLAIN_HEADER) {
-      this.#pendingHeaders.set('content-type', ['content-type', 'text/plain; charset=utf-8'])
-      return
-    }
+    const prepared = getPreparedHeaders(headers)
 
-    if (headers === JSON_HEADER) {
-      this.#pendingHeaders.set('content-type', ['content-type', 'application/json; charset=utf-8'])
-      return
-    }
+    if (prepared) {
+      const groups = prepared.groups
 
-    if (headers === OCTET_STREAM_HEADER) {
-      this.#pendingHeaders.set('content-type', ['content-type', 'application/octet-stream'])
+      for (let i = 0; i < groups.length; i++) {
+        const { key, name, values } = groups[i]
+
+        this.#pendingHeaders.set(key, [name, values.length === 1 ? values[0] : values.slice()])
+      }
+
       return
     }
 
@@ -684,6 +675,18 @@ export default class HttpContext {
   #flushPendingHeaders(headers = null) {
     if (!this.res) {
       this.#pendingHeaders.clear()
+      return
+    }
+
+    const prepared = getPreparedHeaders(headers)
+
+    if (prepared && this.#pendingHeaders.size === 0) {
+      const lines = prepared.lines
+
+      for (let i = 0; i < lines.length; i += 2) {
+        this.res.writeHeader(lines[i], lines[i + 1])
+      }
+
       return
     }
 
