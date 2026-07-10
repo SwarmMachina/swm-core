@@ -2,18 +2,17 @@
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)](https://nodejs.org/)
-[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#)
+[![dependencies](https://img.shields.io/badge/dependencies-1-brightgreen.svg)](#)
 [![stability](https://img.shields.io/badge/stability-experimental-yellow.svg)](#)
 
-A zero-dependency, high-performance HTTP/WebSocket server. Runs on a pure-JS
-`node:http` backend out of the box, with an optional
-[uWebSockets.js](https://github.com/uNetworking/uWebSockets.js) turbo backend
-for maximum throughput.
+A high-performance HTTP/WebSocket server built on
+[uWebSockets.js](https://github.com/uNetworking/uWebSockets.js), with a bundled
+`node:http` backend available as an explicit fallback.
 
 ## Features
 
-- **Zero dependencies** - Pure `node:http` + a pure-JS RFC 6455 WebSocket layer; nothing to install
-- **Optional native turbo** - Opt into the uWebSockets.js backend for the highest throughput
+- **uWS by default** - Native HTTP/WebSocket transport on the primary path
+- **Opt-in Node backend** - Pure `node:http` + RFC 6455 fallback via `backend: 'node'`
 - **HTTP + WebSocket** - Both protocols in a single server instance
 - **Context pooling** - Minimizes garbage collection overhead
 - **Graceful shutdown** - Cleanly closes active connections
@@ -24,25 +23,16 @@ for maximum throughput.
 ## Installation
 
 ```bash
-# Install the package (no native addon, no build step)
+# Install the package and its uWebSockets.js runtime dependency
 npm install @swarmmachina/swm-core
 ```
 
-That's it — the default `node` backend has no runtime dependencies and needs
-**Node.js 22+** only.
+### Runtime requirements
 
-### Optional: the uWebSockets.js turbo backend
+The default backend depends on the native uWebSockets.js addon, which imposes a
+few constraints on the install/runtime environment:
 
-For maximum throughput, install the optional native backend and select it with
-`backend: 'uws'`:
-
-```bash
-npm install uwebsockets.js@uNetworking/uWebSockets.js#v20.67.0
-```
-
-The native addon imposes a few constraints on the install/runtime environment
-(they apply **only** when you use `backend: 'uws'`):
-
+- **Node.js 22+** — required by this package.
 - **glibc, not musl** — the prebuilt binaries target glibc. Use a `bookworm`/`slim`
   (Debian) base image rather than `alpine` (musl), otherwise the native module fails to load.
 - **Architecture-specific prebuilt** — the loaded binary must match the host CPU
@@ -58,29 +48,30 @@ The native addon imposes a few constraints on the install/runtime environment
 The server runs on a selectable transport backend, chosen with the `backend`
 option:
 
-| `backend`          | Transport      | Notes                                                                  |
-| ------------------ | -------------- | ---------------------------------------------------------------------- |
-| `'node'` (default) | `node:http`    | Zero-dependency. HTTP + WebSocket (no `permessage-deflate`).           |
-| `'uws'`            | uWebSockets.js | Native turbo engine — highest throughput. Requires the optional addon. |
+| `backend`         | Transport      | Status                                                       |
+| ----------------- | -------------- | ------------------------------------------------------------ |
+| `'uws'` (default) | uWebSockets.js | Primary native engine. HTTP + WebSocket. Highest throughput. |
+| `'node'`          | `node:http`    | Experimental opt-in fallback. No `permessage-deflate`.       |
 
 ```js
-// Default: zero-dependency node:http backend (no native addon)
+// Default: uWebSockets.js
 const server = new Server({ port: 6000, router })
 
-// Opt into the native turbo backend (after installing uwebsockets.js)
-const turbo = new Server({ backend: 'uws', port: 6000, router })
+// Explicit fallback: bundled node:http backend
+const fallback = new Server({ backend: 'node', port: 6000, router })
 ```
 
-The default `'node'` backend serves the full HTTP and WebSocket API on
-`node:http` plus a pure-JS RFC 6455 implementation — no native addon, so it is
-not subject to the glibc/architecture/prebuilt constraints listed above. It does
-not implement the `permessage-deflate` compression extension. WebSocket
-conformance is verified against the
+The experimental, opt-in `'node'` backend is bundled with this package; no
+second package is needed. It serves the full HTTP and WebSocket API on
+`node:http` plus a pure-JS RFC 6455 implementation. It does not implement the
+`permessage-deflate` compression extension. WebSocket conformance is checked with the
 [Autobahn TestSuite](https://github.com/crossbario/autobahn-testsuite)
 (`npm run test:autobahn`, requires docker).
 
-Selecting `backend: 'uws'` without the `uwebsockets.js` peer dependency installed
-throws a clear error at `listen()`.
+Because the package installs uWebSockets.js as a runtime dependency, a missing
+or platform-incompatible native addon is treated as an installation error when
+the default backend starts. `backend: 'node'` remains an explicit runtime
+fallback.
 
 ## Quick Start
 
@@ -252,14 +243,16 @@ new Server(options)
 
 **Options:**
 
-| Option        | Type       | Default        | Description                                             |
-| ------------- | ---------- | -------------- | ------------------------------------------------------- |
-| `router`      | `Function` | _one required_ | Route handler function `(ctx) => any` (traditional API) |
-| `routes`      | `Array`    | _one required_ | Array of route definitions (native routing API)         |
-| `onHttpError` | `Function` | `() => {}`     | Error handler `(ctx, error) => void`                    |
-| `port`        | `Number`   | `6000`         | Server port (1-65535)                                   |
-| `maxBodySize` | `Number`   | `1`            | Max request body size in MB (1-64)                      |
-| `ws`          | `Object`   | `null`         | WebSocket configuration (see below)                     |
+| Option          | Type       | Default        | Description                                             |
+| --------------- | ---------- | -------------- | ------------------------------------------------------- |
+| `router`        | `Function` | _one required_ | Route handler function `(ctx) => any` (traditional API) |
+| `routes`        | `Array`    | _one required_ | Array of route definitions (native routing API)         |
+| `onHttpError`   | `Function` | `() => {}`     | Request error handler `(ctx, error) => void`            |
+| `onServerError` | `Function` | `() => {}`     | Node backend post-listen transport error handler        |
+| `port`          | `Number`   | `6000`         | Server port (1-65535)                                   |
+| `maxBodySize`   | `Number`   | `1`            | Max request body size in MB (1-64)                      |
+| `ws`            | `Object`   | `null`         | WebSocket configuration (see below)                     |
+| `backend`       | `String`   | `'uws'`        | `'uws'` or the experimental opt-in `'node'` fallback    |
 
 **Note:** You must provide either `router` or `routes`, but not both.
 
@@ -274,18 +267,23 @@ new Server(options)
 
 **WebSocket Options (`ws` object):**
 
-| Option             | Type       | Default                                            | Description                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------ | ---------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enabled`          | `Boolean`  | `false`                                            | Enable WebSocket support. If not set and at least one ws handler is provided, WS will be enabled automatically.                                                                                                                                                                                                                                                    |
-| `wsIdleTimeoutSec` | `Number`   | `15`                                               | Idle timeout in seconds (min: 5)                                                                                                                                                                                                                                                                                                                                   |
-| `onOpen`           | `Function` | `(ctx) => {}`                                      | Called when client connects                                                                                                                                                                                                                                                                                                                                        |
-| `onMessage`        | `Function` | `(ctx, message, isBinary) => {}`                   | Called when message received                                                                                                                                                                                                                                                                                                                                       |
-| `onClose`          | `Function` | `(ctx, code, message) => {}`                       | Called when client disconnects                                                                                                                                                                                                                                                                                                                                     |
-| `onDrain`          | `Function` | `(ctx) => {}`                                      | Called when socket is writable again                                                                                                                                                                                                                                                                                                                               |
-| `onError`          | `Function` | `(ctx, error) => {}`                               | Called on WebSocket error                                                                                                                                                                                                                                                                                                                                          |
-| `onUpgrade`        | `Function` | `(meta) => ({isAllowed: true, userData?: object})` | Validate WebSocket upgrade. Receives `meta` object with: `url()`, `ip()`, `getHeader(name)`, `getQuery(key)`, `getParameter(indexOrName)`, `aborted` boolean. Return `userData` to make it available via `ctx.data`. Call the `meta` getters synchronously, before any `await` — the underlying request is only valid for the duration of the synchronous callback |
-| `onSubscription`   | `Function` | `(ctx, topic, newCount, oldCount) => {}`           | Called on topic subscription change                                                                                                                                                                                                                                                                                                                                |
-| `connectionKey`    | `Function` | `undefined`                                        | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead).                                                                                           |
+| Option               | Type       | Default                                               | Description                                                                                                                                                                                                                                                              |
+| -------------------- | ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enabled`            | `Boolean`  | `false`                                               | Enable WebSocket support. If not set and at least one ws handler is provided, WS will be enabled automatically.                                                                                                                                                          |
+| `wsIdleTimeoutSec`   | `Number`   | `15`                                                  | Idle timeout in seconds (min: 5). On the Node backend this also bounds partial/fragmented message assembly.                                                                                                                                                              |
+| `wsUpgradeTimeoutMs` | `Number`   | `10000`                                               | Node backend deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                          |
+| `onOpen`             | `Function` | `(ctx) => {}`                                         | Called when client connects.                                                                                                                                                                                                                                             |
+| `onMessage`          | `Function` | `(ctx, message, isBinary) => {}`                      | Called when message received.                                                                                                                                                                                                                                            |
+| `onClose`            | `Function` | `(ctx, code, message) => {}`                          | Called when client disconnects.                                                                                                                                                                                                                                          |
+| `onDrain`            | `Function` | `(ctx) => {}`                                         | Called when socket is writable again.                                                                                                                                                                                                                                    |
+| `onError`            | `Function` | `(ctx, error) => {}`                                  | Called on WebSocket error.                                                                                                                                                                                                                                               |
+| `onUpgrade`          | `Function` | `(meta) => ({isAllowed: true, userData?, protocol?})` | Validate WebSocket upgrade. `protocol`, when returned, must exactly match one token from `meta.getHeader('sec-websocket-protocol')`. Call metadata getters synchronously before any `await`; the underlying uWS request is only valid for the synchronous callback.      |
+| `onSubscription`     | `Function` | `(ctx, topic, newCount, oldCount) => {}`              | Called on topic subscription change.                                                                                                                                                                                                                                     |
+| `connectionKey`      | `Function` | `undefined`                                           | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
+
+When a client requests WebSocket subprotocols, `onUpgrade` must explicitly
+return the selected token as `protocol`. The value must be one of the requested
+tokens; raw client input is never reflected automatically.
 
 ### Server Methods
 

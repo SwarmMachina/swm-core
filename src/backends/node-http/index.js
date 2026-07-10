@@ -9,11 +9,12 @@ import WsLayer from './ws/ws-layer.js'
 const METHOD_TO_ROUTE = { del: 'delete' }
 
 /**
+ * @param {typeof createServer} [createHttpServer]
  * @returns {object}
  */
-export function App() {
+export function App(createHttpServer = createServer) {
   const router = new Router()
-  const state = { server: null, listening: false, wsLayer: null }
+  const state = { server: null, listening: false, wsLayer: null, errorHandler: null }
 
   /**
    *
@@ -82,6 +83,11 @@ export function App() {
       return app
     },
 
+    onError(handler) {
+      state.errorHandler = typeof handler === 'function' ? handler : null
+      return app
+    },
+
     publish(topic, message, isBinary) {
       return state.wsLayer ? state.wsLayer.publish(topic, message, isBinary) : false
     },
@@ -91,7 +97,7 @@ export function App() {
     },
 
     listen(port, cb) {
-      const server = createServer({ noDelay: true }, onRequest)
+      const server = createHttpServer({ noDelay: true }, onRequest)
 
       state.server = server
 
@@ -101,10 +107,18 @@ export function App() {
 
       let settled = false
 
-      server.once('error', () => {
+      server.on('error', (err) => {
         if (!settled) {
           settled = true
           cb(null)
+          return
+        }
+
+        try {
+          state.errorHandler?.(err)
+        } catch {
+          // Transport error handlers must never turn an EventEmitter error
+          // into an uncaught exception.
         }
       })
 

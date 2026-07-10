@@ -78,6 +78,13 @@ describe('Server', () => {
       strictEqual(typeof server.onHttpError, 'function')
     })
 
+    test('should use custom onServerError handler', () => {
+      const onServerError = () => {}
+      const server = makeServer({ router: () => {}, onServerError })
+
+      strictEqual(server.onServerError, onServerError)
+    })
+
     test('should throw error when both router and routes are provided', () => {
       throws(() => makeServer({ router: () => {}, routes: [] }), {
         name: 'TypeError',
@@ -232,6 +239,17 @@ describe('Server', () => {
       )
     })
 
+    test('should validate wsUpgradeTimeoutMs', () => {
+      throws(() => makeServer({ router: () => {}, ws: { enabled: true, wsUpgradeTimeoutMs: 99 } }), {
+        name: 'TypeError',
+        message: 'wsUpgradeTimeoutMs must be in range 100 - 300000'
+      })
+      throws(() => makeServer({ router: () => {}, ws: { enabled: true, wsUpgradeTimeoutMs: 300_001 } }), {
+        name: 'TypeError',
+        message: 'wsUpgradeTimeoutMs must be in range 100 - 300000'
+      })
+    })
+
     test('should assign WebSocket handlers when provided', () => {
       const onOpen = () => {}
       const onClose = () => {}
@@ -282,16 +300,16 @@ describe('Server', () => {
   describe('backend selection', () => {
     // This block tests the backend option itself, so it uses `new Server`
     // directly (not the uws-pinning makeServer helper).
-    test('should default to the node backend', () => {
+    test('should default to the uws backend', () => {
       const server = new Server({ router: () => {} })
 
-      strictEqual(server.backend, 'node')
+      strictEqual(server.backend, 'uws')
     })
 
-    test('should accept the uws backend', () => {
-      const server = new Server({ router: () => {}, backend: 'uws' })
+    test('should accept the opt-in node backend', () => {
+      const server = new Server({ router: () => {}, backend: 'node' })
 
-      strictEqual(server.backend, 'uws')
+      strictEqual(server.backend, 'node')
     })
 
     test('should throw on an unknown backend', () => {
@@ -304,10 +322,11 @@ describe('Server', () => {
     test('keeps the node backend when combined with WebSocket options', () => {
       const server = new Server({
         router: () => {},
+        backend: 'node',
         ws: { onMessage: () => {} }
       })
 
-      // The node backend serves WebSocket natively; no fallback to uws.
+      // The node backend serves WebSocket natively when explicitly selected.
       strictEqual(server.backend, 'node')
       strictEqual(server.wsEnabled, true)
     })
@@ -555,6 +574,7 @@ describe('Server', () => {
       strictEqual(wsCall !== undefined, true)
       strictEqual(wsCall.path, '/*')
       strictEqual(wsCall.config.idleTimeout, 20)
+      strictEqual(wsCall.config.upgradeTimeout, 10_000)
       strictEqual(wsCall.config.maxPayloadLength, 1024 * 1024)
       strictEqual(typeof wsCall.config.open, 'function')
       strictEqual(typeof wsCall.config.message, 'function')
@@ -576,6 +596,20 @@ describe('Server', () => {
       const wsCall = mockApp.calls.find((c) => c.method === 'ws')
 
       strictEqual(wsCall.config.idleTimeout, 15)
+      strictEqual(wsCall.config.upgradeTimeout, 10_000)
+    })
+
+    test('should pass custom wsUpgradeTimeoutMs to the backend', async () => {
+      const server = makeServer({
+        router: () => {},
+        ws: { enabled: true, wsUpgradeTimeoutMs: 2500 }
+      })
+
+      await server.listen()
+
+      const wsCall = getCurrentMockApp().calls.find((c) => c.method === 'ws')
+
+      strictEqual(wsCall.config.upgradeTimeout, 2500)
     })
   })
 
@@ -1364,7 +1398,7 @@ describe('Server', () => {
         router: () => {},
         ws: {
           enabled: true,
-          onUpgrade: () => ({ isAllowed: true, userData })
+          onUpgrade: () => ({ isAllowed: true, userData, protocol: 'protocol123' })
         }
       })
 
@@ -1480,7 +1514,7 @@ describe('Server', () => {
       req.setHeader('sec-websocket-protocol', 'STALE-after-return')
       req.setHeader('sec-websocket-extensions', 'STALE-after-return')
 
-      resolveFn({ isAllowed: true, userData: {} })
+      resolveFn({ isAllowed: true, userData: {}, protocol: 'sync-protocol' })
 
       await Promise.resolve()
 
@@ -1490,6 +1524,32 @@ describe('Server', () => {
       strictEqual(upgradeCall.secKey, 'sync-key')
       strictEqual(upgradeCall.protocol, 'sync-protocol')
       strictEqual(upgradeCall.extensions, 'sync-extensions')
+    })
+
+    test('should reject an unrequested subprotocol', async () => {
+      let receivedError = null
+      const server = makeServer({
+        router: () => {},
+        ws: {
+          enabled: true,
+          onUpgrade: () => ({ isAllowed: true, protocol: 'admin' }),
+          onError: (ctx, err) => {
+            receivedError = err
+          }
+        }
+      })
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      req.setHeader('sec-websocket-key', 'key')
+      req.setHeader('sec-websocket-protocol', 'chat, events')
+      server.onUpgrade(res, req, {})
+
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(res.isUpgraded(), false)
+      strictEqual(res.getStatus(), STATUS_TEXT[403])
+      strictEqual(receivedError?.message, 'WebSocket upgrade protocol was not requested by the client: admin')
     })
 
     test('should not upgrade when aborted before async resolve', async () => {

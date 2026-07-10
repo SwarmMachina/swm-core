@@ -77,9 +77,10 @@ class FakeSocket extends EventEmitter {
 
 /**
  * @param {object} [opt]
+ * @param {number} [opt.maxBackpressure]
  * @returns {{ws: NodeWebSocket, socket: FakeSocket, events: object[], hub: object}}
  */
-function make({ userData = { id: 1 } } = {}) {
+function make({ userData = { id: 1 }, maxBackpressure } = {}) {
   const socket = new FakeSocket()
   const events = []
   const hub = {
@@ -92,7 +93,7 @@ function make({ userData = { id: 1 } } = {}) {
     drain: () => events.push({ type: 'drain' }),
     close: (conn, code, reason) => events.push({ type: 'close', code, reason: Buffer.from(reason) })
   }
-  const ws = new NodeWebSocket({ socket, behavior, hub, userData, maxPayload: 1 << 20 })
+  const ws = new NodeWebSocket({ socket, behavior, hub, userData, maxPayload: 1 << 20, maxBackpressure })
 
   return { ws, socket, events, hub }
 }
@@ -165,6 +166,29 @@ describe('ws NodeWebSocket', () => {
     const pong = socket.written.map(readServerFrame).find((f) => f.opcode === 0xa)
     ok(pong)
     strictEqual(pong.payload.toString(), 'pp')
+  })
+
+  test('terminates instead of queueing a pong above the backpressure ceiling', () => {
+    const { socket, events } = make({ maxBackpressure: 16 })
+
+    socket.writableLength = 16
+    socket.emit('data', clientFrame(0x9, 'pp'))
+
+    strictEqual(socket.written.length, 0)
+    strictEqual(socket.destroyed, true)
+    strictEqual(events.filter((event) => event.type === 'close').length, 1)
+    strictEqual(events.find((event) => event.type === 'close').code, 1006)
+  })
+
+  test('tracks how long a partial message has been retained', () => {
+    const { ws, socket } = make()
+    const bytes = clientFrame(0x1, 'slow')
+
+    socket.emit('data', bytes.subarray(0, 1))
+    strictEqual(ws.pendingSince > 0, true)
+
+    socket.emit('data', bytes.subarray(1))
+    strictEqual(ws.pendingSince, 0)
   })
 
   test('peer close echoes a close frame and fires behavior.close once', () => {

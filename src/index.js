@@ -8,6 +8,34 @@ export { default as cors } from './cors.js'
 export { default as serveStatic } from './serve-static.js'
 
 const isPromise = (v) => v != null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function'
+const WS_PROTOCOL_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+
+/**
+ * Select and validate the application-requested WebSocket subprotocol.
+ * @param {string} requestedHeader
+ * @param {unknown} selected
+ * @returns {string}
+ */
+function selectWsProtocol(requestedHeader, selected) {
+  if (selected == null || selected === '') {
+    return ''
+  }
+
+  if (typeof selected !== 'string' || !WS_PROTOCOL_TOKEN.test(selected)) {
+    throw new TypeError('WebSocket upgrade protocol must be a valid protocol token')
+  }
+
+  const requested = requestedHeader
+    .split(',')
+    .map((protocol) => protocol.trim())
+    .filter(Boolean)
+
+  if (!requested.includes(selected)) {
+    throw new TypeError(`WebSocket upgrade protocol was not requested by the client: ${selected}`)
+  }
+
+  return selected
+}
 
 /**
  * Resolve a backend module to the uWS-shaped surface `{ App, us_listen_socket_close }`.
@@ -28,9 +56,10 @@ async function loadBackend(name) {
  * @typedef {object} WSOptions
  * @property {boolean} [enabled]
  * @property {number} [wsIdleTimeoutSec]
+ * @property {number} [wsUpgradeTimeoutMs]
  * @property {(ctx: WSContext) => any} [onOpen]
  * @property {(ctx: WSContext) => any} [onDrain]
- * @property {(meta: object) => Promise<{isAllowed: boolean, userData?: object}>} [onUpgrade]
+ * @property {(meta: object) => ({isAllowed: boolean, userData?: object, protocol?: string}|Promise<{isAllowed: boolean, userData?: object, protocol?: string}>)} [onUpgrade]
  * @property {(ctx: WSContext|null, err: Error) => any} [onError]
  * @property {(ctx: WSContext, code: number, reason: ArrayBuffer) => any} [onClose]
  * @property {(ctx: WSContext, msg: ArrayBuffer, isBinary: boolean) => any} [onMessage]
@@ -75,12 +104,13 @@ export default class Server {
    * @param {(ctx: HttpContext) => any|Promise<any>} [opt.router] - Universal router function (micro like API)
    * @param {Route[]} [opt.routes] - Array of route definitions (native routing API)
    * @param {(ctx: HttpContext, err: Error) => any|Promise<any>} [opt.onHttpError]
+   * @param {(err: Error) => any|Promise<any>} [opt.onServerError]
    * @param {number} [opt.port]
    * @param {number} [opt.maxBodySize] - in mb
    * @param {WSOptions} [opt.ws]
-   * @param {'uws'|'node'} [opt.backend] - Transport backend. 'uws' (default) is the native turbo engine (requires the optional uwebsockets.js peer dependency); 'node' is the zero-dependency node:http backend.
+   * @param {'uws'|'node'} [opt.backend] - Transport backend. 'uws' (default) is the native turbo engine; 'node' is the opt-in node:http backend.
    */
-  constructor({ router, routes, onHttpError, port = 6000, maxBodySize = 1, ws, backend = 'uws' }) {
+  constructor({ router, routes, onHttpError, onServerError, port = 6000, maxBodySize = 1, ws, backend = 'uws' }) {
     if (router && routes) {
       throw new TypeError('Cannot use both "router" and "routes" options. Choose one.')
     }
@@ -109,6 +139,13 @@ export default class Server {
       throw new TypeError('ws.connectionKey must be a function')
     }
 
+    if (
+      ws?.wsUpgradeTimeoutMs != null &&
+      !(Number.isFinite(ws.wsUpgradeTimeoutMs) && ws.wsUpgradeTimeoutMs >= 100 && ws.wsUpgradeTimeoutMs <= 300_000)
+    ) {
+      throw new TypeError('wsUpgradeTimeoutMs must be in range 100 - 300000')
+    }
+
     if (backend !== 'uws' && backend !== 'node') {
       throw new TypeError("backend must be 'uws' or 'node'")
     }
@@ -121,6 +158,7 @@ export default class Server {
     this.maxBodyBytes = Math.floor(maxBodySize * 1024 * 1024)
 
     this.onHttpError = typeof onHttpError === 'function' ? onHttpError : () => {}
+    this.onServerError = typeof onServerError === 'function' ? onServerError : () => {}
     this.onWsOpen = () => {}
     this.onWsClose = () => {}
     this.onWsError = () => {}
@@ -129,6 +167,7 @@ export default class Server {
     this.onWsSubscription = () => {}
     this.onWsUpgrade = () => Promise.resolve({ isAllowed: true })
     this.wsConnectionKey = null
+    this.wsUpgradeTimeoutMs = 10_000
 
     const hasHandlers =
       typeof ws?.onMessage === 'function' ||
@@ -150,6 +189,7 @@ export default class Server {
       }
 
       this.wsIdleTimeoutSec = Math.floor(timeout)
+      this.wsUpgradeTimeoutMs = Math.floor(ws.wsUpgradeTimeoutMs ?? 10_000)
 
       this.onWsOpen = typeof ws.onOpen === 'function' ? ws.onOpen : () => {}
       this.onWsClose = typeof ws.onClose === 'function' ? ws.onClose : () => {}
@@ -200,6 +240,7 @@ export default class Server {
     if (!this.app) {
       this.#backend = await loadBackend(this.backend)
       this.app = this.#backend.App()
+      this.app.onError?.((err) => void this.safeCall(this.onServerError, err))
 
       if (this.useNativeRouting) {
         for (const route of this.routes) {
@@ -226,6 +267,7 @@ export default class Server {
       if (this.wsEnabled) {
         this.app.ws('/*', {
           idleTimeout: this.wsIdleTimeoutSec,
+          upgradeTimeout: this.wsUpgradeTimeoutMs,
           sendPingsAutomatically: true,
           maxPayloadLength: this.maxBodyBytes,
           open: this.onOpen.bind(this),
@@ -572,9 +614,7 @@ export default class Server {
           }
 
           if (result?.isAllowed) {
-            res.cork(() => {
-              res.upgrade(result.userData || {}, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
-            })
+            this.#acceptUpgrade(res, result, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
 
             return
           }
@@ -603,9 +643,7 @@ export default class Server {
       const result = upgradeResult || {}
 
       if (result?.isAllowed) {
-        res.cork(() => {
-          res.upgrade(result.userData || {}, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
-        })
+        this.#acceptUpgrade(res, result, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
       } else {
         res.cork(() => {
           res.writeStatus(STATUS_TEXT[403])
@@ -613,6 +651,33 @@ export default class Server {
         })
       }
     }
+  }
+
+  /**
+   * @param {import('uwebsockets.js').HttpResponse} res
+   * @param {{userData?: object, protocol?: string}} result
+   * @param {string} secWebSocketKey
+   * @param {string} requestedProtocol
+   * @param {string} secWebSocketExtensions
+   * @param {import('uwebsockets.js').us_socket_context_t} context
+   */
+  #acceptUpgrade(res, result, secWebSocketKey, requestedProtocol, secWebSocketExtensions, context) {
+    let protocol
+
+    try {
+      protocol = selectWsProtocol(requestedProtocol, result.protocol)
+    } catch (err) {
+      res.cork(() => {
+        res.writeStatus(STATUS_TEXT[403])
+        res.end()
+      })
+      void this.safeWsError(null, err)
+      return
+    }
+
+    res.cork(() => {
+      res.upgrade(result.userData || {}, secWebSocketKey, protocol, secWebSocketExtensions, context)
+    })
   }
 
   /**

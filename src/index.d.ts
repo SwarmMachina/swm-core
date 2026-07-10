@@ -36,11 +36,15 @@ export interface UpgradeMeta {
 export interface UpgradeResult {
   isAllowed: boolean
   userData?: object
+  /** Selected subprotocol. Must be one of the tokens requested by the client. */
+  protocol?: string
 }
 
 export interface WSOptions {
   enabled?: boolean
   wsIdleTimeoutSec?: number
+  /** Node backend: maximum time allowed for an asynchronous upgrade decision. @default 10000 */
+  wsUpgradeTimeoutMs?: number
   onOpen?: (ctx: WSContext) => any
   onMessage?: (ctx: WSContext, message: ArrayBuffer, isBinary: boolean) => any
   onClose?: (ctx: WSContext, code: number, message: ArrayBuffer) => any
@@ -64,6 +68,8 @@ export interface ServerOptions {
   /** Native routing API: an array of route definitions. Provide either `router` or `routes`, not both. */
   routes?: Route[]
   onHttpError?: (ctx: HttpContext, err: Error) => any | Promise<any>
+  /** Node backend transport errors emitted after the server has started listening. */
+  onServerError?: (err: Error) => any | Promise<any>
   /** @default 6000 */
   port?: number
   /** Max request body size in MB (1-64). @default 1 */
@@ -71,9 +77,9 @@ export interface ServerOptions {
   ws?: WSOptions
   /**
    * Transport backend. `'uws'` (default) is the native uWebSockets.js turbo
-   * engine and requires the optional `uwebsockets.js` peer dependency.
-   * `'node'` is the zero-dependency node:http backend (HTTP + WebSocket).
-   * @default 'node'
+   * engine. `'node'` is the bundled, opt-in node:http backend (HTTP +
+   * WebSocket).
+   * @default 'uws'
    */
   backend?: 'uws' | 'node'
 }
@@ -133,7 +139,7 @@ export type WSSendStatus = 0 | 1 | 2
  * by the native uWebSockets.js socket (`'uws'` backend) or the node:http
  * WebSocket (`'node'` backend). Its identity is stable for the connection's
  * lifetime; invalid after close. Typed as an opaque interface so the package
- * has no compile-time dependency on the optional uWebSockets.js typings.
+ * does not expose backend-specific uWebSockets.js types in the public API.
  */
 export interface RawWebSocket {
   getUserData(): any

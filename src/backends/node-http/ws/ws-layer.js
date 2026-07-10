@@ -5,6 +5,53 @@ import { encode } from './writer.js'
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const EMPTY = Buffer.alloc(0)
+const WS_PROTOCOL_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+
+/**
+ * @param {unknown} value
+ * @param {string} token
+ * @returns {boolean}
+ */
+function headerHasToken(value, token) {
+  if (typeof value !== 'string') {
+    return false
+  }
+
+  return value.split(',').some((part) => part.trim().toLowerCase() === token)
+}
+
+/**
+ * RFC 6455 requires a base64-encoded 16-byte nonce.
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isValidWebSocketKey(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]{22}==$/.test(value)) {
+    return false
+  }
+
+  const decoded = Buffer.from(value, 'base64')
+
+  return decoded.length === 16 && decoded.toString('base64') === value
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isValidProtocolHeader(value) {
+  if (value === undefined) {
+    return true
+  }
+
+  if (typeof value !== 'string') {
+    return false
+  }
+
+  const protocols = value.split(',').map((protocol) => protocol.trim())
+
+  return protocols.length > 0 && protocols.every((protocol) => WS_PROTOCOL_TOKEN.test(protocol))
+}
 
 /**
  * @param {string|Buffer|ArrayBuffer|ArrayBufferView} data
@@ -40,7 +87,7 @@ function topicToArrayBuffer(topic) {
  * Minimal uWS-shaped response for the upgrade handshake, writing raw HTTP over
  * the socket. Implements only what Server.onUpgrade calls.
  */
-class UpgradeResponse {
+export class UpgradeResponse {
   #socket
   #head
   #layer
@@ -48,16 +95,23 @@ class UpgradeResponse {
   #headers = []
   #done = false
   #abortedCb = null
+  #timeout = null
 
   /**
    * @param {import('node:net').Socket} socket
    * @param {Buffer} head
    * @param {WsLayer} layer
+   * @param {number} timeoutMs
    */
-  constructor(socket, head, layer) {
+  constructor(socket, head, layer, timeoutMs) {
     this.#socket = socket
     this.#head = head
     this.#layer = layer
+
+    if (timeoutMs > 0) {
+      this.#timeout = setTimeout(this.#onTimeout, timeoutMs)
+      this.#timeout.unref?.()
+    }
   }
 
   /**
@@ -91,8 +145,7 @@ class UpgradeResponse {
       return
     }
 
-    this.#done = true
-    this.#detachAborted()
+    this.#finish()
 
     const bodyBuf = body ? toBuffer(body) : EMPTY
 
@@ -123,18 +176,54 @@ class UpgradeResponse {
   }
 
   #onAborted = () => {
+    if (this.#done) {
+      return
+    }
+
+    this.#done = true
     const cb = this.#abortedCb
 
-    this.#detachAborted()
+    this.#cleanup()
 
     if (cb) {
       cb()
     }
   }
 
+  #onTimeout = () => {
+    if (this.#done) {
+      return
+    }
+
+    this.#done = true
+    const cb = this.#abortedCb
+
+    this.#cleanup()
+
+    if (cb) {
+      cb()
+    }
+
+    this.#socket.destroy()
+  }
+
   #detachAborted() {
     this.#socket.removeListener('close', this.#onAborted)
     this.#socket.removeListener('error', this.#onAborted)
+  }
+
+  #cleanup() {
+    if (this.#timeout) {
+      clearTimeout(this.#timeout)
+      this.#timeout = null
+    }
+
+    this.#detachAborted()
+  }
+
+  #finish() {
+    this.#done = true
+    this.#cleanup()
   }
 
   /**
@@ -155,8 +244,13 @@ class UpgradeResponse {
       return
     }
 
-    this.#done = true
-    this.#detachAborted()
+    if (protocol && !WS_PROTOCOL_TOKEN.test(protocol)) {
+      this.#finish()
+      this.#socket.destroy()
+      return
+    }
+
+    this.#finish()
 
     const accept = createHash('sha1')
       .update(key + GUID)
@@ -167,11 +261,7 @@ class UpgradeResponse {
     raw += `sec-websocket-accept: ${accept}\r\n`
 
     if (protocol) {
-      const first = protocol.split(',')[0].trim()
-
-      if (first) {
-        raw += `sec-websocket-protocol: ${first}\r\n`
-      }
+      raw += `sec-websocket-protocol: ${protocol}\r\n`
     }
 
     raw += '\r\n'
@@ -185,6 +275,8 @@ export default class WsLayer {
   #behavior
   #maxPayload
   #idleTimeoutMs
+  #upgradeTimeoutMs
+  #sendPings
 
   #topics = new Map()
   #subs = new WeakMap()
@@ -198,8 +290,10 @@ export default class WsLayer {
     this.#behavior = behavior
     this.#maxPayload = behavior.maxPayloadLength
     this.#idleTimeoutMs = (behavior.idleTimeout ?? 15) * 1000
+    this.#upgradeTimeoutMs = behavior.upgradeTimeout ?? 10_000
+    this.#sendPings = behavior.sendPingsAutomatically !== false
 
-    if (behavior.sendPingsAutomatically !== false && this.#idleTimeoutMs > 0) {
+    if (this.#idleTimeoutMs > 0) {
       this.#startPingTimer()
     }
   }
@@ -212,10 +306,19 @@ export default class WsLayer {
    */
   handleUpgrade(req, socket, head) {
     const upgradeHeader = String(req.headers.upgrade ?? '').toLowerCase()
+    const connectionHeader = req.headers.connection
     const key = req.headers['sec-websocket-key']
     const version = req.headers['sec-websocket-version']
+    const protocol = req.headers['sec-websocket-protocol']
 
-    if (upgradeHeader !== 'websocket' || !key || String(version) !== '13') {
+    if (
+      req.method !== 'GET' ||
+      upgradeHeader !== 'websocket' ||
+      !headerHasToken(connectionHeader, 'upgrade') ||
+      !isValidWebSocketKey(key) ||
+      !isValidProtocolHeader(protocol) ||
+      String(version) !== '13'
+    ) {
       socket.write('HTTP/1.1 400 Bad Request\r\nconnection: close\r\n\r\n')
       socket.destroy()
       return
@@ -224,9 +327,14 @@ export default class WsLayer {
     socket.setNoDelay(true)
 
     const request = new NodeHttpRequest(req, [])
-    const res = new UpgradeResponse(socket, head, this)
+    const res = new UpgradeResponse(socket, head, this, this.#upgradeTimeoutMs)
 
-    this.#behavior.upgrade(res, request, null)
+    try {
+      this.#behavior.upgrade(res, request, null)
+    } catch {
+      res.writeStatus('500 Internal Server Error')
+      res.end()
+    }
   }
 
   /**
@@ -385,20 +493,28 @@ export default class WsLayer {
   #startPingTimer() {
     const interval = Math.max(1000, Math.floor(this.#idleTimeoutMs / 2))
 
-    this.#pingTimer = setInterval(() => {
-      const now = Date.now()
-
-      for (const conn of this.#connections) {
-        const idle = now - conn.lastActivity
-
-        if (idle >= this.#idleTimeoutMs) {
-          conn.terminate()
-        } else if (idle >= interval) {
-          conn.ping()
-        }
-      }
-    }, interval)
+    this.#pingTimer = setInterval(() => this.runMaintenance(), interval)
 
     this.#pingTimer.unref?.()
+  }
+
+  /**
+   * Shared connection maintenance pass. This keeps timeout cost at one timer
+   * per server rather than one timer per socket.
+   * @param {number} [now]
+   */
+  runMaintenance(now = Date.now()) {
+    const pingAfter = Math.max(1000, Math.floor(this.#idleTimeoutMs / 2))
+
+    for (const conn of this.#connections) {
+      const idle = now - conn.lastActivity
+      const assemblingTooLong = conn.pendingSince > 0 && now - conn.pendingSince >= this.#idleTimeoutMs
+
+      if (idle >= this.#idleTimeoutMs || assemblingTooLong) {
+        conn.terminate()
+      } else if (this.#sendPings && idle >= pingAfter) {
+        conn.ping()
+      }
+    }
   }
 }

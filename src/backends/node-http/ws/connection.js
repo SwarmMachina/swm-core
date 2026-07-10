@@ -69,6 +69,7 @@ export default class NodeWebSocket {
   #closeTimer = null
 
   lastActivity = 0
+  pendingSince = 0
 
   /**
    * @param {object} opt
@@ -90,9 +91,7 @@ export default class NodeWebSocket {
       maxPayload,
       onMessage: (payload, isBinary) => this.#behavior.message(this, payload, isBinary),
       onPing: (payload) => {
-        if (this.#open) {
-          this.#socket.write(encodePong(payload))
-        }
+        this.#writeControl(encodePong(payload))
       },
       onPong: () => {},
       onClose: (code, reason) => this.#handlePeerClose(code, reason),
@@ -197,9 +196,7 @@ export default class NodeWebSocket {
    * @param {Buffer} [payload]
    */
   ping(payload = EMPTY) {
-    if (this.#open) {
-      this.#socket.write(encodePing(payload))
-    }
+    this.#writeControl(encodePing(payload))
   }
 
   terminate() {
@@ -251,10 +248,45 @@ export default class NodeWebSocket {
   }
 
   /**
+   * Control frames obey the same memory ceiling as application messages. If
+   * even a small control frame cannot be queued safely, terminate the socket
+   * instead of growing the writable buffer without bound.
+   * @param {Buffer} frame
+   * @returns {number}
+   */
+  #writeControl(frame) {
+    if (!this.#open) {
+      return DROPPED
+    }
+
+    if (this.#socket.writableLength >= this.#maxBackpressure) {
+      this.#hardClose = true
+      this.#code = 1006
+      this.#finalize()
+      return DROPPED
+    }
+
+    const ok = this.#socket.write(frame)
+
+    if (!ok) {
+      this.#backpressured = true
+      return BACKPRESSURE
+    }
+
+    return SUCCESS
+  }
+
+  /**
    * @param {Buffer} chunk
    */
   #feed(chunk) {
-    this.lastActivity = Date.now()
+    if (!this.#open) {
+      return
+    }
+
+    const now = Date.now()
+
+    this.lastActivity = now
 
     this.#socket.cork()
 
@@ -262,6 +294,12 @@ export default class NodeWebSocket {
       this.#parser.push(chunk)
     } finally {
       this.#socket.uncork()
+    }
+
+    if (this.#parser.pending) {
+      this.pendingSince ||= now
+    } else {
+      this.pendingSince = 0
     }
   }
 
@@ -301,6 +339,8 @@ export default class NodeWebSocket {
 
     this.#finalized = true
     this.#open = false
+    this.pendingSince = 0
+    this.#parser.stop()
 
     if (this.#closeTimer) {
       clearTimeout(this.#closeTimer)

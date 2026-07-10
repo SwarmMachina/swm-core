@@ -106,6 +106,31 @@ describe('ws FrameParser', () => {
     strictEqual(events[0].payload.toString(), 'chunked')
   })
 
+  test('tracks partial input and releases it after a complete frame', () => {
+    const { parser, events } = makeParser()
+    const bytes = frame({ opcode: 1, payload: 'pending' })
+
+    parser.push(bytes.subarray(0, 1))
+    strictEqual(parser.pending, true)
+
+    parser.push(bytes.subarray(1))
+    strictEqual(parser.pending, false)
+    strictEqual(events[0].payload.toString(), 'pending')
+  })
+
+  test('stop releases pending input and ignores later frames', () => {
+    const { parser, events } = makeParser()
+
+    parser.push(Buffer.from([0x81]))
+    strictEqual(parser.pending, true)
+
+    parser.stop()
+    parser.push(frame({ opcode: 1, payload: 'late' }))
+
+    strictEqual(parser.pending, false)
+    strictEqual(events.length, 0)
+  })
+
   test('handles two frames arriving in a single buffer', () => {
     const { parser, events } = makeParser()
 
@@ -187,6 +212,41 @@ describe('ws FrameParser', () => {
     const b = makeParser({ maxPayload: 1 << 20 })
     b.parser.push(frame({ opcode: 2, payload: big64 }))
     strictEqual(b.events[0].payload.length, 70000)
+  })
+
+  test('rejects non-canonical 16-bit payload lengths (1002)', () => {
+    const { parser, events } = makeParser()
+    const mask = Buffer.from(DEFAULT_MASK)
+    const payload = applyMask(Buffer.from('x'), DEFAULT_MASK)
+
+    parser.push(Buffer.concat([Buffer.from([0x81, 0xfe, 0x00, 0x01]), mask, payload]))
+
+    strictEqual(events[0].type, 'error')
+    strictEqual(events[0].code, 1002)
+  })
+
+  test('rejects non-canonical 64-bit payload lengths (1002)', () => {
+    const { parser, events } = makeParser()
+    const mask = Buffer.from(DEFAULT_MASK)
+    const payload = applyMask(Buffer.from('x'), DEFAULT_MASK)
+    const length = Buffer.alloc(8)
+
+    length.writeUInt32BE(1, 4)
+    parser.push(Buffer.concat([Buffer.from([0x81, 0xff]), length, mask, payload]))
+
+    strictEqual(events[0].type, 'error')
+    strictEqual(events[0].code, 1002)
+  })
+
+  test('rejects a 64-bit payload length with the high bit set (1002)', () => {
+    const { parser, events } = makeParser()
+    const length = Buffer.alloc(8)
+
+    length.writeUInt32BE(0x80000000, 0)
+    parser.push(Buffer.concat([Buffer.from([0x82, 0xff]), length]))
+
+    strictEqual(events[0].type, 'error')
+    strictEqual(events[0].code, 1002)
   })
 
   test('rejects a frame with RSV bits set (1002)', () => {

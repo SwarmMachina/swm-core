@@ -5,6 +5,112 @@ const GET_LEN16 = 1
 const GET_LEN64 = 2
 const GET_MASK = 3
 const GET_PAYLOAD = 4
+const QUEUE_BLOCK_SIZE = 16 * 1024
+
+/**
+ * Byte queue optimized for both normal socket chunks and adversarial tiny
+ * chunks. Large chunks stay zero-copy; small chunks are copied into fixed-size
+ * blocks so one-byte writes cannot create one retained Buffer object each.
+ */
+class BufferQueue {
+  #blocks = []
+  #head = 0
+
+  length = 0
+
+  /**
+   * @param {Buffer} chunk
+   */
+  push(chunk) {
+    let offset = 0
+    let remaining = chunk.length
+    let tail = this.#blocks[this.#blocks.length - 1]
+
+    if (tail && !tail.owned && remaining < QUEUE_BLOCK_SIZE) {
+      const retained = tail.end - tail.start
+
+      if (retained < QUEUE_BLOCK_SIZE) {
+        const buffer = Buffer.allocUnsafe(QUEUE_BLOCK_SIZE)
+
+        tail.buffer.copy(buffer, 0, tail.start, tail.end)
+        tail = { buffer, start: 0, end: retained, owned: true }
+        this.#blocks[this.#blocks.length - 1] = tail
+      }
+    }
+
+    if (tail?.owned && tail.end < tail.buffer.length) {
+      const copyLength = Math.min(remaining, tail.buffer.length - tail.end)
+
+      chunk.copy(tail.buffer, tail.end, offset, offset + copyLength)
+      tail.end += copyLength
+      offset += copyLength
+      remaining -= copyLength
+    }
+
+    if (remaining > 0) {
+      this.#blocks.push({ buffer: chunk, start: offset, end: chunk.length, owned: false })
+    }
+
+    this.length += chunk.length
+  }
+
+  /**
+   * @param {number} n
+   * @returns {Buffer}
+   */
+  consume(n) {
+    this.length -= n
+
+    const first = this.#blocks[this.#head]
+    const available = first.end - first.start
+
+    if (n <= available) {
+      const out = first.buffer.subarray(first.start, first.start + n)
+
+      first.start += n
+
+      if (first.start === first.end) {
+        this.#releaseHead()
+      }
+
+      return out
+    }
+
+    const out = Buffer.allocUnsafe(n)
+    let offset = 0
+
+    while (offset < n) {
+      const block = this.#blocks[this.#head]
+      const blockLength = block.end - block.start
+      const copyLength = Math.min(n - offset, blockLength)
+
+      block.buffer.copy(out, offset, block.start, block.start + copyLength)
+      block.start += copyLength
+      offset += copyLength
+
+      if (block.start === block.end) {
+        this.#releaseHead()
+      }
+    }
+
+    return out
+  }
+
+  clear() {
+    this.#blocks = []
+    this.#head = 0
+    this.length = 0
+  }
+
+  #releaseHead() {
+    this.#blocks[this.#head++] = null
+
+    if (this.#head >= 64 && this.#head * 2 >= this.#blocks.length) {
+      this.#blocks = this.#blocks.slice(this.#head)
+      this.#head = 0
+    }
+  }
+}
 
 /**
  * @param {number} code
@@ -49,8 +155,7 @@ export default class FrameParser {
   #onClose
   #onError
 
-  #buffers = []
-  #bufferedBytes = 0
+  #queue = new BufferQueue()
 
   #state = GET_INFO
   #errored = false
@@ -94,11 +199,30 @@ export default class FrameParser {
     }
 
     if (chunk.length) {
-      this.#buffers.push(chunk)
-      this.#bufferedBytes += chunk.length
+      this.#queue.push(chunk)
     }
 
     this.#run()
+  }
+
+  /**
+   * Whether a partial frame or fragmented message is currently retained.
+   * @returns {boolean}
+   */
+  get pending() {
+    return !this.#errored && (this.#fragmented || this.#state !== GET_INFO || this.#queue.length > 0)
+  }
+
+  /** Stop parsing and release all retained input without emitting an error. */
+  stop() {
+    this.#errored = true
+    this.#clearBuffered()
+  }
+
+  #clearBuffered() {
+    this.#queue.clear()
+    this.#messageChunks = []
+    this.#totalPayload = 0
   }
 
   /**
@@ -106,78 +230,66 @@ export default class FrameParser {
    * @returns {Buffer}
    */
   #consume(n) {
-    this.#bufferedBytes -= n
-
-    const first = this.#buffers[0]
-
-    if (n === first.length) {
-      return this.#buffers.shift()
-    }
-
-    if (n < first.length) {
-      this.#buffers[0] = first.subarray(n)
-      return first.subarray(0, n)
-    }
-
-    const dst = Buffer.allocUnsafe(n)
-    let offset = 0
-
-    while (offset < n) {
-      const buf = this.#buffers[0]
-      const need = n - offset
-
-      if (need >= buf.length) {
-        dst.set(buf, offset)
-        offset += buf.length
-        this.#buffers.shift()
-      } else {
-        dst.set(buf.subarray(0, need), offset)
-        this.#buffers[0] = buf.subarray(need)
-        offset += need
-      }
-    }
-
-    return dst
+    return this.#queue.consume(n)
   }
 
   #run() {
     while (!this.#errored) {
       if (this.#state === GET_INFO) {
-        if (this.#bufferedBytes < 2) {
+        if (this.#queue.length < 2) {
           return
         }
 
         this.#getInfo()
       } else if (this.#state === GET_LEN16) {
-        if (this.#bufferedBytes < 2) {
+        if (this.#queue.length < 2) {
           return
         }
 
         this.#payloadLen = this.#consume(2).readUInt16BE(0)
+
+        if (this.#payloadLen < 126) {
+          this.#fail(1002, 'non-canonical 16-bit payload length')
+          return
+        }
+
         this.#haveLength()
       } else if (this.#state === GET_LEN64) {
-        if (this.#bufferedBytes < 8) {
+        if (this.#queue.length < 8) {
           return
         }
 
         const buf = this.#consume(8)
 
-        if (buf.readUInt32BE(0) !== 0) {
+        const high = buf.readUInt32BE(0)
+        const low = buf.readUInt32BE(4)
+
+        if ((high & 0x80000000) !== 0) {
+          this.#fail(1002, 'invalid 64-bit payload length')
+          return
+        }
+
+        if (high !== 0) {
           this.#fail(1009, 'message too large')
           return
         }
 
-        this.#payloadLen = buf.readUInt32BE(4)
+        if (low < 65536) {
+          this.#fail(1002, 'non-canonical 64-bit payload length')
+          return
+        }
+
+        this.#payloadLen = low
         this.#haveLength()
       } else if (this.#state === GET_MASK) {
-        if (this.#bufferedBytes < 4) {
+        if (this.#queue.length < 4) {
           return
         }
 
         this.#mask = this.#consume(4)
         this.#state = GET_PAYLOAD
       } else {
-        if (this.#bufferedBytes < this.#payloadLen) {
+        if (this.#queue.length < this.#payloadLen) {
           return
         }
 
@@ -356,8 +468,7 @@ export default class FrameParser {
     // A close frame terminates the stream: stop parsing so trailing frames in
     // the same chunk are not processed (RFC 6455 - nothing follows a Close).
     this.#errored = true
-    this.#buffers = []
-    this.#bufferedBytes = 0
+    this.#clearBuffered()
 
     this.#onClose(code, reason)
   }
@@ -372,8 +483,7 @@ export default class FrameParser {
     }
 
     this.#errored = true
-    this.#buffers = []
-    this.#bufferedBytes = 0
+    this.#clearBuffered()
 
     this.#onError(code, message)
   }

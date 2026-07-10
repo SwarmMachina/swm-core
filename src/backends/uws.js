@@ -11,7 +11,7 @@ export async function load() {
       mod = await import('uwebsockets.js')
     } catch (err) {
       throw new Error(
-        "The 'uws' backend requires the optional 'uwebsockets.js' dependency. Install it (npm i uwebsockets.js) or use backend: 'node'.",
+        "Failed to load the required 'uwebsockets.js' dependency. Reinstall the package for this platform or explicitly use backend: 'node'.",
         { cause: err }
       )
     }

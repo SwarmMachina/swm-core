@@ -1,7 +1,7 @@
 {
   "name": "@swarmmachina/swm-core",
   "version": "1.3.0",
-  "description": "Zero-dependency high-performance HTTP/WebSocket server built on uWebSockets.js",
+  "description": "High-performance HTTP/WebSocket server built on uWebSockets.js with an opt-in node:http backend",
   "keywords": [
     "http",
     "websocket",
@@ -62,13 +62,8 @@
     "prepublishOnly": "npm run fix && npm test",
     "release": "npm run check && npm test && npm publish"
   },
-  "peerDependencies": {
+  "dependencies": {
     "uwebsockets.js": "uNetworking/uWebSockets.js#v20.67.0"
-  },
-  "peerDependenciesMeta": {
-    "uwebsockets.js": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@swarmmachina/standards": "^1.0.3",
@@ -76,7 +71,6 @@
     "express": "^5.2.1",
     "fastify": "^5.8.5",
     "micro": "^10.0.1",
-    "uwebsockets.js": "uNetworking/uWebSockets.js#v20.67.0",
     "ws": "^8.21.0"
   }
 }
