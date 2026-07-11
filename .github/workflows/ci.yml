@@ -49,12 +49,32 @@ jobs:
       - name: WS e2e tests (node backend)
         run: npm run test:e2e:ws:node
 
+      - name: swm-uws candidate binding compatibility
+        run: npm run test:e2e:swm-uws-candidate
+
+  swm-uws-bookworm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container: node:24-bookworm
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install
+        run: npm ci
+
+      - name: swm-uws candidate on production image
+        run: npm run test:e2e:swm-uws-candidate
+
   regression-profile:
     runs-on:
       group: swm-ci
       labels: bench
     timeout-minutes: 20
-    needs: test
+    needs: [test, swm-uws-bookworm]
     if: github.event_name != 'pull_request'
     permissions:
       contents: read
@@ -146,12 +166,44 @@ jobs:
           name: compare-ws
           path: benchmark/profiles/compare-ci/
 
+  binding-performance-gate:
+    runs-on:
+      group: swm-ci
+      labels: bench
+    timeout-minutes: 15
+    needs: compare-ws
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Native binding performance gate
+        run: npm run bench:bindings
+
+      - name: Upload binding comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: binding-comparison
+          path: benchmark/profiles/binding-compare/
+
   autobahn:
     runs-on:
       group: swm-ci
       labels: bench
     timeout-minutes: 30
-    needs: compare-ws
+    needs: binding-performance-gate
     permissions:
       contents: read
 

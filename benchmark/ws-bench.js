@@ -14,7 +14,7 @@ import { processV8Profile } from './helpers/v8-prof-run.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const KNOWN_FRAMEWORKS = new Set(['core', 'core-node', 'ws'])
+const KNOWN_FRAMEWORKS = new Set(['core', 'core-swm-uws', 'core-uwebsockets', 'core-node', 'ws'])
 
 /**
  * @param {string[]} argv
@@ -33,6 +33,7 @@ function parseWsBenchArgs(argv) {
       msgSize: 64,
       mode: 'closed',
       depth: 16,
+      order: 'random',
       v8prof: false,
       jsonOut: null
     },
@@ -66,6 +67,9 @@ function parseWsBenchArgs(argv) {
       },
       '--depth': (out, v) => {
         out.depth = Number(v)
+      },
+      '--order': (out, v) => {
+        out.order = String(v)
       },
       '--v8prof': (out, v) => {
         out.v8prof = v == null ? true : v === '1' || v === 'true' || v === 'on'
@@ -143,6 +147,7 @@ async function runOne({
     fw,
     msgPerSec: res.msgPerSec,
     latAvgMs: res.latencyAvgMs,
+    latP95Ms: res.latencyP95Ms,
     latP97_5Ms: res.latencyP97_5Ms,
     latP99Ms: res.latencyP99Ms,
     errors: res.errors,
@@ -179,6 +184,10 @@ async function main() {
     throw new Error(`Unknown --mode=${args.mode} (ws-bench supports: closed, open)`)
   }
 
+  if (args.order !== 'random' && args.order !== 'balanced') {
+    throw new Error(`Unknown --order=${args.order} (expected: random, balanced)`)
+  }
+
   const runStamp = formatYmdHms()
   const perFw = Object.fromEntries(args.frameworks.map((fw) => [fw, []]))
   const runRows = []
@@ -191,7 +200,12 @@ async function main() {
 
   for (let i = 0; i < args.runs; i++) {
     const rows = []
-    const order = shuffle(args.frameworks.slice())
+    const order =
+      args.order === 'balanced'
+        ? i % 2 === 0
+          ? args.frameworks.slice()
+          : args.frameworks.slice().reverse()
+        : shuffle(args.frameworks.slice())
 
     console.log(`\n== run ${i + 1}/${args.runs}: ${order.join(', ')} ==`)
 
@@ -221,6 +235,7 @@ async function main() {
         fw: r.fw,
         msgPerSec: Math.round(r.msgPerSec),
         latAvg: r.latAvgMs != null ? `${r.latAvgMs.toFixed(3)}ms` : 'n/a',
+        latP95: r.latP95Ms != null ? `${r.latP95Ms.toFixed(3)}ms` : 'n/a',
         latP99: r.latP99Ms != null ? `${r.latP99Ms.toFixed(3)}ms` : 'n/a',
         rss: r.rssMB != null ? `${r.rssMB.toFixed(0)}MB` : 'n/a',
         heap: r.heapMB != null ? `${r.heapMB.toFixed(0)}MB` : 'n/a',
@@ -238,6 +253,7 @@ async function main() {
     const arr = perFw[fw] || []
     const msg = arr.map((x) => x.msgPerSec).filter((v) => v != null)
     const avg = arr.map((x) => x.latAvgMs).filter((v) => v != null)
+    const p95 = arr.map((x) => x.latP95Ms).filter((v) => v != null)
     const p97 = arr.map((x) => x.latP97_5Ms).filter((v) => v != null)
     const p99 = arr.map((x) => x.latP99Ms).filter((v) => v != null)
 
@@ -245,6 +261,7 @@ async function main() {
       fw,
       msgPerSec: msg.length ? Math.round(median(msg)) : null,
       latAvgMs: avg.length ? Number(median(avg).toFixed(3)) : null,
+      latP95Ms: p95.length ? Number(median(p95).toFixed(3)) : null,
       latP97_5Ms: p97.length ? Number(median(p97).toFixed(3)) : null,
       latP99Ms: p99.length ? Number(median(p99).toFixed(3)) : null,
       n: arr.length
@@ -267,6 +284,7 @@ async function main() {
       sampleMs: args.sampleMs,
       mode: args.mode,
       depth: args.depth,
+      order: args.order,
       v8prof: args.v8prof,
       frameworks: args.frameworks
     },

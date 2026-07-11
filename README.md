@@ -73,6 +73,26 @@ or platform-incompatible native addon is treated as an installation error when
 the default backend starts. `backend: 'node'` remains an explicit runtime
 fallback.
 
+## Native binding comparison
+
+The migration gate runs the same `swm-core` HTTP and WebSocket paths with only
+the native binding changed: candidate `@swarmmachina/swm-uws@0.3.1` versus the
+current `uWebSockets.js@20.67.0` dependency. The candidate stays dev-only until
+compatibility and performance gates pass on the supported production image.
+
+```bash
+npm run test:e2e:bindings
+npm run bench:bindings
+```
+
+The performance command runs four measured iterations in balanced AB/BA order
+after a two-second warmup. HTTP uses 100 connections, six seconds and pipelining 10; WebSocket echo
+uses 50 connections, six seconds and 64-byte messages. The report includes
+throughput, HTTP p97.5/p99 and WebSocket p95/p99 latency, ELU, RSS, heap and errors, and writes its JSON
+artifact to `benchmark/profiles/binding-compare/summary.json`. Override the
+parameters with the `BINDING_BENCH_*` environment variables defined in
+`benchmark/binding-compare.js`.
+
 ## Quick Start
 
 ### Basic HTTP Server

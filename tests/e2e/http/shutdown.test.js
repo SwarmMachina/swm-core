@@ -31,7 +31,7 @@ test('shutdown: rejects all conections while stopping', async () => {
 
   const reqP = reqText(`${server.baseUrl}/slow`)
 
-  await delay(30)
+  await inFlight
 
   let closeResolved = false
 
@@ -46,7 +46,6 @@ test('shutdown: rejects all conections while stopping', async () => {
   assert.strictEqual(ping.status, 503)
   assert.strictEqual(ping.headers.get('connection'), 'close')
 
-  await inFlight
   await delay(30)
 
   const { status, text } = await reqP

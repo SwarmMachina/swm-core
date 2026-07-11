@@ -20,7 +20,7 @@ function percentile(buf, count, p) {
 // Running sum drives the average; the bounded ring buffer (last MAX_LAT_SAMPLES)
 // drives the percentiles.
 /**
- * @returns {{ record: (ms: number) => void, summary: (messages: number) => { avgMs: number|null, p97_5Ms: number|null, p99Ms: number|null } }}
+ * @returns {{ record: (ms: number) => void, summary: (messages: number) => { avgMs: number|null, p95Ms: number|null, p97_5Ms: number|null, p99Ms: number|null } }}
  */
 export default function createLatencyRecorder() {
   const lat = new Float64Array(MAX_LAT_SAMPLES)
@@ -41,6 +41,7 @@ export default function createLatencyRecorder() {
     summary(messages) {
       return {
         avgMs: messages ? sum / messages : null,
+        p95Ms: percentile(lat, count, 95),
         p97_5Ms: percentile(lat, count, 97.5),
         p99Ms: percentile(lat, count, 99)
       }

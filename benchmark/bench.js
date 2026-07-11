@@ -34,6 +34,7 @@ function parseBenchArgs(argv) {
       duration: null,
       connections: null,
       pipelining: null,
+      order: 'random',
       jsonOut: null
     },
     {
@@ -66,6 +67,9 @@ function parseBenchArgs(argv) {
       },
       '--pipelining': (out, v) => {
         out.pipelining = Number(v)
+      },
+      '--order': (out, v) => {
+        out.order = String(v)
       },
       '--json-out': (out, v) => {
         out.jsonOut = String(v)
@@ -165,6 +169,10 @@ async function main() {
   const args = parseBenchArgs(process.argv)
   const test = getTest(args.testName)
 
+  if (args.order !== 'random' && args.order !== 'balanced') {
+    throw new Error(`Unknown --order=${args.order} (expected: random, balanced)`)
+  }
+
   if (Number.isFinite(args.duration) && args.duration > 0) {
     test.duration = args.duration
   }
@@ -187,7 +195,12 @@ async function main() {
 
   for (let i = 0; i < args.runs; i++) {
     const rows = []
-    const order = shuffle(args.frameworks.slice())
+    const order =
+      args.order === 'balanced'
+        ? i % 2 === 0
+          ? args.frameworks.slice()
+          : args.frameworks.slice().reverse()
+        : shuffle(args.frameworks.slice())
 
     console.log(`\n== run ${i + 1}/${args.runs}: ${order.join(', ')} ==`)
 
@@ -301,6 +314,7 @@ async function main() {
       warmup: args.warmup,
       sampleMs: args.sampleMs,
       v8prof: args.v8prof,
+      order: args.order,
       frameworks: args.frameworks
     },
     runs: runRows,

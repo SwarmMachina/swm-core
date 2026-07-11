@@ -29,6 +29,10 @@ export async function startServer({ benchDir, serverName, fw, testName, runIndex
 
   const nodeArgs = []
 
+  if (fw === 'core-swm-uws') {
+    nodeArgs.push('--conditions=swm-uws-candidate')
+  }
+
   if (v8prof) {
     nodeArgs.push('--prof')
   }

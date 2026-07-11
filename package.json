@@ -26,6 +26,12 @@
       "default": "./src/index.js"
     }
   },
+  "imports": {
+    "#uws-binding": {
+      "swm-uws-candidate": "@swarmmachina/swm-uws",
+      "default": "uwebsockets.js"
+    }
+  },
   "files": [
     "src/",
     "README.md",
@@ -48,6 +54,8 @@
     "test:e2e:http:node": "SWM_BACKEND=node node --test tests/e2e/http/*.test.js",
     "test:e2e:ws": "node --test tests/e2e/ws/*.test.js",
     "test:e2e:ws:node": "SWM_BACKEND=node node --test tests/e2e/ws/*.test.js",
+    "test:e2e:swm-uws-candidate": "node --conditions=swm-uws-candidate --test tests/e2e/**/*.test.js",
+    "test:e2e:bindings": "npm run test:e2e && npm run test:e2e:swm-uws-candidate",
     "test:leak": "node --expose-gc --test tests/leak/*.leak.test.js",
     "test:leak:node": "SWM_BACKEND=node node --expose-gc --test tests/leak/*.leak.test.js",
     "test:autobahn": "node ./tests/autobahn/run.js",
@@ -57,6 +65,7 @@
     "bench:headers:core": "node ./benchmark/bench.js --test headers --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
     "bench:headers:prepared": "node ./benchmark/bench.js --test headers-prepared --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",
     "bench:ws": "node ./benchmark/ws-bench.js --fw core,ws --runs 1 --warmup 2 --v8prof true",
+    "bench:bindings": "node ./benchmark/binding-compare.js",
     "bench:prehandler": "node ./benchmark/prehandler-bench.js",
     "profile:ci": "node ./benchmark/regression-ci.js",
     "profile:compare": "node ./benchmark/compare-ci.js",
@@ -67,6 +76,7 @@
   },
   "devDependencies": {
     "@swarmmachina/standards": "^1.0.4",
+    "@swarmmachina/swm-uws": "0.3.1",
     "autocannon": "^8.0.0",
     "express": "^5.2.1",
     "fastify": "^5.8.5",
@@ -74,6 +84,6 @@
     "ws": "^8.21.0"
   },
   "dependencies": {
-    "@swarmmachina/swm-uws": "file:../swm-uws"
+    "uwebsockets.js": "github:uNetworking/uWebSockets.js#v20.67.0"
   }
 }

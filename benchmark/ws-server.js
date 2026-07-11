@@ -76,7 +76,7 @@ async function runCore(port, backend) {
  *
  */
 async function main() {
-  if (fw === 'core') {
+  if (fw === 'core' || fw === 'core-swm-uws' || fw === 'core-uwebsockets') {
     await runCore(port, 'uws')
     return
   }

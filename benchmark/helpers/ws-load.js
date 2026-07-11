@@ -12,7 +12,7 @@ import createLatencyRecorder from './latency-recorder.js'
  * @param {number} o.durationSec
  * @param {number} o.payloadBytes
  * @param {number} [o.echoTimeoutMs]
- * @returns {Promise<{messages: number, msgPerSec: number, latencyAvgMs: number|null, latencyP97_5Ms: number|null, latencyP99Ms: number|null, errors: number}>}
+ * @returns {Promise<{messages: number, msgPerSec: number, latencyAvgMs: number|null, latencyP95Ms: number|null, latencyP97_5Ms: number|null, latencyP99Ms: number|null, errors: number}>}
  */
 export default async function wsLoad({ url, connections, durationSec, payloadBytes, echoTimeoutMs = 5000 }) {
   const payload = Buffer.alloc(Math.max(1, payloadBytes), 0x61)
@@ -98,6 +98,7 @@ export default async function wsLoad({ url, connections, durationSec, payloadByt
     messages,
     msgPerSec: messages / durationSec,
     latencyAvgMs: summary.avgMs,
+    latencyP95Ms: summary.p95Ms,
     latencyP97_5Ms: summary.p97_5Ms,
     latencyP99Ms: summary.p99Ms,
     errors
