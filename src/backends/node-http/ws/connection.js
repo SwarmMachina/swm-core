@@ -101,6 +101,7 @@ export default class NodeWebSocket {
     socket.on('data', this.#onData)
     socket.on('error', this.#onSocketDown)
     socket.on('close', this.#onSocketDown)
+    socket.on('end', this.#onSocketDown)
     socket.on('drain', this.#onDrain)
 
     this.lastActivity = Date.now()
