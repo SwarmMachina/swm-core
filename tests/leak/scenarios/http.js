@@ -60,6 +60,9 @@ export function makeHttpScenarios() {
 
                 collect(body)
 
+                // BodyParser retains the raw buffer until the pooled context is cleared.
+                collect(await ctx.buffer())
+
                 return { ok: true, id: body.id }
               }
             }
@@ -146,7 +149,7 @@ export function makeHttpScenarios() {
                 const marker = makeMarker(nextId++)
 
                 collect(marker)
-                ctx.sendJson({ denied: true, id: marker.id }, 403)
+                ctx.sendJson({ denied: true, marker }, 403)
               },
               handler: () => {
                 throw new Error('handler must not run after short-circuit')

@@ -15,9 +15,16 @@ import {
 import { serveStatic } from '../../src/index.js'
 
 for (const scenario of makeHttpScenarios()) {
-  test(`http leak: ${scenario.name}`, async () => {
+  test(`http leak: ${scenario.name}`, async (t) => {
     const collector = makeCollector()
     const handle = await startHttpServer(scenario.serverOptions(collector.collect))
+
+    let closed = false
+
+    // Close the server if an assertion or scenario fails before measured shutdown.
+    t.after(() => {
+      if (!closed) return handle.close()
+    })
 
     for (let i = 0; i < scenario.iterations; i++) {
       await scenario.run(handle, collector.collect, i)
@@ -32,6 +39,8 @@ for (const scenario of makeHttpScenarios()) {
 
     await handle.close()
 
+    closed = true
+
     const shutdownMs = performance.now() - shutdownStart
 
     assert.ok(
@@ -44,12 +53,18 @@ for (const scenario of makeHttpScenarios()) {
   })
 }
 
-test('http leak: retained memory does not grow across sustained churn', async () => {
+test('http leak: retained memory does not grow across sustained churn', async (t) => {
   const handle = await startHttpServer({
     routes: [
       { method: 'get', path: '/ping', handler: () => ({ ok: true }) },
       { method: 'post', path: '/echo', handler: async (ctx) => ({ len: (await ctx.text()).length }) }
     ]
+  })
+
+  let closed = false
+
+  t.after(() => {
+    if (!closed) return handle.close()
   })
 
   await assertNoMemoryGrowth(
@@ -70,6 +85,8 @@ test('http leak: retained memory does not grow across sustained churn', async ()
   )
 
   await handle.close()
+
+  closed = true
 })
 
 test('http leak: serveStatic cache stays bounded', async () => {

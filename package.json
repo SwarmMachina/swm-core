@@ -58,6 +58,7 @@
     "test:e2e:bindings": "npm run test:e2e && npm run test:e2e:swm-uws-candidate",
     "test:leak": "node --expose-gc --test tests/leak/*.leak.test.js",
     "test:leak:node": "SWM_BACKEND=node node --expose-gc --test tests/leak/*.leak.test.js",
+    "soak": "node --expose-gc tests/soak/soak.js",
     "test:autobahn": "node ./tests/autobahn/run.js",
     "bench": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true",
     "bench:core": "node ./benchmark/bench.js --test base --runs 1 --warmup 10 --sample-ms 250 --v8prof true --fw core",

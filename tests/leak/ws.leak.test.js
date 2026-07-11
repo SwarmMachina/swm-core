@@ -5,9 +5,16 @@ import { makeWsScenarios } from './scenarios/ws.js'
 import { makeCollector, assertCollected, forceGC } from './helpers/leak-harness.js'
 
 for (const scenario of makeWsScenarios()) {
-  test(`ws leak: ${scenario.name}`, async () => {
+  test(`ws leak: ${scenario.name}`, async (t) => {
     const collector = makeCollector()
     const handle = await startWsServer(scenario.serverOptions(collector.collect))
+
+    let closed = false
+
+    // Close the server if an assertion or scenario fails before measured shutdown.
+    t.after(() => {
+      if (!closed) return handle.close()
+    })
 
     for (let i = 0; i < scenario.iterations; i++) {
       await scenario.run(handle, collector.collect, i)
@@ -22,6 +29,8 @@ for (const scenario of makeWsScenarios()) {
     const shutdownStart = performance.now()
 
     await handle.close()
+
+    closed = true
 
     const shutdownMs = performance.now() - shutdownStart
 

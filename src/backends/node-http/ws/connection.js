@@ -101,6 +101,8 @@ export default class NodeWebSocket {
     socket.on('data', this.#onData)
     socket.on('error', this.#onSocketDown)
     socket.on('close', this.#onSocketDown)
+    // HTTP server sockets are half-open, so a peer FIN without a close frame
+    // emits only 'end'. Finalize the WS context on that path as well.
     socket.on('end', this.#onSocketDown)
     socket.on('drain', this.#onDrain)
 
