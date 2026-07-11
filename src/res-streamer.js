@@ -4,7 +4,7 @@ export default class ResStreamer {
   /** @type {HttpContext} */
   #ctx = null
 
-  /** @type {import('uwebsockets.js').HttpResponse} */
+  /** @type {import('@swarmmachina/swm-uws').HttpResponse} */
   #res = null
 
   /** @type {import('node:stream').Readable} */
@@ -46,7 +46,7 @@ export default class ResStreamer {
 
   /**
    * @param {HttpContext} ctx
-   * @param {import('uwebsockets.js').HttpResponse} res
+   * @param {import('@swarmmachina/swm-uws').HttpResponse} res
    * @returns {ResStreamer}
    */
   reset(ctx, res = ctx?.res) {
