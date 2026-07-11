@@ -1,4 +1,6 @@
 import { Agent, get } from 'node:http'
+import { connect } from 'node:net'
+import { Readable } from 'node:stream'
 import { makeMarker } from '../helpers/leak-harness.js'
 
 /**
@@ -195,6 +197,84 @@ export function makeHttpScenarios() {
       teardown() {
         this.agent?.destroy()
         this.agent = null
+      }
+    },
+    {
+      name: 'abort-mid-body',
+      iterations: 100,
+      serverOptions(collect) {
+        return {
+          routes: [
+            {
+              method: 'post',
+              path: '/upload',
+              handler: async (ctx) => {
+                const marker = makeMarker(nextId++)
+
+                collect(marker)
+
+                try {
+                  await ctx.buffer()
+                } catch {
+                  // Aborted upload: the body promise is expected to reject.
+                }
+              }
+            }
+          ]
+        }
+      },
+      async run({ port }) {
+        await new Promise((resolve) => {
+          const sock = connect(port, '127.0.0.1', () => {
+            sock.write('POST /upload HTTP/1.1\r\nhost: 127.0.0.1\r\ncontent-length: 1048576\r\n\r\n')
+            sock.write(Buffer.alloc(4096, 1))
+            setTimeout(() => sock.destroy(), 5)
+          })
+
+          sock.on('error', () => {})
+          sock.on('close', resolve)
+        })
+      }
+    },
+    {
+      name: 'abort-mid-stream',
+      iterations: 100,
+      serverOptions(collect) {
+        return {
+          routes: [
+            {
+              method: 'get',
+              path: '/stream',
+              handler: (ctx) => {
+                const marker = makeMarker(nextId++)
+
+                collect(marker)
+
+                // Endless source: the framework must destroy it on abort,
+                // otherwise the marker stays reachable through the stream.
+                const readable = new Readable({
+                  read() {
+                    this.push(marker.blob)
+                  }
+                })
+
+                return ctx.stream(readable)
+              }
+            }
+          ]
+        }
+      },
+      async run({ port }) {
+        await new Promise((resolve) => {
+          const req = get({ host: '127.0.0.1', port, path: '/stream' }, (res) => {
+            res.once('data', () => {
+              req.destroy()
+            })
+          })
+
+          req.on('error', () => {})
+          req.on('close', resolve)
+        })
       }
     }
   ]
