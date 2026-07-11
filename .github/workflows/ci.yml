@@ -69,45 +69,12 @@ jobs:
       - name: swm-uws candidate on production image
         run: npm run test:e2e:swm-uws-candidate
 
-  regression-profile:
-    runs-on:
-      group: swm-ci
-      labels: bench
-    timeout-minutes: 20
-    needs: [test, swm-uws-bookworm]
-    if: github.event_name != 'pull_request'
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Regression profile
-        run: npm run profile:ci
-
-      - name: Upload regression profiles
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: regression-profiles
-          path: benchmark/profiles/regression-ci/
-
   compare-http:
     runs-on:
       group: swm-ci
       labels: bench
     timeout-minutes: 15
-    needs: regression-profile
+    needs: [test, swm-uws-bookworm]
     permissions:
       contents: read
 
@@ -166,12 +133,44 @@ jobs:
           name: compare-ws
           path: benchmark/profiles/compare-ci/
 
+  regression-profile:
+    runs-on:
+      group: swm-ci
+      labels: bench
+    timeout-minutes: 20
+    needs: compare-ws
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Regression profile
+        run: npm run profile:ci
+
+      - name: Upload regression profiles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-profiles
+          path: benchmark/profiles/regression-ci/
+
   binding-performance-gate:
     runs-on:
       group: swm-ci
       labels: bench
     timeout-minutes: 15
-    needs: compare-ws
+    needs: regression-profile
     permissions:
       contents: read
 
