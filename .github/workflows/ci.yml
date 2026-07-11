@@ -11,9 +11,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  source-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify workflow commit belongs to master
+        run: git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/master
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: source-policy
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +71,7 @@ jobs:
   swm-uws-bookworm:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: source-policy
     container: node:24-bookworm
     permissions:
       contents: read
@@ -69,12 +86,44 @@ jobs:
       - name: swm-uws candidate on production image
         run: npm run test:e2e:swm-uws-candidate
 
+  autobahn:
+    runs-on:
+      group: swm-ci
+      labels: bench
+    timeout-minutes: 30
+    needs: [test, swm-uws-bookworm]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Autobahn RFC 6455 conformance (node backend)
+        run: npm run test:autobahn
+
+      - name: Upload Autobahn report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report
+          path: tests/autobahn/reports/
+
   compare-http:
     runs-on:
       group: swm-ci
       labels: bench
     timeout-minutes: 15
-    needs: [test, swm-uws-bookworm]
+    needs: autobahn
     permissions:
       contents: read
 
@@ -197,42 +246,10 @@ jobs:
           name: binding-comparison
           path: benchmark/profiles/binding-compare/
 
-  autobahn:
-    runs-on:
-      group: swm-ci
-      labels: bench
-    timeout-minutes: 30
-    needs: binding-performance-gate
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Autobahn RFC 6455 conformance (node backend)
-        run: npm run test:autobahn
-
-      - name: Upload Autobahn report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: autobahn-report
-          path: tests/autobahn/reports/
-
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: autobahn
+    needs: binding-performance-gate
     if: success() && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
