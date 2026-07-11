@@ -1,8 +1,18 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { startHttpServer } from '../helpers/e2e-server.js'
 import { makeHttpScenarios } from './scenarios/http.js'
-import { makeCollector, assertCollected, assertNoMemoryGrowth, forceGC } from './helpers/leak-harness.js'
+import {
+  makeCollector,
+  assertCollected,
+  assertNoMemoryGrowth,
+  forceGC,
+  measureRetainedBytes
+} from './helpers/leak-harness.js'
+import { serveStatic } from '../../src/index.js'
 
 for (const scenario of makeHttpScenarios()) {
   test(`http leak: ${scenario.name}`, async () => {
@@ -60,4 +70,42 @@ test('http leak: retained memory does not grow across sustained churn', async ()
   )
 
   await handle.close()
+})
+
+test('http leak: serveStatic cache stays bounded', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'swm-leak-static-'))
+  const fileCount = 120
+  const fileSize = 64 * 1024
+
+  for (let i = 0; i < fileCount; i++) {
+    writeFileSync(join(dir, `f${i}.txt`), Buffer.alloc(fileSize, i & 0xff))
+  }
+
+  const handle = await startHttpServer({ router: serveStatic(dir, { cacheLimit: 16 }) })
+
+  try {
+    // Warmup fills the cache up to its limit.
+    for (let i = 0; i < 32; i++) {
+      const res = await fetch(`${handle.baseUrl}/f${i}.txt`)
+
+      await res.arrayBuffer()
+    }
+
+    const before = await measureRetainedBytes()
+
+    for (let i = 0; i < fileCount; i++) {
+      const res = await fetch(`${handle.baseUrl}/f${i}.txt`)
+
+      await res.arrayBuffer()
+    }
+
+    const growth = (await measureRetainedBytes()) - before
+
+    // Bounded cache holds 16 * 64KB = 1MB; an unbounded one would retain
+    // all 120 files (7.5MB).
+    assert.ok(growth < 2.5 * 1024 * 1024, `serveStatic retained ${growth} bytes - cache looks unbounded`)
+  } finally {
+    await handle.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
