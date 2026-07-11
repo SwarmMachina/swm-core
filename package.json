@@ -65,9 +65,6 @@
     "prepublishOnly": "npm run fix && npm test",
     "release": "npm run check && npm test && npm publish"
   },
-  "dependencies": {
-    "uwebsockets.js": "uNetworking/uWebSockets.js#v20.67.0"
-  },
   "devDependencies": {
     "@swarmmachina/standards": "^1.0.4",
     "autocannon": "^8.0.0",
@@ -75,5 +72,8 @@
     "fastify": "^5.8.5",
     "micro": "^10.0.1",
     "ws": "^8.21.0"
+  },
+  "dependencies": {
+    "@swarmmachina/swm-uws": "file:../swm-uws"
   }
 }

@@ -11,7 +11,7 @@ const __dirname = dirname(__filename)
  * @returns {object}
  */
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === 'uwebsockets.js') {
+  if (specifier === '@swarmmachina/swm-uws') {
     const mockModulePath = pathToFileURL(join(__dirname, 'mock-uws-module.js')).href
 
     return {

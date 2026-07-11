@@ -8,10 +8,10 @@ export async function load() {
     let mod
 
     try {
-      mod = await import('uwebsockets.js')
+      mod = await import('@swarmmachina/swm-uws')
     } catch (err) {
       throw new Error(
-        "Failed to load the required 'uwebsockets.js' dependency. Reinstall the package for this platform or explicitly use backend: 'node'.",
+        "Failed to load the required '@swarmmachina/swm-uws' dependency. Reinstall the package for this platform or explicitly use backend: 'node'.",
         { cause: err }
       )
     }
