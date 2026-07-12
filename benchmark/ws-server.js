@@ -73,6 +73,49 @@ async function runCore(port, backend) {
 }
 
 /**
+ * Run a raw binding echo server so the deep comparison can separate native
+ * binding cost from swm-core's WSContext lifecycle.
+ * @param {number} port
+ */
+async function runRawBinding(port) {
+  const { App, us_listen_socket_close } = await import('#uws-binding')
+  const app = App()
+
+  app.ws('/*', {
+    message: (ws, message, isBinary) => ws.send(message, isBinary)
+  })
+
+  let socket = null
+
+  app.listen(port, (token) => {
+    if (!token) {
+      throw new Error(`Raw binding failed to listen on port ${port}`)
+    }
+
+    socket = token
+    sendReady(port)
+  })
+
+  const shutdown = () => {
+    if (socket) {
+      us_listen_socket_close(socket)
+      socket = null
+    }
+
+    app.close?.()
+  }
+
+  process.on('SIGTERM', () => {
+    shutdown()
+    process.exit(0)
+  })
+  process.on('SIGINT', () => {
+    shutdown()
+    process.exit(0)
+  })
+}
+
+/**
  *
  */
 async function main() {
@@ -83,6 +126,11 @@ async function main() {
 
   if (fw === 'core-node') {
     await runCore(port, 'node')
+    return
+  }
+
+  if (fw === 'raw-swm-uws' || fw === 'raw-uwebsockets') {
+    await runRawBinding(port)
     return
   }
 

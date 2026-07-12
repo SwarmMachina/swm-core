@@ -6,6 +6,7 @@ import runChild from './helpers/run-child.js'
 import { appendStepSummary, fmt, mdTable, round } from './helpers/step-summary.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.resolve(__dirname, '..')
 const CANDIDATE = 'core-swm-uws'
 const REFERENCE = 'core-uwebsockets'
 const FRAMEWORKS = `${CANDIDATE},${REFERENCE}`
@@ -47,6 +48,37 @@ const GUARDS = {
  */
 async function readJson(file) {
   return JSON.parse(await fs.readFile(file, 'utf8'))
+}
+
+/**
+ * Read the versions that this process will actually load, and fail before a
+ * long benchmark if node_modules is stale relative to package.json.
+ * @returns {Promise<{candidate: string, reference: string}>}
+ */
+async function readBindingLabels() {
+  const manifest = await readJson(path.join(ROOT, 'package.json'))
+  const candidatePackage = await readJson(path.join(ROOT, 'node_modules', '@swarmmachina', 'swm-uws', 'package.json'))
+  const referencePackage = await readJson(path.join(ROOT, 'node_modules', 'uwebsockets.js', 'package.json'))
+  const requestedCandidate = manifest.devDependencies?.['@swarmmachina/swm-uws']
+  const requestedReference = manifest.dependencies?.['uwebsockets.js']
+  const requestedReferenceVersion = /#v?(\d+\.\d+\.\d+)$/.exec(requestedReference || '')?.[1]
+
+  if (requestedCandidate !== candidatePackage.version) {
+    throw new Error(
+      `Installed @swarmmachina/swm-uws@${candidatePackage.version} does not match package.json (${requestedCandidate})`
+    )
+  }
+
+  if (requestedReferenceVersion !== referencePackage.version) {
+    throw new Error(
+      `Installed uWebSockets.js@${referencePackage.version} does not match package.json (${requestedReference})`
+    )
+  }
+
+  return {
+    candidate: `${candidatePackage.name}@${candidatePackage.version}`,
+    reference: `${referencePackage.name}@${referencePackage.version}`
+  }
 }
 
 /**
@@ -268,6 +300,8 @@ async function main() {
     throw new Error('BINDING_BENCH_RUNS must be even for balanced AB/BA ordering')
   }
 
+  const bindings = await readBindingLabels()
+
   await fs.mkdir(outDir, { recursive: true })
 
   const http = await runHttp(outDir)
@@ -282,8 +316,8 @@ async function main() {
     schemaVersion: 'binding-compare/v1',
     createdAt: new Date().toISOString(),
     node: process.version,
-    candidate: '@swarmmachina/swm-uws@0.3.1',
-    reference: 'uWebSockets.js@20.67.0',
+    candidate: bindings.candidate,
+    reference: bindings.reference,
     parameters: PARAMS,
     guards: GUARDS,
     status,
@@ -295,6 +329,8 @@ async function main() {
 
   const report = [
     `# Binding migration gate: ${status.toUpperCase()}`,
+    '',
+    `Bindings: candidate=${bindings.candidate}, reference=${bindings.reference}, Node=${process.version}.`,
     '',
     `Parameters: runs=${PARAMS.runs}, warmup=${PARAMS.warmup}s, duration=${PARAMS.duration}s, ` +
       `HTTP connections=${PARAMS.httpConnections}, pipelining=${PARAMS.httpPipelining}, ` +

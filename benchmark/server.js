@@ -106,6 +106,73 @@ async function runCore(port, backend) {
 }
 
 /**
+ * Run the binding directly, without swm-core request/context overhead. Both
+ * candidates execute this exact JS path; only the resolved native module
+ * differs.
+ * @param {number} port
+ */
+async function runRawBinding(port) {
+  const { App, us_listen_socket_close } = await import('#uws-binding')
+  const app = App()
+
+  app.get('/base', (res) => {
+    res.writeHeader('content-type', 'application/json').end('{"ok":true}')
+  })
+
+  app.get('/headers', (res) => {
+    res
+      .writeHeader('content-type', HEADERS_TEST.responseHeaders['content-type'])
+      .writeHeader('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
+      .writeHeader('x-trace-id', HEADERS_TEST.responseHeaders['x-trace-id'])
+      .writeHeader('x-response-id', HEADERS_TEST.responseHeaders['x-response-id'])
+      .writeHeader('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][0])
+      .writeHeader('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
+      .end(HEADERS_TEST.responseText)
+  })
+
+  app.post('/base', (res) => {
+    const chunks = []
+
+    res.onData((chunk, isLast) => {
+      chunks.push(Buffer.from(chunk))
+
+      if (isLast) {
+        res.writeHeader('content-type', 'application/json').end(Buffer.concat(chunks))
+      }
+    })
+  })
+
+  let socket = null
+
+  app.listen(port, (token) => {
+    if (!token) {
+      throw new Error(`Raw binding failed to listen on port ${port}`)
+    }
+
+    socket = token
+    sendReady(port)
+  })
+
+  const shutdown = () => {
+    if (socket) {
+      us_listen_socket_close(socket)
+      socket = null
+    }
+
+    app.close?.()
+  }
+
+  process.on('SIGTERM', () => {
+    shutdown()
+    process.exit(0)
+  })
+  process.on('SIGINT', () => {
+    shutdown()
+    process.exit(0)
+  })
+}
+
+/**
  *
  */
 async function main() {
@@ -116,6 +183,11 @@ async function main() {
 
   if (fw === 'core-node') {
     await runCore(port, 'node')
+    return
+  }
+
+  if (fw === 'raw-swm-uws' || fw === 'raw-uwebsockets') {
+    await runRawBinding(port)
     return
   }
 

@@ -83,6 +83,7 @@ compatibility and performance gates pass on the supported production image.
 ```bash
 npm run test:e2e:bindings
 npm run bench:bindings
+npm run bench:bindings:deep
 ```
 
 The performance command runs four measured iterations in balanced AB/BA order
@@ -92,6 +93,16 @@ throughput, HTTP p97.5/p99 and WebSocket p95/p99 latency, ELU, RSS, heap and err
 artifact to `benchmark/profiles/binding-compare/summary.json`. Override the
 parameters with the `BINDING_BENCH_*` environment variables defined in
 `benchmark/binding-compare.js`.
+
+Use `bench:bindings:deep` when validating a release or investigating a noisy
+result. It runs six balanced AB/BA pairs across HTTP concurrency/pipelining,
+headers, request bodies, and closed/open-loop WebSocket workloads. Raw binding
+servers are measured alongside the same paths through `swm-core`, which
+separates native binding cost from framework overhead. Its report uses paired
+throughput and latency deltas with an interquartile range and writes artifacts
+to `benchmark/profiles/binding-deep/`. Override duration, warmup, runs, and
+sampling with the `DEEP_BINDING_*` variables in
+`benchmark/binding-deep-compare.js`.
 
 To advance both native implementations together after publishing a candidate
 binding release, run:
