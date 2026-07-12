@@ -39,9 +39,9 @@ function selectWsProtocol(requestedHeader, selected) {
 }
 
 /**
- * Resolve a backend module to the uWS-shaped surface `{ App, us_listen_socket_close }`.
+ * Resolve a backend module to the uWS-shaped surface and its optional capabilities.
  * @param {'uws'|'node'} name
- * @returns {Promise<{App: Function, us_listen_socket_close: Function}>}
+ * @returns {Promise<{App: Function, us_listen_socket_close: Function, capabilities?: object}>}
  */
 async function loadBackend(name) {
   if (name === 'node') {
@@ -99,6 +99,8 @@ export default class Server {
   // Resolved backend module `{ App, us_listen_socket_close }`, loaded lazily on
   // first listen(). Null until then.
   #backend = null
+
+  bindingCapabilities = Object.freeze({})
 
   /**
    * @param {object} opt
@@ -240,6 +242,7 @@ export default class Server {
   async #doListen() {
     if (!this.app) {
       this.#backend = await loadBackend(this.backend)
+      this.bindingCapabilities = Object.freeze({ ...(this.#backend.capabilities || {}) })
       this.app = this.#backend.App()
       this.app.onError?.((err) => void this.safeCall(this.onServerError, err))
 
@@ -517,11 +520,7 @@ export default class Server {
     }
 
     if (isPromise(result)) {
-      ctx.method()
-      ctx.url()
-      ctx.cacheQuery()
-      ctx.cacheHeaders()
-      ctx.cacheParams(paramNames)
+      ctx.cacheRequest(paramNames)
 
       ctx.asyncPending = true
 
@@ -580,8 +579,12 @@ export default class Server {
       aborted: false
     }
 
+    let upgradeTimer = null
+
     res.onAborted(() => {
       meta.aborted = true
+      clearTimeout(upgradeTimer)
+      upgradeTimer = null
     })
 
     let upgradeResult
@@ -608,11 +611,33 @@ export default class Server {
     }
 
     if (isAsync) {
+      let settled = false
+      upgradeTimer = setTimeout(() => {
+        if (settled || meta.aborted) {
+          return
+        }
+
+        settled = true
+        upgradeTimer = null
+        res.cork(() => {
+          res.writeStatus(STATUS_TEXT[408])
+          res.end()
+        })
+
+        const error = new Error(`WebSocket upgrade timed out after ${this.wsUpgradeTimeoutMs}ms`)
+        error.code = 'WS_UPGRADE_TIMEOUT'
+        void this.safeWsError(null, error)
+      }, this.wsUpgradeTimeoutMs)
+
       void upgradeResult
         .then((result = {}) => {
-          if (meta.aborted) {
+          if (settled || meta.aborted) {
             return
           }
+
+          settled = true
+          clearTimeout(upgradeTimer)
+          upgradeTimer = null
 
           if (result?.isAllowed) {
             this.#acceptUpgrade(res, result, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
@@ -626,9 +651,13 @@ export default class Server {
           })
         })
         .catch((err) => {
-          if (meta.aborted) {
+          if (settled || meta.aborted) {
             return
           }
+
+          settled = true
+          clearTimeout(upgradeTimer)
+          upgradeTimer = null
 
           res.cork(() => {
             res.writeStatus(STATUS_TEXT[403])

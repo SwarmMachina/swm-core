@@ -1,5 +1,5 @@
 import os from 'node:os'
-import { eventLoopUtilization, monitorEventLoopDelay, performance } from 'node:perf_hooks'
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
 
 /**
  * @param {number} bytes
@@ -39,7 +39,7 @@ export default class Metrics {
 
     this.#t0 = performance.now()
     this.#cpu0 = process.cpuUsage()
-    this.#elu0 = eventLoopUtilization()
+    this.#elu0 = performance.eventLoopUtilization()
 
     this.#peakRss = 0
     this.#peakHeap = 0
@@ -80,7 +80,7 @@ export default class Metrics {
     const cpuCorePct = (cpuMs / dtMs) * 100
     const cpuHostPct = (cpuMs / (dtMs * os.cpus().length)) * 100
 
-    const elu = eventLoopUtilization(this.#elu0)
+    const elu = performance.eventLoopUtilization(this.#elu0)
     const eluPct = (elu.utilization || 0) * 100
 
     const eld = this.#eld

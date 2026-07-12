@@ -93,6 +93,25 @@ artifact to `benchmark/profiles/binding-compare/summary.json`. Override the
 parameters with the `BINDING_BENCH_*` environment variables defined in
 `benchmark/binding-compare.js`.
 
+To advance both native implementations together after publishing a candidate
+binding release, run:
+
+```bash
+npm run deps:update:bindings -- 0.4.0 v20.69.0
+npm run test:e2e:bindings
+```
+
+The updater changes both dependency pins, regenerates `package-lock.json`, and
+updates the version references in this README. Commit the generated lockfile;
+do not edit the two pins independently.
+
+By default, `swm-core` enables the measured `beginWrite`, `collectBody`, and
+`requestPause` capabilities. Set `SWM_UWS_NATIVE_FAST_PATHS=0` to disable every
+capability-gated path without changing the backend, or pass a comma-separated
+allowlist. `SWM_UWS_NATIVE_FAST_PATHS=all` also enables experimental request
+snapshot and response batching; those two paths remain opt-in until they meet
+the migration performance gate.
+
 ## Quick Start
 
 ### Basic HTTP Server

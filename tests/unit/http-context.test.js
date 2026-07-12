@@ -349,6 +349,33 @@ describe('HttpContext', () => {
       strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 0)
     })
 
+    test('cacheRequest() uses one native snapshot when the backend supports it', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({
+        method: 'get',
+        url: '/users/42',
+        fullQuery: 'expand=1',
+        headers: { authorization: 'Bearer token' },
+        parameters: ['42']
+      })
+      const server = {
+        bindingCapabilities: { requestSnapshot: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      ctx.cacheRequest(['id'])
+
+      strictEqual(ctx.method(), 'get')
+      strictEqual(ctx.url(), '/users/42')
+      strictEqual(ctx.fullQuery(), 'expand=1')
+      strictEqual(ctx.header('authorization'), 'Bearer token')
+      strictEqual(ctx.param(0), '42')
+      strictEqual(ctx.param('id'), '42')
+      deepStrictEqual(req.calls, [['snapshot', 1]])
+    })
+
     test('query(name) — caches and returns from cache on repeated call', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -951,6 +978,46 @@ describe('HttpContext', () => {
 
       strictEqual(endCalls.length, 1)
       strictEqual(endCalls[0].length, 1)
+    })
+
+    test('reply uses the native response batch for prepared headers', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: { responseBatch: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      ctx.reply(201, JSON_HEADER, '{"ok":true}')
+
+      deepStrictEqual(res.calls, [
+        ['endBatch', STATUS_TEXT[201], ['content-type', 'application/json; charset=utf-8'], '{"ok":true}']
+      ])
+    })
+
+    test('reply keeps the compatibility path when headers were staged dynamically', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: { responseBatch: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      ctx.setHeader('x-dynamic', 'yes')
+      ctx.reply(200, JSON_HEADER, '{}')
+
+      strictEqual(
+        res.calls.some(([name]) => name === 'endBatch'),
+        false
+      )
+      strictEqual(
+        res.calls.some(([name]) => name === 'cork'),
+        true
+      )
     })
 
     test('reply should write repeated set-cookie headers as separate header lines', () => {

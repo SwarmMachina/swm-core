@@ -108,6 +108,9 @@ export default class ResStreamer {
     res.cork(() => {
       res.writeStatus(typeof status === 'string' ? status : this.#ctx.getStatus(status))
       this.#ctx.flushHeaders(headers)
+      if (this.#ctx.server?.bindingCapabilities?.beginWrite === true && typeof res.beginWrite === 'function') {
+        res.beginWrite()
+      }
     })
 
     this.#started = true

@@ -85,29 +85,25 @@ test('ws upgrade selects only the subprotocol returned by onUpgrade', async () =
   sock.close()
 })
 
-test(
-  'node backend aborts an asynchronous upgrade after wsUpgradeTimeoutMs',
-  { skip: process.env.SWM_BACKEND !== 'node' },
-  async () => {
-    handle = await startWsServer({
-      ws: {
-        enabled: true,
-        wsUpgradeTimeoutMs: 100,
-        onUpgrade: () => new Promise(() => {})
-      }
-    })
+test('backend aborts an asynchronous upgrade after wsUpgradeTimeoutMs', async () => {
+  handle = await startWsServer({
+    ws: {
+      enabled: true,
+      wsUpgradeTimeoutMs: 100,
+      onUpgrade: () => new Promise(() => {})
+    }
+  })
 
-    const sock = new WebSocket(handle.wsBaseUrl, { perMessageDeflate: false })
+  const sock = new WebSocket(handle.wsBaseUrl, { perMessageDeflate: false })
 
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('upgrade socket was not closed')), 1000)
-      const done = () => {
-        clearTimeout(timeout)
-        resolve()
-      }
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('upgrade socket was not closed')), 1000)
+    const done = () => {
+      clearTimeout(timeout)
+      resolve()
+    }
 
-      sock.once('error', done)
-      sock.once('close', done)
-    })
-  }
-)
+    sock.once('error', done)
+    sock.once('close', done)
+  })
+})

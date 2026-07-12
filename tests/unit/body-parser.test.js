@@ -124,6 +124,45 @@ describe('BodyParser', () => {
   })
 
   describe('body() - known length mode', () => {
+    test('should use native collectBody when advertised by the backend', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '3' } })
+      const server = {
+        bindingCapabilities: { collectBody: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      parser.reset(ctx, 16)
+      const body = parser.body()
+
+      res.pushCollectedBody([1, 2, 3])
+
+      deepStrictEqual(await body, Buffer.from([1, 2, 3]))
+      deepStrictEqual(res.calls, [['collectBody', 16]])
+    })
+
+    test('should map native collectBody overflow to bodyTooLarge', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: { collectBody: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      parser.reset(ctx, 4)
+      const body = parser.body()
+
+      res.pushCollectedBody(null)
+
+      await rejects(body, (error) => error.message === 'Request body too large')
+    })
+
     test('should resolve with correct buffer when content-length matches', async () => {
       const parser = new BodyParser()
       const ctx = new HttpContext(null)

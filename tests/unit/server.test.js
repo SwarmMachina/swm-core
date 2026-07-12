@@ -1589,6 +1589,31 @@ describe('Server', () => {
 
       strictEqual(status403Call, undefined)
     })
+
+    test('should terminate an async upgrade that exceeds wsUpgradeTimeoutMs', async () => {
+      let receivedError = null
+      const server = makeServer({
+        router: () => {},
+        ws: {
+          enabled: true,
+          wsUpgradeTimeoutMs: 100,
+          onUpgrade: () => new Promise(() => {}),
+          onError: (_ctx, error) => {
+            receivedError = error
+          }
+        }
+      })
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.onUpgrade(res, req, {})
+      await new Promise((resolve) => setTimeout(resolve, 120))
+
+      strictEqual(res.getStatus(), STATUS_TEXT[408])
+      strictEqual(res.isEnded(), true)
+      strictEqual(res.isUpgraded(), false)
+      strictEqual(receivedError?.code, 'WS_UPGRADE_TIMEOUT')
+    })
   })
 
   describe('onOpen()', () => {

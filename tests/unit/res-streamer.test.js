@@ -343,6 +343,23 @@ describe('ResStreamer', () => {
       )
     })
 
+    test('should flush streaming headers with beginWrite when supported', () => {
+      const streamer = new ResStreamer()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: { beginWrite: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      streamer.reset(ctx, res)
+      streamer.begin(200, TEXT_PLAIN_HEADER)
+
+      strictEqual(res.calls.filter(([name]) => name === 'beginWrite').length, 1)
+    })
+
     test('should write repeated set-cookie headers as separate header lines', () => {
       const streamer = new ResStreamer()
       const ctx = new HttpContext(null)

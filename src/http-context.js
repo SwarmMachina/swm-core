@@ -215,6 +215,42 @@ export default class HttpContext {
     }
   }
 
+  /**
+   * Preserve request metadata before the native request object expires. Newer
+   * bindings can materialize it in one crossing; older backends keep the
+   * compatibility path.
+   * @param {string[]} [paramNames]
+   */
+  cacheRequest(paramNames) {
+    const canSnapshot = this.server?.bindingCapabilities?.requestSnapshot === true
+
+    if (canSnapshot && this.req && typeof this.req.snapshot === 'function') {
+      const names = paramNames || []
+      const snapshot = this.req.snapshot(names.length)
+
+      this.#method = typeof snapshot?.method === 'string' ? snapshot.method : ''
+      this.#url = typeof snapshot?.url === 'string' ? snapshot.url : ''
+      this.#fullQuery = typeof snapshot?.query === 'string' ? snapshot.query : ''
+      this.#fullQueryCached = true
+      this.#fullQueryParsed = false
+      this.#headers = snapshot?.headers || Object.create(null)
+      this.#headersCached = true
+
+      const values = Array.isArray(snapshot?.params) ? snapshot.params : []
+      for (let i = 0; i < names.length; i++) {
+        this.#params[i] = values[i]
+        this.#params[names[i]] = values[i]
+      }
+      return
+    }
+
+    this.method()
+    this.url()
+    this.cacheQuery()
+    this.cacheHeaders()
+    this.cacheParams(paramNames)
+  }
+
   cacheHeaders() {
     if (this.#headersCached || !this.req) {
       return
@@ -788,6 +824,17 @@ export default class HttpContext {
     }
 
     this.replied = true
+
+    const prepared = getPreparedHeaders(headers)
+    if (
+      this.server?.bindingCapabilities?.responseBatch === true &&
+      prepared &&
+      this.#pendingHeaders.size === 0 &&
+      typeof this.res?.endBatch === 'function'
+    ) {
+      this.res.endBatch(this.getStatus(status), prepared.lines, body ?? undefined)
+      return
+    }
 
     this.res.cork(() => {
       if (this.aborted) {

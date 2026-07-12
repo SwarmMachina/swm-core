@@ -264,6 +264,26 @@ export default class BodyParser {
     this.#bodyReject = reject
     this.#done = false
 
+    if (
+      this.#ctx.server?.bindingCapabilities?.collectBody === true &&
+      typeof this.#ctx.res?.collectBody === 'function'
+    ) {
+      this.#ctx.res.collectBody(limit, (body) => {
+        if (body === null) {
+          this.#reject(CACHED_ERRORS.bodyTooLarge)
+          return
+        }
+
+        const buffer = Buffer.from(body)
+        if (contentLength !== null && buffer.length !== contentLength) {
+          this.#reject(CACHED_ERRORS.sizeMismatch)
+          return
+        }
+        this.#resolve(buffer)
+      })
+      return this.#bodyPromise
+    }
+
     if (contentLength !== null) {
       this.#expected = contentLength
       this.#offset = 0

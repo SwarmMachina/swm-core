@@ -7,6 +7,7 @@ export function createMockRes(options = {}) {
   const calls = []
   const warnings = []
   let onDataCb = null
+  let collectBodyCb = null
   let getProxiedRemoteAddressAsTextCallCount = 0
   let getRemoteAddressAsTextCallCount = 0
   let proxiedIp = null
@@ -78,6 +79,20 @@ export function createMockRes(options = {}) {
       } else {
         calls.push(['end'])
       }
+    },
+    endBatch(status, headerLines, body) {
+      calls.push(['endBatch', status, headerLines, body])
+    },
+    beginWrite() {
+      calls.push(['beginWrite'])
+    },
+    collectBody(maxSize, cb) {
+      calls.push(['collectBody', maxSize])
+      collectBodyCb = cb
+    },
+    pushCollectedBody(data) {
+      if (!collectBodyCb) throw new Error('collectBody not called yet')
+      collectBodyCb(data === null ? null : Uint8Array.from(data).buffer)
     },
     onData(cb) {
       calls.push(['onData'])
@@ -296,6 +311,16 @@ export function createMockReq(options = {}) {
 
       for (const name in headers) {
         cb(name, headers[name])
+      }
+    },
+    snapshot(paramCount = 0) {
+      calls.push(['snapshot', paramCount])
+      return {
+        method,
+        url,
+        query: typeof fullQuery === 'string' ? fullQuery : new URLSearchParams(query).toString(),
+        headers: Object.assign(Object.create(null), headers),
+        params: parameters.slice(0, paramCount)
       }
     }
   }
