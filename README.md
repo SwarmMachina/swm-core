@@ -40,7 +40,7 @@ few constraints on the install/runtime environment:
   platform you deploy to (e.g. `--platform linux/amd64`); a binary built on
   arm64 will not run on an amd64 server.
 - **Network access to GitHub at install time** — uWS is pulled from a GitHub tag
-  (`uNetworking/uWebSockets.js#v20.67.0`), so the install needs outbound access
+  (`uNetworking/uWebSockets.js#v20.69.0`), so the install needs outbound access
   to GitHub. Offline/air-gapped installs require a pre-populated cache or mirror.
 
 ## Backends
@@ -76,8 +76,8 @@ fallback.
 ## Native binding comparison
 
 The migration gate runs the same `swm-core` HTTP and WebSocket paths with only
-the native binding changed: candidate `@swarmmachina/swm-uws@0.3.1` versus the
-current `uWebSockets.js@20.67.0` dependency. The candidate stays dev-only until
+the native binding changed: candidate `@swarmmachina/swm-uws@0.4.0` versus the
+current `uWebSockets.js@20.69.0` dependency. The candidate stays dev-only until
 compatibility and performance gates pass on the supported production image.
 
 ```bash
