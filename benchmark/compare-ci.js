@@ -8,10 +8,10 @@ import { appendStepSummary, fmt, mdTable } from './helpers/step-summary.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const HTTP_TESTS = ['base', 'headers', 'post-base']
-const HTTP_FRAMEWORKS = 'core,core-swm-uws,core-node,micro,fastify,express'
-const HTTP_ORDER = ['core', 'core-swm-uws', 'core-node', 'micro', 'fastify', 'express']
-const WS_FRAMEWORKS = 'core,core-swm-uws,core-node,ws'
-const WS_ORDER = ['core', 'core-swm-uws', 'core-node', 'ws']
+const HTTP_FRAMEWORKS = 'core,core-uwebsockets,core-node,micro,fastify,express'
+const HTTP_ORDER = ['core', 'core-uwebsockets', 'core-node', 'micro', 'fastify', 'express']
+const WS_FRAMEWORKS = 'core,core-uwebsockets,core-node,ws'
+const WS_ORDER = ['core', 'core-uwebsockets', 'core-node', 'ws']
 
 /**
  * @param {string} name

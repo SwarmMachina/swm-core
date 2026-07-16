@@ -16,12 +16,12 @@ const lockPath = resolve(root, 'package-lock.json')
 const previousPackage = readFileSync(packagePath, 'utf8')
 const packageJson = JSON.parse(previousPackage)
 const previousLock = readFileSync(lockPath, 'utf8')
-const previousSwmVersion = packageJson.devDependencies['@swarmmachina/swm-uws']
-const previousUpstream = packageJson.dependencies['uwebsockets.js']
+const previousSwmVersion = packageJson.dependencies['@swarmmachina/swm-uws']
+const previousUpstream = packageJson.devDependencies['uwebsockets.js']
 const previousUpstreamTag = /#(v20\.\d+\.0)$/.exec(previousUpstream)?.[1]
 
-packageJson.devDependencies['@swarmmachina/swm-uws'] = swmVersion
-packageJson.dependencies['uwebsockets.js'] = `github:uNetworking/uWebSockets.js#${upstreamTag}`
+packageJson.dependencies['@swarmmachina/swm-uws'] = swmVersion
+packageJson.devDependencies['uwebsockets.js'] = `github:uNetworking/uWebSockets.js#${upstreamTag}`
 writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
 
 try {
@@ -30,16 +30,16 @@ try {
     [
       'install',
       '--package-lock-only',
+      '--save-dev',
       '--save-exact',
       `uwebsockets.js@github:uNetworking/uWebSockets.js#${upstreamTag}`
     ],
     { cwd: root, stdio: 'inherit' }
   )
-  execFileSync(
-    'npm',
-    ['install', '--package-lock-only', '--save-dev', '--save-exact', `@swarmmachina/swm-uws@${swmVersion}`],
-    { cwd: root, stdio: 'inherit' }
-  )
+  execFileSync('npm', ['install', '--package-lock-only', '--save-exact', `@swarmmachina/swm-uws@${swmVersion}`], {
+    cwd: root,
+    stdio: 'inherit'
+  })
 } catch (error) {
   writeFileSync(packagePath, previousPackage)
   writeFileSync(lockPath, previousLock)

@@ -107,7 +107,7 @@ async function runCore(port, backend) {
 
 /**
  * Run the binding directly, without swm-core request/context overhead. Both
- * candidates execute this exact JS path; only the resolved native module
+ * bindings execute this exact JS path; only the resolved native module
  * differs.
  * @param {number} port
  */

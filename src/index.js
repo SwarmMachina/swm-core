@@ -370,7 +370,7 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    * @returns {WSContext}
    */
   createWsContext(ws) {
@@ -390,7 +390,7 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    * @returns {WSContext}
    */
   getWsContext(ws) {
@@ -399,7 +399,7 @@ export default class Server {
 
   /**
    * @param {WSContext} ctx
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    */
   #registerConnection(ctx, ws) {
     if (!this.wsConnectionKey) {
@@ -440,7 +440,7 @@ export default class Server {
 
   /**
    * @param {WSContext} ctx
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    */
   #unregisterConnection(ctx, ws) {
     if (ctx.key != null && this.#connections.get(ctx.key) === ws) {
@@ -449,7 +449,7 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    */
   deleteWsContext(ws) {
     const ctx = this.#wsContexts.get(ws)
@@ -478,8 +478,8 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').HttpResponse} res
-   * @param {import('uwebsockets.js').HttpRequest} req
+   * @param {import('@swarmmachina/swm-uws').HttpResponse} res
+   * @param {import('@swarmmachina/swm-uws').HttpRequest} req
    * @param {(ctx: HttpContext) => any|Promise<any>} handler
    * @param {string[]} [paramNames] - route :param names, in path order (native routing only)
    * @returns {void}
@@ -547,9 +547,9 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').HttpResponse} res
-   * @param {import('uwebsockets.js').HttpRequest} req
-   * @param {import('uwebsockets.js').us_socket_context_t} context
+   * @param {import('@swarmmachina/swm-uws').HttpResponse} res
+   * @param {import('@swarmmachina/swm-uws').HttpRequest} req
+   * @param {import('@swarmmachina/swm-uws').us_socket_context_t} context
    */
   onUpgrade(res, req, context) {
     if (this.#draining) {
@@ -684,12 +684,12 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').HttpResponse} res
+   * @param {import('@swarmmachina/swm-uws').HttpResponse} res
    * @param {{userData?: object, protocol?: string}} result
    * @param {string} secWebSocketKey
    * @param {string} requestedProtocol
    * @param {string} secWebSocketExtensions
-   * @param {import('uwebsockets.js').us_socket_context_t} context
+   * @param {import('@swarmmachina/swm-uws').us_socket_context_t} context
    */
   #acceptUpgrade(res, result, secWebSocketKey, requestedProtocol, secWebSocketExtensions, context) {
     let protocol
@@ -711,7 +711,7 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    */
   onOpen(ws) {
     if (this.#draining) {
@@ -749,7 +749,7 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    * @param {ArrayBuffer} message
    * @param {boolean} isBinary
    */
@@ -778,7 +778,7 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    * @param {ArrayBuffer} topic
    * @param {number} newCount
    * @param {number} oldCount
@@ -808,7 +808,7 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    */
   onDrain(ws) {
     const ctx = this.getWsContext(ws)
@@ -835,7 +835,7 @@ export default class Server {
   }
 
   /**
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    * @param {number} code
    * @param {ArrayBuffer} message
    */
@@ -930,7 +930,7 @@ export default class Server {
 
   /**
    * @param {string | number} key
-   * @returns {import('uwebsockets.js').WebSocket | undefined}
+   * @returns {import('@swarmmachina/swm-uws').WebSocket | undefined}
    */
   getConnection(key) {
     return this.#connections.get(key)

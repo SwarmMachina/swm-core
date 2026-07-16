@@ -12,7 +12,7 @@ export default class WSContext {
 
   /**
    * @param {Server} server
-   * @param {import('uwebsockets.js').WebSocket} ws
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
    * @param {object} userData
    * @returns {WSContext}
    */

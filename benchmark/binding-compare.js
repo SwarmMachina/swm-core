@@ -59,8 +59,8 @@ async function readBindingLabels() {
   const manifest = await readJson(path.join(ROOT, 'package.json'))
   const candidatePackage = await readJson(path.join(ROOT, 'node_modules', '@swarmmachina', 'swm-uws', 'package.json'))
   const referencePackage = await readJson(path.join(ROOT, 'node_modules', 'uwebsockets.js', 'package.json'))
-  const requestedCandidate = manifest.devDependencies?.['@swarmmachina/swm-uws']
-  const requestedReference = manifest.dependencies?.['uwebsockets.js']
+  const requestedCandidate = manifest.dependencies?.['@swarmmachina/swm-uws']
+  const requestedReference = manifest.devDependencies?.['uwebsockets.js']
   const requestedReferenceVersion = /#v?(\d+\.\d+\.\d+)$/.exec(requestedReference || '')?.[1]
 
   if (requestedCandidate !== candidatePackage.version) {

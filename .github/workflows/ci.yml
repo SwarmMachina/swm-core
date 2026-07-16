@@ -65,8 +65,8 @@ jobs:
       - name: WS e2e tests (node backend)
         run: npm run test:e2e:ws:node
 
-      - name: swm-uws candidate binding compatibility
-        run: npm run test:e2e:swm-uws-candidate
+      - name: uWebSockets.js reference binding compatibility
+        run: npm run test:e2e:uwebsockets-reference
 
   swm-uws-bookworm:
     runs-on: ubuntu-latest
@@ -83,8 +83,8 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: swm-uws candidate on production image
-        run: npm run test:e2e:swm-uws-candidate
+      - name: swm-uws runtime on production image
+        run: npm run test:e2e
 
   autobahn:
     runs-on:

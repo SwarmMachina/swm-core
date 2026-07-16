@@ -1,13 +1,13 @@
 # @swarmmachina/swm-core
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)](https://nodejs.org/)
+[![Node.js Version](https://img.shields.io/badge/node-22.x%20%7C%2024.x-brightgreen)](https://nodejs.org/)
 [![dependencies](https://img.shields.io/badge/dependencies-1-brightgreen.svg)](#)
 [![stability](https://img.shields.io/badge/stability-experimental-yellow.svg)](#)
 
-A high-performance HTTP/WebSocket server built on
-[uWebSockets.js](https://github.com/uNetworking/uWebSockets.js), with a bundled
-`node:http` backend available as an explicit fallback.
+A high-performance HTTP/WebSocket server built on the
+[`@swarmmachina/swm-uws`](https://www.npmjs.com/package/@swarmmachina/swm-uws)
+native binding, with a bundled `node:http` backend available as an explicit fallback.
 
 ## Features
 
@@ -18,43 +18,40 @@ A high-performance HTTP/WebSocket server built on
 - **Graceful shutdown** - Cleanly closes active connections
 - **Streaming support** - Efficient handling of large payloads
 - **Auto Content-Type detection** - Automatically sets headers based on response type
-- **Modern ES modules** - Native ESM support (Node.js 22+)
+- **Modern ES modules** - Native ESM support (Node.js 22 and 24)
 
 ## Installation
 
 ```bash
-# Install the package and its uWebSockets.js runtime dependency
+# Install the package and its swm-uws runtime dependency
 npm install @swarmmachina/swm-core
 ```
 
 ### Runtime requirements
 
-The default backend depends on the native uWebSockets.js addon, which imposes a
-few constraints on the install/runtime environment:
+The default backend depends on the native `@swarmmachina/swm-uws` addon, which
+ships platform-specific prebuilds:
 
-- **Node.js 22+** — required by this package.
-- **glibc, not musl** — the prebuilt binaries target glibc. Use a `bookworm`/`slim`
-  (Debian) base image rather than `alpine` (musl), otherwise the native module fails to load.
-- **Architecture-specific prebuilt** — the loaded binary must match the host CPU
-  architecture and Node ABI. When building container images, build for the same
-  platform you deploy to (e.g. `--platform linux/amd64`); a binary built on
-  arm64 will not run on an amd64 server.
-- **Network access to GitHub at install time** — uWS is pulled from a GitHub tag
-  (`uNetworking/uWebSockets.js#v20.69.0`), so the install needs outbound access
-  to GitHub. Offline/air-gapped installs require a pre-populated cache or mirror.
+- **Node.js 22 or 24** — other majors are rejected by the package engine constraint.
+- **Linux x64 with glibc** — use a `bookworm`/`slim` image rather than Alpine/musl.
+- **Windows x64** and **macOS arm64/x64** are supported.
+- **Linux ARM64, Windows ARM64 and musl are not supported.** Use `backend: 'node'`
+  on unsupported hosts.
+- **TLS and `permessage-deflate` are disabled** in the native binding; terminate
+  TLS before the application.
 
 ## Backends
 
 The server runs on a selectable transport backend, chosen with the `backend`
 option:
 
-| `backend`         | Transport      | Status                                                       |
-| ----------------- | -------------- | ------------------------------------------------------------ |
-| `'uws'` (default) | uWebSockets.js | Primary native engine. HTTP + WebSocket. Highest throughput. |
-| `'node'`          | `node:http`    | Experimental opt-in fallback. No `permessage-deflate`.       |
+| `backend`         | Transport   | Status                                                       |
+| ----------------- | ----------- | ------------------------------------------------------------ |
+| `'uws'` (default) | `swm-uws`   | Primary native engine. HTTP + WebSocket. Highest throughput. |
+| `'node'`          | `node:http` | Experimental opt-in fallback. No `permessage-deflate`.       |
 
 ```js
-// Default: uWebSockets.js
+// Default: @swarmmachina/swm-uws
 const server = new Server({ port: 6000, router })
 
 // Explicit fallback: bundled node:http backend
@@ -68,17 +65,16 @@ second package is needed. It serves the full HTTP and WebSocket API on
 [Autobahn TestSuite](https://github.com/crossbario/autobahn-testsuite)
 (`npm run test:autobahn`, requires docker).
 
-Because the package installs uWebSockets.js as a runtime dependency, a missing
-or platform-incompatible native addon is treated as an installation error when
-the default backend starts. `backend: 'node'` remains an explicit runtime
-fallback.
+Because the package installs `@swarmmachina/swm-uws` as a runtime dependency, a
+missing or platform-incompatible native addon is treated as an installation
+error when the default backend starts. `backend: 'node'` remains an explicit
+runtime fallback.
 
-## Native binding comparison
+## Native binding regression gate
 
-The migration gate runs the same `swm-core` HTTP and WebSocket paths with only
-the native binding changed: candidate `@swarmmachina/swm-uws@0.4.0` versus the
-current `uWebSockets.js@20.69.0` dependency. The candidate stays dev-only until
-compatibility and performance gates pass on the supported production image.
+The default runtime is `@swarmmachina/swm-uws@0.4.1`. The regression gate runs
+the same `swm-core` HTTP and WebSocket paths against the dev-only
+`uWebSockets.js@20.69.0` reference, changing only the native binding.
 
 ```bash
 npm run test:e2e:bindings
@@ -104,11 +100,10 @@ to `benchmark/profiles/binding-deep/`. Override duration, warmup, runs, and
 sampling with the `DEEP_BINDING_*` variables in
 `benchmark/binding-deep-compare.js`.
 
-To advance both native implementations together after publishing a candidate
-binding release, run:
+To advance the runtime binding and its upstream reference together, run:
 
 ```bash
-npm run deps:update:bindings -- 0.4.0 v20.69.0
+npm run deps:update:bindings -- 0.4.1 v20.69.0
 npm run test:e2e:bindings
 ```
 
@@ -121,7 +116,7 @@ By default, `swm-core` enables the measured `beginWrite`, `collectBody`, and
 capability-gated path without changing the backend, or pass a comma-separated
 allowlist. `SWM_UWS_NATIVE_FAST_PATHS=all` also enables experimental request
 snapshot and response batching; those two paths remain opt-in until they meet
-the migration performance gate.
+the performance gate.
 
 ## Quick Start
 

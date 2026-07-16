@@ -29,8 +29,8 @@ export async function startServer({ benchDir, serverName, fw, testName, runIndex
 
   const nodeArgs = []
 
-  if (fw === 'core-swm-uws' || fw === 'raw-swm-uws') {
-    nodeArgs.push('--conditions=swm-uws-candidate')
+  if (fw === 'core-uwebsockets' || fw === 'raw-uwebsockets') {
+    nodeArgs.push('--conditions=uwebsockets-reference')
   }
 
   if (v8prof) {

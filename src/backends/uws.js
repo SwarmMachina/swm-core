@@ -36,7 +36,7 @@ export async function load() {
       mod = await import('#uws-binding')
     } catch (err) {
       throw new Error(
-        "Failed to load the required 'uwebsockets.js' dependency. Reinstall the package for this platform or explicitly use backend: 'node'.",
+        "Failed to load the required '@swarmmachina/swm-uws' dependency. Reinstall the package for this platform or explicitly use backend: 'node'.",
         { cause: err }
       )
     }

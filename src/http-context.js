@@ -117,8 +117,8 @@ export default class HttpContext {
   }
 
   /**
-   * @param {import('uwebsockets.js').HttpResponse} res
-   * @param {import('uwebsockets.js').HttpRequest} req
+   * @param {import('@swarmmachina/swm-uws').HttpResponse} res
+   * @param {import('@swarmmachina/swm-uws').HttpRequest} req
    * @param {Server} [server]
    * @param {number} [maxSize]
    * @returns {HttpContext}
