@@ -1,6 +1,6 @@
 {
   "name": "@swarmmachina/swm-core",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "High-performance HTTP/WebSocket server built on swm-uws with an opt-in node:http backend",
   "keywords": [
     "http",
