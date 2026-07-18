@@ -58,21 +58,13 @@ const server = new Server({ port: 6000, http: { onRequest } })
 const fallback = new Server({ backend: 'node', port: 6000, http: { onRequest } })
 ```
 
-The experimental, opt-in `'node'` backend is bundled with this package; no
-second package is needed. It serves the full HTTP and WebSocket API on
-`node:http` plus a pure-JS RFC 6455 implementation. It does not implement the
-`permessage-deflate` compression extension. WebSocket conformance is checked with the
-[Autobahn TestSuite](https://github.com/crossbario/autobahn-testsuite)
-(`npm run test:autobahn`, requires docker).
-
-Because the package installs `@swarmmachina/swm-uws` as a runtime dependency, a
-missing or platform-incompatible native addon is treated as an installation
-error when the default backend starts. `backend: 'node'` remains an explicit
-runtime fallback.
+The bundled `'node'` backend implements the same API without
+`permessage-deflate`; `npm run test:autobahn` checks WebSocket conformance. A
+missing native addon fails startup unless `backend: 'node'` is selected.
 
 ## Native binding regression gate
 
-The default runtime is `@swarmmachina/swm-uws@0.4.1`. The regression gate runs
+The default runtime is `@swarmmachina/swm-uws@0.5.0`. The regression gate runs
 the same `swm-core` HTTP and WebSocket paths against the dev-only
 `uWebSockets.js@20.69.0` reference, changing only the native binding.
 
@@ -82,41 +74,21 @@ npm run bench:bindings
 npm run bench:bindings:deep
 ```
 
-The performance command runs four measured iterations in balanced AB/BA order
-after a two-second warmup. HTTP uses 100 connections, six seconds and pipelining 10; WebSocket echo
-uses 50 connections, six seconds and 64-byte messages. The report includes
-throughput, HTTP p97.5/p99 and WebSocket p95/p99 latency, ELU, RSS, heap and errors, and writes its JSON
-artifact to `benchmark/profiles/binding-compare/summary.json`. Override the
-parameters with the `BINDING_BENCH_*` environment variables defined in
-`benchmark/binding-compare.js`.
-
-Use `bench:bindings:deep` when validating a release or investigating a noisy
-result. It runs six balanced AB/BA pairs across HTTP concurrency/pipelining,
-headers, request bodies, and closed/open-loop WebSocket workloads. Raw binding
-servers are measured alongside the same paths through `swm-core`, which
-separates native binding cost from framework overhead. Its report uses paired
-throughput and latency deltas with an interquartile range and writes artifacts
-to `benchmark/profiles/binding-deep/`. Override duration, warmup, runs, and
-sampling with the `DEEP_BINDING_*` variables in
-`benchmark/binding-deep-compare.js`.
+`bench:bindings` is the CI gate; `bench:bindings:deep` is the longer diagnostic
+run. Both use balanced AB/BA ordering and write JSON under `benchmark/profiles/`.
+Parameters can be overridden with `BINDING_BENCH_*` or `DEEP_BINDING_*`.
 
 To advance the runtime binding and its upstream reference together, run:
 
 ```bash
-npm run deps:update:bindings -- 0.4.1 v20.69.0
+npm run deps:update:bindings -- 0.5.0 v20.69.0
 npm run test:e2e:bindings
 ```
 
-The updater changes both dependency pins, regenerates `package-lock.json`, and
-updates the version references in this README. Commit the generated lockfile;
-do not edit the two pins independently.
+The updater changes both pins and the lockfile; do not edit them independently.
 
-By default, `swm-core` enables the measured `beginWrite`, `collectBody`, and
-`requestPause` capabilities. Set `SWM_UWS_NATIVE_FAST_PATHS=0` to disable every
-capability-gated path without changing the backend, or pass a comma-separated
-allowlist. `SWM_UWS_NATIVE_FAST_PATHS=all` also enables experimental request
-snapshot and response batching; those two paths remain opt-in until they meet
-the performance gate.
+`SWM_UWS_NATIVE_FAST_PATHS=0` disables native fast paths. A comma-separated list
+selects individual paths; `all` also enables experimental paths.
 
 ## Quick Start
 
@@ -137,6 +109,54 @@ const server = new Server({
 await server.listen()
 console.log('Server listening on port 3000')
 ```
+
+### Async Work Before Using the Request Body
+
+With the default `uws` backend, start the body reader before the first
+asynchronous operation if the handler will need the body later. The body is
+collected while the user is checked, but it is not parsed or used until the
+check succeeds:
+
+```javascript
+http: {
+  onRequest: async (ctx) => {
+    console.log(`http ${ctx.method()} ${ctx.url()}`)
+
+    if (ctx.method() !== 'post') {
+      return null // 204 No Content
+    }
+
+    // Register the body reader synchronously, before the first await.
+    const dataPromise = ctx.text(1024 * 1024) // 1 MB limit, in bytes
+
+    // The body can fail while the database call is still pending. Attach a
+    // rejection handler immediately; awaiting the original promise below still
+    // propagates the error when the user is allowed.
+    void dataPromise.catch(() => {})
+
+    const token = ctx.header('authorization')
+    const isBlocked = await checkUserInDatabase(token)
+
+    if (isBlocked) {
+      return null // 204 No Content
+    }
+
+    const data = JSON.parse(await dataPromise)
+    console.log({ data })
+
+    ctx.status(404)
+    return { status: false }
+  }
+}
+```
+
+> **Warning:** awaiting any other asynchronous operation before the first call
+> to `ctx.body()`, `ctx.buffer()`, `ctx.text()`, or `ctx.json()` can leave that
+> body promise waiting indefinitely on the `uws` backend because body events may
+> already have arrived. The same rule applies to routes with `preHandler`: if
+> the handler will read the body, its reader must be started synchronously
+> before an asynchronous `preHandler` yields. Calling `ctx.text()` returns a
+> Promise`.
 
 ### HTTP Server with Routing (Traditional API)
 
@@ -277,6 +297,9 @@ const server = new Server({
       console.log('Received:', text)
       ctx.send(`Echo: ${text}`)
     },
+    onDropped: (ctx, message, isBinary) => {
+      console.warn('Dropped outgoing message for slow client:', message.byteLength, isBinary)
+    },
     onClose: (ctx, code, message) => {
       console.log('Client disconnected:', ctx.data.ip)
     },
@@ -349,6 +372,7 @@ HTTP with a deterministic default `404` response.
 | `wsUpgradeTimeoutMs` | `Number`   | `10000`                                               | Node backend deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                          |
 | `onOpen`             | `Function` | `(ctx) => {}`                                         | Called when client connects.                                                                                                                                                                                                                                             |
 | `onMessage`          | `Function` | `(ctx, message, isBinary) => {}`                      | Called when message received.                                                                                                                                                                                                                                            |
+| `onDropped`          | `Function` | `(ctx, message, isBinary) => {}`                      | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
 | `onClose`            | `Function` | `(ctx, code, message) => {}`                          | Called when client disconnects.                                                                                                                                                                                                                                          |
 | `onDrain`            | `Function` | `(ctx) => {}`                                         | Called when socket is writable again.                                                                                                                                                                                                                                    |
 | `onError`            | `Function` | `(ctx, error) => {}`                                  | Called on WebSocket error.                                                                                                                                                                                                                                               |
@@ -1389,68 +1413,39 @@ npm run test:coverage
 
 ## Regression profiling (CI)
 
-`npm run profile:ci` runs the regression-profiling suites (HTTP, body-parser and
-WebSocket), records CPU profiles and memory peaks, and fails on a guard breach.
-In CI it runs for release tags and manual dispatches (see
-`.github/workflows/ci.yml`). Thresholds and the exact calibrated parameters live
-in `benchmark/baselines/*.json`; the runner reads both from the same baseline so
-they cannot drift independently.
+`npm run profile:ci` checks HTTP, body-parser and WebSocket performance against
+`benchmark/baselines/*.json`. CI runs it on release tags and manual dispatches.
 
-GitHub's shared runners are noisy — throughput can swing 30–40% between runs — so
-absolute thresholds there only catch large regressions. Running the profiling job
-on a quiet self-hosted runner removes that noise and lets the thresholds be
-tightened enough to catch small regressions.
+The self-hosted `regression-gate` runs, in order:
 
-The self-hosted `regression-gate` job is intentionally single-pass. After one
-checkout and `npm ci`, it runs the absolute regression profile first, then the
-balanced native-binding comparison, report-only framework comparisons, and
-Autobahn conformance. This keeps the calibrated measurement ahead of workloads
-that can heat or perturb the runner, and avoids changing hosts between related
-performance checks. The step summary and these artifacts preserve the evidence:
-`regression-profiles`, `binding-comparison`, `framework-comparison`, and
-`autobahn-report`.
+1. regression profile;
+2. native-binding comparison;
+3. framework comparison (report only);
+4. Autobahn conformance.
 
-## Release flow
+Reports are uploaded as CI artifacts.
 
-A release tag must exactly match the version in both package manifests: tag
-`vX.Y.Z`, `package.json` version `X.Y.Z`, and the root `package-lock.json` version
-`X.Y.Z`. The tagged commit must also be reachable from `master`. These cheap
-policy checks run before the test matrix or self-hosted gate.
+## Release
 
-After all gates pass, CI creates one npm tarball with lifecycle scripts disabled,
-checks that it contains only the declared public package surface, and records its
-SHA-256/SHA-512 hashes in `release-manifest.json`. The publish job downloads that
-artifact, verifies `SHA256SUMS`, and publishes the same tarball without another
-checkout, install, pack, or test pass. Manual dispatches exercise the complete
-flow and retain the tarball but never publish it.
+CI publishes only tags matching the package version (`vX.Y.Z`). The tagged commit
+must belong to `master`, and `package.json` and `package-lock.json` must agree.
 
-Publishing is retry-safe: if npm already contains the same version, the publish
-step compares its registry integrity with the tarball and succeeds only when the
-contents are identical. An occupied version with different content, an ambiguous
-registry failure, or a checksum mismatch fails closed.
+CI packs once, verifies the tarball and checksum, then publishes that exact
+artifact. A retry succeeds only when the existing npm package has the same
+integrity. Manual dispatch runs all gates without publishing.
 
-For a local release, use `npm run release`. It runs the functional release gate
-once, builds the inspected tarball, then publishes that tarball with npm lifecycle
-scripts disabled. Direct `npm publish` remains protected by `prepublishOnly`.
-Performance acceptance remains authoritative only on the calibrated CI runner.
+Local release: `npm run release`.
 
-Published npm versions are immutable. If a release must be rolled back, move the
-`latest` dist-tag to the previous known-good version and deprecate the faulty
-version; fix forward with a new version rather than reusing or moving a release
-tag.
+Rollback by moving `latest` to a known-good version and deprecating the bad one.
+Never reuse a published version or release tag.
 
 ### Self-hosted runner
 
-The gated `regression-gate` job uses a self-hosted runner. The regular `test` job
-stays on `ubuntu-latest`.
+Use an ephemeral runner in the `swm-ci` group with the `bench` label. Run it as an
+unprivileged user, allow only outbound HTTPS, and do not expose production
+secrets. Fork pull requests do not use this runner.
 
-> **Public-repository note.** The workflow accepts release tags and manual
-> dispatches, so fork pull requests never reach the self-hosted machine. Still
-> treat the host as exposed: dedicated unprivileged user, firewalled, no
-> production secrets, ephemeral runner.
-
-**1. Register the runner** (repo Settings → Actions → Runners → New self-hosted
-runner). The connection is outbound-only — no inbound ports, works behind NAT:
+Register it from repository Settings → Actions → Runners:
 
 ```bash
 ./config.sh --url https://github.com/<owner>/<repo> --token <RUNNER_TOKEN> --labels bench --ephemeral
@@ -1458,28 +1453,14 @@ sudo ./svc.sh install <user>
 sudo ./svc.sh start
 ```
 
-**2. Harden the host.**
-
-- Run the runner as a dedicated unprivileged user, never root.
-- Keep the host firewalled; allow only outbound HTTPS to GitHub.
-- Do not expose repository or production secrets to the runner.
-- `--ephemeral` de-registers the runner after each job, limiting persistence.
-
-**3. Tune for low noise** (otherwise the variance returns):
+Use the performance governor and keep the host idle during benchmarks:
 
 ```bash
 sudo cpupower frequency-set -g performance
 ```
 
-Keep the host idle during a run; optionally pin the runner to dedicated cores.
-
-**4. Point the job at the runner.** In `.github/workflows/ci.yml`, configure the
-`regression-gate` job for the `swm-ci` runner group and `bench` label.
-
-**5. Recalibrate.** Throughput and memory numbers differ per machine, so recalibrate
-`benchmark/baselines/*.json` on the self-hosted runner: collect a few green runs,
-then set each guard just past the observed noise floor (throughput `min` ≈ observed
-low × 0.9; latency and memory `max` ≈ observed high × 1.15).
+After changing hardware, recalibrate `benchmark/baselines/*.json` from several
+green runs (`min` ≈ low × 0.9; `max` ≈ high × 1.15).
 
 ## Contributing
 
