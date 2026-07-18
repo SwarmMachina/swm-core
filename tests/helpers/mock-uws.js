@@ -75,8 +75,8 @@ export function createMockApp() {
       calls.push({ method: 'ws', path, config })
       return app
     },
-    listen(port, cb) {
-      mockCalls.listen.push({ port, cb })
+    listen(host, port, cb) {
+      mockCalls.listen.push({ host, port, cb })
       if (listenCallback) {
         listenCallback(cb)
       } else {

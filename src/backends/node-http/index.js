@@ -96,7 +96,7 @@ export function App(createHttpServer = createServer) {
       return state.wsLayer ? state.wsLayer.numSubscribers(topic) : 0
     },
 
-    listen(port, cb) {
+    listen(host, port, cb) {
       const server = createHttpServer({ noDelay: true }, onRequest)
 
       state.server = server
@@ -122,7 +122,7 @@ export function App(createHttpServer = createServer) {
         }
       })
 
-      server.listen(port, () => {
+      server.listen(port, host, () => {
         if (!settled) {
           settled = true
           state.listening = true

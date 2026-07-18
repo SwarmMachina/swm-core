@@ -36,6 +36,7 @@ describe('Server', () => {
       strictEqual(server.router, router)
       strictEqual(server.routes, null)
       strictEqual(server.useNativeRouting, false)
+      strictEqual(server.host, '127.0.0.1')
       strictEqual(server.port, 6000)
       strictEqual(server.maxBodyBytes, 1024 * 1024)
       strictEqual(server.wsEnabled, false)
@@ -57,6 +58,19 @@ describe('Server', () => {
       const server = makeServer({ router: () => {}, port: 3000 })
 
       strictEqual(server.port, 3000)
+    })
+
+    test('should use custom host', () => {
+      const server = makeServer({ router: () => {}, host: '0.0.0.0' })
+
+      strictEqual(server.host, '0.0.0.0')
+    })
+
+    test('should reject an invalid host', () => {
+      throws(() => makeServer({ router: () => {}, host: '' }), {
+        name: 'TypeError',
+        message: 'Host must be a non-empty string'
+      })
     })
 
     test('should use custom maxBodySize', () => {
@@ -355,6 +369,21 @@ describe('Server', () => {
       strictEqual(typeof mockApp.calls[0].handler, 'function')
       strictEqual(server.socket !== null, true)
       strictEqual(server.app !== null, true)
+      deepStrictEqual(
+        mockCalls.listen.map(({ host, port }) => ({ host, port })),
+        [{ host: '127.0.0.1', port: 7000 }]
+      )
+    })
+
+    test('should listen on a custom host', async () => {
+      const server = makeServer({ router: () => {}, host: '0.0.0.0', port: 7000 })
+
+      await server.listen()
+
+      deepStrictEqual(
+        mockCalls.listen.map(({ host, port }) => ({ host, port })),
+        [{ host: '0.0.0.0', port: 7000 }]
+      )
     })
 
     test('should return server instance on successful listen', async () => {
@@ -400,7 +429,7 @@ describe('Server', () => {
       })
 
       await rejects(server.listen(), {
-        message: 'Listen failed on :8000'
+        message: 'Listen failed on 127.0.0.1:8000'
       })
 
       strictEqual(server.socket, null)

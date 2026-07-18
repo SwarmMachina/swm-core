@@ -108,12 +108,23 @@ export default class Server {
    * @param {Route[]} [opt.routes] - Array of route definitions (native routing API)
    * @param {(ctx: HttpContext, err: Error) => any|Promise<any>} [opt.onHttpError]
    * @param {(err: Error) => any|Promise<any>} [opt.onServerError]
+   * @param {string} [opt.host]
    * @param {number} [opt.port]
    * @param {number} [opt.maxBodySize] - in mb
    * @param {WSOptions} [opt.ws]
    * @param {'uws'|'node'} [opt.backend] - Transport backend. 'uws' (default) is the native turbo engine; 'node' is the opt-in node:http backend.
    */
-  constructor({ router, routes, onHttpError, onServerError, port = 6000, maxBodySize = 1, ws, backend = 'uws' }) {
+  constructor({
+    router,
+    routes,
+    onHttpError,
+    onServerError,
+    host = '127.0.0.1',
+    port = 6000,
+    maxBodySize = 1,
+    ws,
+    backend = 'uws'
+  }) {
     if (router && routes) {
       throw new TypeError('Cannot use both "router" and "routes" options. Choose one.')
     }
@@ -132,6 +143,10 @@ export default class Server {
 
     if (!(Number.isFinite(port) && port > 0 && port <= 65535)) {
       throw new TypeError('Http port must be in range 1 - 65535')
+    }
+
+    if (typeof host !== 'string' || host.length === 0) {
+      throw new TypeError('Host must be a non-empty string')
     }
 
     if (!(Number.isFinite(maxBodySize) && maxBodySize >= 1 && maxBodySize <= 64)) {
@@ -154,6 +169,7 @@ export default class Server {
     }
 
     this.backend = backend
+    this.host = host
     this.port = port
     this.router = router || null
     this.routes = routes || null
@@ -285,11 +301,11 @@ export default class Server {
     }
 
     return new Promise((resolve, reject) => {
-      this.app.listen(this.port, (socket) => {
+      this.app.listen(this.host, this.port, (socket) => {
         this.#listenPromise = null
 
         if (!socket) {
-          return reject(new Error(`Listen failed on :${this.port}`))
+          return reject(new Error(`Listen failed on ${this.host}:${this.port}`))
         }
 
         resolve(this)

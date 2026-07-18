@@ -83,6 +83,8 @@ export interface ServerOptions {
   onHttpError?: (ctx: HttpContext, err: Error) => any | Promise<any>
   /** Node backend transport errors emitted after the server has started listening. */
   onServerError?: (err: Error) => any | Promise<any>
+  /** Address or hostname to bind. @default '127.0.0.1' */
+  host?: string
   /** @default 6000 */
   port?: number
   /** Max request body size in MB (1-64). @default 1 */
@@ -199,6 +201,7 @@ export class WSContext {
 export default class Server {
   constructor(options: ServerOptions)
 
+  readonly host: string
   readonly port: number
   /** The selected transport backend. */
   readonly backend: 'uws' | 'node'

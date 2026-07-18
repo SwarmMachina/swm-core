@@ -298,6 +298,7 @@ new Server(options)
 | `routes`        | `Array`    | _one required_ | Array of route definitions (declarative routing API)    |
 | `onHttpError`   | `Function` | `() => {}`     | Request error handler `(ctx, error) => void`            |
 | `onServerError` | `Function` | `() => {}`     | Node backend post-listen transport error handler        |
+| `host`          | `String`   | `'127.0.0.1'`  | Address or hostname to bind                             |
 | `port`          | `Number`   | `6000`         | Server port (1-65535)                                   |
 | `maxBodySize`   | `Number`   | `1`            | Max request body size in MB (1-64)                      |
 | `ws`            | `Object`   | `null`         | WebSocket configuration (see below)                     |
