@@ -68,7 +68,7 @@ function sendReady(port) {
 async function runCore(port, backend) {
   const { default: Server, prepareHeaders } = await import('../src/index.js')
   const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
-  const router = async (ctx) => {
+  const onRequest = async (ctx) => {
     const method = ctx.method()
     const url = ctx.url()
 
@@ -92,7 +92,7 @@ async function runCore(port, backend) {
 
     return 'Not Found'
   }
-  const server = new Server({ port, onHttpError: console.error, router, backend })
+  const server = new Server({ port, http: { onRequest, onError: console.error }, backend })
 
   await server.listen()
   sendReady(server.port)

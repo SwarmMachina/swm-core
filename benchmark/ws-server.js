@@ -54,10 +54,8 @@ async function runCore(port, backend) {
   const server = new Server({
     port,
     backend,
-    onHttpError: console.error,
-    router: () => 'ok',
+    http: null,
     ws: {
-      enabled: true,
       onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
     }
   })

@@ -113,7 +113,6 @@ export function makeWsScenarios() {
 
   const echoServerOptions = (collect) => ({
     ws: {
-      enabled: true,
       onUpgrade: () => ({ isAllowed: true, userData: { marker: makeMarker(nextId++) } }),
       onOpen: (ctx) => {
         collect(ctx)
@@ -163,7 +162,6 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
-            enabled: true,
             onOpen: (ctx) => {
               collect(ctx)
             },
@@ -194,7 +192,6 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
-            enabled: true,
             onOpen: (ctx) => {
               collect(ctx)
             },
@@ -237,7 +234,6 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
-            enabled: true,
             onOpen: (ctx) => {
               collect(ctx)
             },
@@ -285,7 +281,6 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
-            enabled: true,
             onOpen: (ctx) => {
               collect(ctx)
             },
@@ -321,7 +316,6 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
-            enabled: true,
             onUpgrade: (meta) => ({
               isAllowed: true,
               userData: { userId: Number(meta.getQuery('uid')), marker: makeMarker(nextId++) }

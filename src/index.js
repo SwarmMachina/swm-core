@@ -10,6 +10,152 @@ export { prepareHeaders } from './prepared-headers.js'
 
 const isPromise = (v) => v != null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function'
 const WS_PROTOCOL_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'del', 'patch', 'options', 'head', 'any'])
+const NOOP = () => {}
+const ALLOW_WS_UPGRADE = () => Promise.resolve({ isAllowed: true })
+
+/**
+ * @param {unknown} value
+ * @param {string} name
+ * @returns {asserts value is object}
+ */
+function assertOptionsObject(value, name) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${name} must be an object or null`)
+  }
+}
+
+/**
+ * @param {object} options
+ * @param {string[]} names
+ * @param {string} namespace
+ */
+function validateCallbacks(options, names, namespace) {
+  for (const name of names) {
+    if (options[name] !== undefined && typeof options[name] !== 'function') {
+      throw new TypeError(`${namespace}.${name} must be a function`)
+    }
+  }
+}
+
+/**
+ * @param {Route} route
+ * @param {number} index
+ */
+function validateRoute(route, index) {
+  if (typeof route !== 'object' || route === null || Array.isArray(route)) {
+    throw new TypeError(`http.routes[${index}] must be an object`)
+  }
+
+  const { method, path, handler, preHandler } = route
+
+  if (!HTTP_METHODS.has(method)) {
+    throw new TypeError(`Invalid HTTP method: ${method}`)
+  }
+
+  if (typeof path !== 'string' || !path.startsWith('/')) {
+    throw new TypeError(`Invalid Path in route, method: ${method}, path: ${path}`)
+  }
+
+  if (typeof handler !== 'function') {
+    throw new TypeError(`http.routes[${index}].handler must be a function`)
+  }
+
+  if (preHandler === undefined) {
+    return
+  }
+
+  const chain = Array.isArray(preHandler) ? preHandler : [preHandler]
+
+  if (chain.some((item) => typeof item !== 'function')) {
+    throw new TypeError('Route preHandler must be a function or an array of functions')
+  }
+}
+
+/**
+ * @param {unknown} http
+ * @returns {{onRequest: ((ctx: HttpContext) => unknown|Promise<unknown>)|null, routes: Route[]|null, onError: (ctx: HttpContext, err: Error) => unknown|Promise<unknown>}|null}
+ */
+function normalizeHttpOptions(http) {
+  if (http == null) {
+    return null
+  }
+
+  assertOptionsObject(http, 'http')
+  validateCallbacks(http, ['onRequest', 'onError'], 'http')
+
+  if (http.onRequest !== undefined && http.routes !== undefined) {
+    throw new TypeError('Cannot use both "http.onRequest" and "http.routes" options. Choose one.')
+  }
+
+  if (http.routes !== undefined && !Array.isArray(http.routes)) {
+    throw new TypeError('http.routes must be an array')
+  }
+
+  http.routes?.forEach(validateRoute)
+
+  return {
+    onRequest: http.onRequest ?? null,
+    routes: http.routes ?? null,
+    onError: http.onError ?? NOOP
+  }
+}
+
+/**
+ * @param {unknown} ws
+ * @returns {WSOptions|null}
+ */
+function normalizeWsOptions(ws) {
+  if (ws == null) {
+    return null
+  }
+
+  assertOptionsObject(ws, 'ws')
+
+  if ('enabled' in ws) {
+    throw new TypeError('ws.enabled is no longer supported; use ws: null to disable WebSocket')
+  }
+
+  validateCallbacks(
+    ws,
+    [
+      'onOpen',
+      'onDrain',
+      'onUpgrade',
+      'onError',
+      'onClose',
+      'onMessage',
+      'onSubscription',
+      'connectionKey'
+    ],
+    'ws'
+  )
+
+  if (
+    ws.wsUpgradeTimeoutMs != null &&
+    !(Number.isFinite(ws.wsUpgradeTimeoutMs) && ws.wsUpgradeTimeoutMs >= 100 && ws.wsUpgradeTimeoutMs <= 300_000)
+  ) {
+    throw new TypeError('wsUpgradeTimeoutMs must be in range 100 - 300000')
+  }
+
+  const idleTimeout = ws.wsIdleTimeoutSec ?? 15
+
+  if (!(Number.isFinite(idleTimeout) && idleTimeout >= 5)) {
+    throw new TypeError('wsIdleTimeoutSec must be >= 5')
+  }
+
+  return ws
+}
+
+/**
+ * @param {import('@swarmmachina/swm-uws').HttpResponse} res
+ */
+function sendNotFound(res) {
+  res.cork(() => {
+    res.writeStatus(STATUS_TEXT[404])
+    res.end('Not Found')
+  })
+}
 
 /**
  * Select and validate the application-requested WebSocket subprotocol.
@@ -55,7 +201,6 @@ async function loadBackend(name) {
 
 /**
  * @typedef {object} WSOptions
- * @property {boolean} [enabled]
  * @property {number} [wsIdleTimeoutSec]
  * @property {number} [wsUpgradeTimeoutMs]
  * @property {(ctx: WSContext) => unknown} [onOpen]
@@ -103,42 +248,40 @@ export default class Server {
   bindingCapabilities = Object.freeze({})
 
   /**
-   * @param {object} opt
-   * @param {(ctx: HttpContext) => unknown|Promise<unknown>} [opt.router] - Universal router function (micro like API)
-   * @param {Route[]} [opt.routes] - Array of route definitions (native routing API)
-   * @param {(ctx: HttpContext, err: Error) => unknown|Promise<unknown>} [opt.onHttpError]
+   * @param {object} [opt]
+   * @param {{onRequest?: (ctx: HttpContext) => unknown|Promise<unknown>, routes?: Route[], onError?: (ctx: HttpContext, err: Error) => unknown|Promise<unknown>}|null} [opt.http]
    * @param {(err: Error) => unknown|Promise<unknown>} [opt.onServerError]
    * @param {string} [opt.host]
    * @param {number} [opt.port]
    * @param {number} [opt.maxBodySize] - in mb
-   * @param {WSOptions} [opt.ws]
+   * @param {WSOptions|null} [opt.ws]
    * @param {'uws'|'node'} [opt.backend] - Transport backend. 'uws' (default) is the native turbo engine; 'node' is the opt-in node:http backend.
    */
-  constructor({
-    router,
-    routes,
-    onHttpError,
-    onServerError,
-    host = '127.0.0.1',
-    port = 6000,
-    maxBodySize = 1,
-    ws,
-    backend = 'uws'
-  }) {
-    if (router && routes) {
-      throw new TypeError('Cannot use both "router" and "routes" options. Choose one.')
+  constructor(opt = {}) {
+    if (typeof opt !== 'object' || opt === null || Array.isArray(opt)) {
+      throw new TypeError('Server options must be an object')
     }
 
-    if (!router && !routes) {
-      throw new TypeError('Either "router" or "routes" option must be provided')
+    if ('router' in opt || 'routes' in opt || 'onHttpError' in opt) {
+      throw new TypeError(
+        'Legacy HTTP options are no longer supported; use http.onRequest, http.routes, and http.onError'
+      )
     }
 
-    if (router && typeof router !== 'function') {
-      throw new TypeError('Router must be a function')
-    }
+    const {
+      http: httpOptions,
+      onServerError,
+      host = '127.0.0.1',
+      port = 6000,
+      maxBodySize = 1,
+      ws: wsOptions,
+      backend = 'uws'
+    } = opt
+    const http = normalizeHttpOptions(httpOptions)
+    const ws = normalizeWsOptions(wsOptions)
 
-    if (routes && !Array.isArray(routes)) {
-      throw new TypeError('Routes must be an array')
+    if (!http && !ws) {
+      throw new TypeError('At least one of "http" or "ws" must be configured')
     }
 
     if (!(Number.isFinite(port) && port > 0 && port <= 65535)) {
@@ -153,15 +296,8 @@ export default class Server {
       throw new TypeError('Max body size must be in range 1 - 64')
     }
 
-    if (ws?.connectionKey != null && typeof ws.connectionKey !== 'function') {
-      throw new TypeError('ws.connectionKey must be a function')
-    }
-
-    if (
-      ws?.wsUpgradeTimeoutMs != null &&
-      !(Number.isFinite(ws.wsUpgradeTimeoutMs) && ws.wsUpgradeTimeoutMs >= 100 && ws.wsUpgradeTimeoutMs <= 300_000)
-    ) {
-      throw new TypeError('wsUpgradeTimeoutMs must be in range 100 - 300000')
+    if (onServerError !== undefined && typeof onServerError !== 'function') {
+      throw new TypeError('onServerError must be a function')
     }
 
     if (backend !== 'uws' && backend !== 'node') {
@@ -171,52 +307,25 @@ export default class Server {
     this.backend = backend
     this.host = host
     this.port = port
-    this.router = router || null
-    this.routes = routes || null
-    this.useNativeRouting = !!routes
+    this.http = http
+    this.ws = ws
     this.maxBodyBytes = Math.floor(maxBodySize * 1024 * 1024)
 
-    this.onHttpError = typeof onHttpError === 'function' ? onHttpError : () => {}
-    this.onServerError = typeof onServerError === 'function' ? onServerError : () => {}
-    this.onWsOpen = () => {}
-    this.onWsClose = () => {}
-    this.onWsError = () => {}
-    this.onWsMessage = () => {}
-    this.onWsDrain = () => {}
-    this.onWsSubscription = () => {}
-    this.onWsUpgrade = () => Promise.resolve({ isAllowed: true })
+    this.httpErrorHandler = http?.onError ?? NOOP
+    this.onServerError = typeof onServerError === 'function' ? onServerError : NOOP
+    this.onWsOpen = ws?.onOpen ?? NOOP
+    this.onWsClose = ws?.onClose ?? NOOP
+    this.onWsError = ws?.onError ?? NOOP
+    this.onWsMessage = ws?.onMessage ?? NOOP
+    this.onWsDrain = ws?.onDrain ?? NOOP
+    this.onWsSubscription = ws?.onSubscription ?? NOOP
+    this.onWsUpgrade = ws?.onUpgrade ?? ALLOW_WS_UPGRADE
     this.wsConnectionKey = null
     this.wsUpgradeTimeoutMs = 10_000
 
-    const hasHandlers =
-      typeof ws?.onMessage === 'function' ||
-      typeof ws?.onClose === 'function' ||
-      typeof ws?.onOpen === 'function' ||
-      typeof ws?.onError === 'function' ||
-      typeof ws?.onDrain === 'function' ||
-      typeof ws?.onUpgrade === 'function' ||
-      typeof ws?.onSubscription === 'function' ||
-      typeof ws?.connectionKey === 'function'
-
-    this.wsEnabled = !!(ws && (ws?.enabled ?? hasHandlers))
-
-    if (ws && this.wsEnabled) {
-      const timeout = ws?.wsIdleTimeoutSec ?? 15
-
-      if (!(Number.isFinite(timeout) && timeout >= 5)) {
-        throw new TypeError('wsIdleTimeoutSec must be >= 5')
-      }
-
-      this.wsIdleTimeoutSec = Math.floor(timeout)
+    if (ws) {
+      this.wsIdleTimeoutSec = Math.floor(ws.wsIdleTimeoutSec ?? 15)
       this.wsUpgradeTimeoutMs = Math.floor(ws.wsUpgradeTimeoutMs ?? 10_000)
-
-      this.onWsOpen = typeof ws.onOpen === 'function' ? ws.onOpen : () => {}
-      this.onWsClose = typeof ws.onClose === 'function' ? ws.onClose : () => {}
-      this.onWsError = typeof ws.onError === 'function' ? ws.onError : () => {}
-      this.onWsMessage = typeof ws.onMessage === 'function' ? ws.onMessage : () => {}
-      this.onWsDrain = typeof ws.onDrain === 'function' ? ws.onDrain : () => {}
-      this.onWsSubscription = typeof ws.onSubscription === 'function' ? ws.onSubscription : () => {}
-      this.onWsUpgrade = typeof ws.onUpgrade === 'function' ? ws.onUpgrade : () => Promise.resolve({ isAllowed: true })
       this.wsConnectionKey = ws.connectionKey ?? null
     }
 
@@ -262,29 +371,26 @@ export default class Server {
       this.app = this.#backend.App()
       this.app.onError?.((err) => void this.safeCall(this.onServerError, err))
 
-      if (this.useNativeRouting) {
-        for (const route of this.routes) {
+      if (this.http?.routes) {
+        for (const route of this.http.routes) {
           const { method, path, handler, preHandler } = route
           const methodName = method === 'delete' ? 'del' : method
-
-          if (typeof this.app[methodName] !== 'function') {
-            throw new TypeError(`Invalid HTTP method: ${method}`)
-          }
-
-          if (typeof path !== 'string' || !path.startsWith('/')) {
-            throw new TypeError(`Invalid Path in route, method: ${method}, path: ${path}`)
-          }
-
           const routeHandler = this.#composeRouteHandler(handler, preHandler)
           const paramNames = path.match(/:[^/]+/g)?.map((name) => name.slice(1)) ?? []
 
           this.app[methodName](path, (res, req) => this.handleWithContext(res, req, routeHandler, paramNames))
         }
+
+        if (!this.http.routes.some(({ method, path }) => method === 'any' && path === '/*')) {
+          this.app.any('/*', sendNotFound)
+        }
+      } else if (this.http?.onRequest) {
+        this.app.any('/*', (res, req) => this.handleWithContext(res, req, this.http.onRequest))
       } else {
-        this.app.any('/*', (res, req) => this.handleWithContext(res, req, this.router))
+        this.app.any('/*', sendNotFound)
       }
 
-      if (this.wsEnabled) {
+      if (this.ws) {
         this.app.ws('/*', {
           idleTimeout: this.wsIdleTimeoutSec,
           upgradeTimeout: this.wsUpgradeTimeoutMs,
@@ -383,7 +489,7 @@ export default class Server {
    * @returns {Promise<void>}
    */
   safeHttpError(ctx, err) {
-    return this.safeCall(this.onHttpError, ctx, err)
+    return this.safeCall(this.httpErrorHandler, ctx, err)
   }
 
   /**
@@ -910,7 +1016,7 @@ export default class Server {
    * @returns {number}
    */
   getSubscribersCount(topic) {
-    if (!this.app || !this.wsEnabled) {
+    if (!this.app || !this.ws) {
       return 0
     }
 
@@ -924,7 +1030,7 @@ export default class Server {
    * @returns {boolean}
    */
   publish(topic, message, isBinary) {
-    if (!this.app || !this.wsEnabled) {
+    if (!this.app || !this.ws) {
       return false
     }
 

@@ -14,7 +14,7 @@ let server = null
 async function start(routes) {
   const port = await getFreePort()
 
-  server = new Server({ port, routes })
+  server = new Server({ port, http: { routes } })
   await server.listen()
 
   return `http://127.0.0.1:${port}`

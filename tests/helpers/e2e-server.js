@@ -7,14 +7,14 @@ const BACKEND = process.env.SWM_BACKEND || 'uws'
 
 /**
  * @param {object} opt
- * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.router]
+ * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.onRequest]
  * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>}>} [opt.routes]
  * @param {number} [opt.maxBodySize]
  * @returns {Promise<{server: Server, port: number, baseUrl: string, close: () => Promise<void>}>}
  */
-export async function startHttpServer({ router, routes, maxBodySize }) {
+export async function startHttpServer({ onRequest, routes, maxBodySize }) {
   const port = await getFreePort()
-  const server = new Server({ router, routes, port, maxBodySize, backend: BACKEND })
+  const server = new Server({ http: { onRequest, routes }, port, maxBodySize, backend: BACKEND })
 
   await server.listen()
 
@@ -29,18 +29,18 @@ export async function startHttpServer({ router, routes, maxBodySize }) {
 /**
  * @param {object} [opt]
  * @param {import('../../src/index.js').WSOptions} [opt.ws]
- * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.router]
+ * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.onRequest]
  * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>}>} [opt.routes]
  * @param {number} [opt.maxBodySize]
  * @returns {Promise<{server: Server, port: number, httpBaseUrl: string, wsBaseUrl: string, close: () => Promise<void>}>}
  */
-export async function startWsServer({ ws, router, routes, maxBodySize } = {}) {
+export async function startWsServer({ ws, onRequest, routes, maxBodySize } = {}) {
   const port = await getFreePort()
+  const http = onRequest !== undefined || routes !== undefined ? { onRequest, routes } : null
   const server = new Server({
     port,
     maxBodySize: maxBodySize ?? 16,
-    router: router ?? ((ctx) => 'ok'),
-    routes,
+    http,
     ws,
     backend: BACKEND
   })

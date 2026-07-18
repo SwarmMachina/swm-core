@@ -52,10 +52,10 @@ option:
 
 ```js
 // Default: @swarmmachina/swm-uws
-const server = new Server({ port: 6000, router })
+const server = new Server({ port: 6000, http: { onRequest } })
 
 // Explicit fallback: bundled node:http backend
-const fallback = new Server({ backend: 'node', port: 6000, router })
+const fallback = new Server({ backend: 'node', port: 6000, http: { onRequest } })
 ```
 
 The experimental, opt-in `'node'` backend is bundled with this package; no
@@ -127,8 +127,10 @@ import Server from '@swarmmachina/swm-core'
 
 const server = new Server({
   port: 3000,
-  router: (ctx) => {
-    return { message: 'Hello World' }
+  http: {
+    onRequest: (ctx) => {
+      return { message: 'Hello World' }
+    }
   }
 })
 
@@ -143,27 +145,29 @@ import Server from '@swarmmachina/swm-core'
 
 const server = new Server({
   port: 3000,
-  router: async (ctx) => {
-    // Simple routing
-    if (ctx.url() === '/' && ctx.method() === 'get') {
-      return { message: 'Welcome to the API' }
-    }
+  http: {
+    onRequest: async (ctx) => {
+      // Simple routing
+      if (ctx.url() === '/' && ctx.method() === 'get') {
+        return { message: 'Welcome to the API' }
+      }
 
-    if (ctx.url() === '/users' && ctx.method() === 'get') {
-      return { users: await getUsers() }
-    }
+      if (ctx.url() === '/users' && ctx.method() === 'get') {
+        return { users: await getUsers() }
+      }
 
-    if (ctx.url() === '/users' && ctx.method() === 'post') {
-      const data = await ctx.json()
-      return await createUser(data)
-    }
+      if (ctx.url() === '/users' && ctx.method() === 'post') {
+        const data = await ctx.json()
+        return await createUser(data)
+      }
 
-    // 404 Not Found
-    ctx.status(404)
-    return { error: 'Not found' }
-  },
-  onHttpError: (ctx, error) => {
-    console.error('HTTP Error:', error)
+      // 404 Not Found
+      ctx.status(404)
+      return { error: 'Not found' }
+    },
+    onError: (ctx, error) => {
+      console.error('HTTP Error:', error)
+    }
   }
 })
 
@@ -182,53 +186,55 @@ import Server from '@swarmmachina/swm-core'
 
 const server = new Server({
   port: 3000,
-  routes: [
-    {
-      method: 'get',
-      path: '/',
-      handler: () => ({ message: 'Welcome to the API' })
-    },
-    {
-      method: 'get',
-      path: '/users',
-      handler: async () => ({ users: await getUsers() })
-    },
-    {
-      method: 'get',
-      path: '/users/:id',
-      handler: (ctx) => {
-        const id = ctx.param('id') // or ctx.param(0)
-        return getUserById(id)
+  http: {
+    routes: [
+      {
+        method: 'get',
+        path: '/',
+        handler: () => ({ message: 'Welcome to the API' })
+      },
+      {
+        method: 'get',
+        path: '/users',
+        handler: async () => ({ users: await getUsers() })
+      },
+      {
+        method: 'get',
+        path: '/users/:id',
+        handler: (ctx) => {
+          const id = ctx.param('id') // or ctx.param(0)
+          return getUserById(id)
+        }
+      },
+      {
+        method: 'post',
+        path: '/users',
+        handler: async (ctx) => {
+          const data = await ctx.json()
+          return await createUser(data)
+        }
+      },
+      {
+        method: 'put',
+        path: '/users/:id',
+        handler: async (ctx) => {
+          const id = ctx.param('id')
+          const data = await ctx.json()
+          return await updateUser(id, data)
+        }
+      },
+      {
+        method: 'delete',
+        path: '/users/:id',
+        handler: (ctx) => {
+          const id = ctx.param('id')
+          return deleteUser(id)
+        }
       }
-    },
-    {
-      method: 'post',
-      path: '/users',
-      handler: async (ctx) => {
-        const data = await ctx.json()
-        return await createUser(data)
-      }
-    },
-    {
-      method: 'put',
-      path: '/users/:id',
-      handler: async (ctx) => {
-        const id = ctx.param('id')
-        const data = await ctx.json()
-        return await updateUser(id, data)
-      }
-    },
-    {
-      method: 'delete',
-      path: '/users/:id',
-      handler: (ctx) => {
-        const id = ctx.param('id')
-        return deleteUser(id)
-      }
+    ],
+    onError: (ctx, error) => {
+      console.error('HTTP Error:', error)
     }
-  ],
-  onHttpError: (ctx, error) => {
-    console.error('HTTP Error:', error)
   }
 })
 
@@ -251,11 +257,12 @@ import Server from '@swarmmachina/swm-core'
 
 const server = new Server({
   port: 3000,
-  router: (ctx) => {
-    return { message: 'HTTP endpoint' }
+  http: {
+    onRequest: (ctx) => {
+      return { message: 'HTTP endpoint' }
+    }
   },
   ws: {
-    enabled: true,
     wsIdleTimeoutSec: 30,
     onUpgrade: (meta) => ({
       isAllowed: true,
@@ -292,19 +299,38 @@ new Server(options)
 
 **Options:**
 
-| Option          | Type       | Default        | Description                                             |
-| --------------- | ---------- | -------------- | ------------------------------------------------------- |
-| `router`        | `Function` | _one required_ | Route handler function `(ctx) => any` (traditional API) |
-| `routes`        | `Array`    | _one required_ | Array of route definitions (declarative routing API)    |
-| `onHttpError`   | `Function` | `() => {}`     | Request error handler `(ctx, error) => void`            |
-| `onServerError` | `Function` | `() => {}`     | Node backend post-listen transport error handler        |
-| `host`          | `String`   | `'127.0.0.1'`  | Address or hostname to bind                             |
-| `port`          | `Number`   | `6000`         | Server port (1-65535)                                   |
-| `maxBodySize`   | `Number`   | `1`            | Max request body size in MB (1-64)                      |
-| `ws`            | `Object`   | `null`         | WebSocket configuration (see below)                     |
-| `backend`       | `String`   | `'uws'`        | `'uws'` or the experimental opt-in `'node'` fallback    |
+| Option          | Type            | Default       | Description                                          |
+| --------------- | --------------- | ------------- | ---------------------------------------------------- |
+| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)           |
+| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below)      |
+| `onServerError` | `Function`      | `() => {}`    | Node backend post-listen transport error handler     |
+| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                          |
+| `port`          | `Number`        | `6000`        | Server port (1-65535)                                |
+| `maxBodySize`   | `Number`        | `1`           | Max HTTP body / WebSocket payload size in MB (1-64)  |
+| `backend`       | `String`        | `'uws'`       | `'uws'` or the experimental opt-in `'node'` fallback |
 
-**Note:** You must provide either `router` or `routes`, but not both.
+At least one of `http` or `ws` must be an object. A nullish value disables that
+application layer. `http: null` with a configured `ws` still creates the minimal
+HTTP transport required for WebSocket upgrades; ordinary HTTP requests receive
+a fixed `404` without allocating an `HttpContext`.
+
+| `http` | `ws`   | Result                                        |
+| ------ | ------ | --------------------------------------------- |
+| object | object | HTTP + WebSocket                              |
+| object | `null` | HTTP only                                     |
+| `null` | object | WebSocket with minimal HTTP upgrade transport |
+| `null` | `null` | Configuration error                           |
+
+**HTTP Options (`http` object):**
+
+| Option      | Type       | Default     | Description                                  |
+| ----------- | ---------- | ----------- | -------------------------------------------- |
+| `onRequest` | `Function` | default 404 | Universal request handler `(ctx) => any`     |
+| `routes`    | `Array`    | default 404 | Declarative route definitions                |
+| `onError`   | `Function` | `() => {}`  | Request error handler `(ctx, error) => void` |
+
+`http.onRequest` and `http.routes` are mutually exclusive. `http: {}` enables
+HTTP with a deterministic default `404` response.
 
 **Route Definition (for `routes` array):**
 
@@ -319,7 +345,6 @@ new Server(options)
 
 | Option               | Type       | Default                                               | Description                                                                                                                                                                                                                                                              |
 | -------------------- | ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enabled`            | `Boolean`  | `false`                                               | Enable WebSocket support. If not set and at least one ws handler is provided, WS will be enabled automatically.                                                                                                                                                          |
 | `wsIdleTimeoutSec`   | `Number`   | `15`                                                  | Idle timeout in seconds (min: 5). On the Node backend this also bounds partial/fragmented message assembly.                                                                                                                                                              |
 | `wsUpgradeTimeoutMs` | `Number`   | `10000`                                               | Node backend deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                          |
 | `onOpen`             | `Function` | `(ctx) => {}`                                         | Called when client connects.                                                                                                                                                                                                                                             |
@@ -330,6 +355,9 @@ new Server(options)
 | `onUpgrade`          | `Function` | `(meta) => ({isAllowed: true, userData?, protocol?})` | Validate WebSocket upgrade. `protocol`, when returned, must exactly match one token from `meta.getHeader('sec-websocket-protocol')`. Call metadata getters synchronously before any `await`; the underlying uWS request is only valid for the synchronous callback.      |
 | `onSubscription`     | `Function` | `(ctx, topic, newCount, oldCount) => {}`              | Called on topic subscription change.                                                                                                                                                                                                                                     |
 | `connectionKey`      | `Function` | `undefined`                                           | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
+
+`ws: {}` enables WebSocket with permissive upgrades and no-op lifecycle
+callbacks. Use `ws: null` (or omit `ws` when `http` is configured) to disable it.
 
 When a client requests WebSocket subprotocols, `onUpgrade` must explicitly
 return the selected token as `protocol`. The value must be one of the requested
@@ -417,7 +445,7 @@ console.log(server.connectionCount)
 
 ### HttpContext API
 
-The `ctx` object passed to the router function:
+The `ctx` object passed to `http.onRequest` and route handlers:
 
 #### Properties
 
@@ -885,48 +913,50 @@ const users = new Map()
 
 const server = new Server({
   port: 3000,
-  router: async (ctx) => {
-    try {
-      // GET /users
-      if (ctx.url() === '/users' && ctx.method() === 'get') {
-        return Array.from(users.values())
-      }
-
-      // GET /users/:id
-      if (ctx.url().startsWith('/users/') && ctx.method() === 'get') {
-        const id = ctx.url().split('/')[2]
-        const user = users.get(id)
-
-        if (!user) {
-          return ctx.status(404).send({ error: 'User not found' })
+  http: {
+    onRequest: async (ctx) => {
+      try {
+        // GET /users
+        if (ctx.url() === '/users' && ctx.method() === 'get') {
+          return Array.from(users.values())
         }
 
-        return user
-      }
+        // GET /users/:id
+        if (ctx.url().startsWith('/users/') && ctx.method() === 'get') {
+          const id = ctx.url().split('/')[2]
+          const user = users.get(id)
 
-      // POST /users
-      if (ctx.url() === '/users' && ctx.method() === 'post') {
-        const data = await ctx.json()
+          if (!user) {
+            return ctx.status(404).send({ error: 'User not found' })
+          }
 
-        if (!data.name || !data.email) {
-          return ctx.status(400).send({ error: 'Missing required fields' })
+          return user
         }
 
-        const user = { id: Date.now().toString(), ...data }
-        users.set(user.id, user)
+        // POST /users
+        if (ctx.url() === '/users' && ctx.method() === 'post') {
+          const data = await ctx.json()
 
-        return ctx.status(201).send(user)
+          if (!data.name || !data.email) {
+            return ctx.status(400).send({ error: 'Missing required fields' })
+          }
+
+          const user = { id: Date.now().toString(), ...data }
+          users.set(user.id, user)
+
+          return ctx.status(201).send(user)
+        }
+
+        // 404
+        return ctx.status(404).send({ error: 'Not found' })
+      } catch (error) {
+        console.error('Route error:', error)
+        return ctx.status(500).send({ error: 'Internal server error' })
       }
-
-      // 404
-      return ctx.status(404).send({ error: 'Not found' })
-    } catch (error) {
-      console.error('Route error:', error)
-      return ctx.status(500).send({ error: 'Internal server error' })
+    },
+    onError: (ctx, error) => {
+      console.error(`HTTP Error [${ctx.method()} ${ctx.url()}]:`, error)
     }
-  },
-  onHttpError: (ctx, error) => {
-    console.error(`HTTP Error [${ctx.method()} ${ctx.url()}]:`, error)
   }
 })
 
@@ -943,21 +973,23 @@ import fs from 'fs/promises'
 const server = new Server({
   port: 3000,
   maxBodySize: 10, // 10 MB
-  router: async (ctx) => {
-    if (ctx.url() === '/upload' && ctx.method() === 'post') {
-      const filename = ctx.query('filename') || 'upload.bin'
-      const body = await ctx.body()
+  http: {
+    onRequest: async (ctx) => {
+      if (ctx.url() === '/upload' && ctx.method() === 'post') {
+        const filename = ctx.query('filename') || 'upload.bin'
+        const body = await ctx.body()
 
-      await fs.writeFile(`./uploads/${filename}`, body)
+        await fs.writeFile(`./uploads/${filename}`, body)
 
-      return ctx.status(201).send({
-        success: true,
-        filename,
-        size: body.length
-      })
+        return ctx.status(201).send({
+          success: true,
+          filename,
+          size: body.length
+        })
+      }
+
+      return ctx.status(404).send({ error: 'Not found' })
     }
-
-    return ctx.status(404).send({ error: 'Not found' })
   }
 })
 
@@ -972,25 +1004,27 @@ import fs from 'fs'
 
 const server = new Server({
   port: 3000,
-  router: async (ctx) => {
-    if (ctx.url() === '/download' && ctx.method() === 'get') {
-      const filename = ctx.query('file')
+  http: {
+    onRequest: async (ctx) => {
+      if (ctx.url() === '/download' && ctx.method() === 'get') {
+        const filename = ctx.query('file')
 
-      if (!filename) {
-        return ctx.status(400).send({ error: 'Missing file parameter' })
+        if (!filename) {
+          return ctx.status(400).send({ error: 'Missing file parameter' })
+        }
+
+        const stream = fs.createReadStream(`./files/${filename}`)
+
+        await ctx.stream(stream, 200, {
+          'content-type': 'application/octet-stream',
+          'content-disposition': `attachment; filename="${filename}"`
+        })
+
+        return
       }
 
-      const stream = fs.createReadStream(`./files/${filename}`)
-
-      await ctx.stream(stream, 200, {
-        'content-type': 'application/octet-stream',
-        'content-disposition': `attachment; filename="${filename}"`
-      })
-
-      return
+      return ctx.status(404).send({ error: 'Not found' })
     }
-
-    return ctx.status(404).send({ error: 'Not found' })
   }
 })
 
@@ -1004,11 +1038,8 @@ import Server from '@swarmmachina/swm-core'
 
 const server = new Server({
   port: 3000,
-  router: (ctx) => {
-    return { message: 'WebSocket chat server' }
-  },
+  http: null,
   ws: {
-    enabled: true,
     onUpgrade: (meta) => ({
       isAllowed: true,
       userData: { username: meta.getQuery('username') || 'Anonymous' }
@@ -1061,9 +1092,8 @@ import Server from '@swarmmachina/swm-core'
 
 const server = new Server({
   port: 3000,
-  router: (ctx) => ({ ok: true }),
+  http: null,
   ws: {
-    enabled: true,
     onUpgrade: async (meta) => {
       // Validate token from query or header
       const token = meta.getQuery('token') || meta.getHeader('authorization')
@@ -1110,9 +1140,8 @@ import Server from '@swarmmachina/swm-core'
 
 const server = new Server({
   port: 3000,
-  router: (ctx) => ({ ok: true }),
+  http: null,
   ws: {
-    enabled: true,
     onUpgrade: (meta) => ({
       isAllowed: true,
       userData: { userId: meta.getQuery('userId') }
@@ -1188,37 +1217,41 @@ const requireAuth = (ctx) => {
 }
 
 const server = new Server({
-  routes: [
-    {
-      method: 'get',
-      path: '/admin',
-      preHandler: requireAuth,
-      handler: () => ({ ok: true })
-    }
-  ]
+  http: {
+    routes: [
+      {
+        method: 'get',
+        path: '/admin',
+        preHandler: requireAuth,
+        handler: () => ({ ok: true })
+      }
+    ]
+  }
 })
 ```
 
 - Run in order, sync or async (awaited); replying (`ctx.replied`) stops the chain.
 - Composed once at registration — zero per-request cost for routes without one.
-- Declarative `routes` API only (not the `router` function).
+- Declarative `http.routes` API only (not `http.onRequest`).
 
 ### Custom Response Headers
 
 ```javascript
 const server = new Server({
-  router: (ctx) => {
-    // Set custom headers
-    ctx.setHeader('custom-header', 'value')
-    return ctx.reply(
-      200,
-      {
-        'content-type': 'application/json',
-        'x-custom-header': 'value',
-        'cache-control': 'no-cache'
-      },
-      JSON.stringify({ ok: true })
-    )
+  http: {
+    onRequest: (ctx) => {
+      // Set custom headers
+      ctx.setHeader('custom-header', 'value')
+      return ctx.reply(
+        200,
+        {
+          'content-type': 'application/json',
+          'x-custom-header': 'value',
+          'cache-control': 'no-cache'
+        },
+        JSON.stringify({ ok: true })
+      )
+    }
   }
 })
 ```
@@ -1238,7 +1271,9 @@ const responseHeaders = prepareHeaders({
 })
 
 const server = new Server({
-  router: (ctx) => ctx.reply(200, responseHeaders, JSON.stringify({ ok: true }))
+  http: {
+    onRequest: (ctx) => ctx.reply(200, responseHeaders, JSON.stringify({ ok: true }))
+  }
 })
 ```
 
@@ -1260,19 +1295,21 @@ const applyCors = cors({
 })
 
 const server = new Server({
-  routes: [
-    {
-      method: 'any',
-      path: '/*',
-      handler: (ctx) => {
-        if (applyCors(ctx)) {
-          return // preflight handled (204)
-        }
+  http: {
+    routes: [
+      {
+        method: 'any',
+        path: '/*',
+        handler: (ctx) => {
+          if (applyCors(ctx)) {
+            return // preflight handled (204)
+          }
 
-        return { ok: true }
+          return { ok: true }
+        }
       }
-    }
-  ]
+    ]
+  }
 })
 ```
 
@@ -1290,17 +1327,19 @@ by extension, and caches file contents in memory.
 import Server, { serveStatic } from '@swarmmachina/swm-core'
 
 const server = new Server({
-  routes: [
-    { method: 'get', path: '/api/health', handler: () => ({ ok: true }) },
-    {
-      method: 'get',
-      path: '/*',
-      handler: serveStatic('./public', {
-        spa: true, // fall back to index.html for unmatched paths (default false)
-        maxAge: 3600 // optional Cache-Control: public, max-age=<seconds>
-      })
-    }
-  ]
+  http: {
+    routes: [
+      { method: 'get', path: '/api/health', handler: () => ({ ok: true }) },
+      {
+        method: 'get',
+        path: '/*',
+        handler: serveStatic('./public', {
+          spa: true, // fall back to index.html for unmatched paths (default false)
+          maxAge: 3600 // optional Cache-Control: public, max-age=<seconds>
+        })
+      }
+    ]
+  }
 })
 ```
 
@@ -1313,24 +1352,26 @@ traversal `403`, non-`GET`/`HEAD` `405`.
 
 ```javascript
 const server = new Server({
-  router: async (ctx) => {
-    if (ctx.url() === '/stream') {
-      ctx.startStreaming(200, { 'content-type': 'text/plain' })
+  http: {
+    onRequest: async (ctx) => {
+      if (ctx.url() === '/stream') {
+        ctx.startStreaming(200, { 'content-type': 'text/plain' })
 
-      for (let i = 0; i < 1000; i++) {
-        const ok = ctx.write(`Chunk ${i}\n`)
+        for (let i = 0; i < 1000; i++) {
+          const ok = ctx.write(`Chunk ${i}\n`)
 
-        if (!ok) {
-          // Handle backpressure
-          await new Promise((resolve) => {
-            ctx.onWritable((offset) => {
-              resolve(offset)
+          if (!ok) {
+            // Handle backpressure
+            await new Promise((resolve) => {
+              ctx.onWritable((offset) => {
+                resolve(offset)
+              })
             })
-          })
+          }
         }
-      }
 
-      ctx.end()
+        ctx.end()
+      }
     }
   }
 })

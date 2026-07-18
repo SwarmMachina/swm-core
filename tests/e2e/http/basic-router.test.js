@@ -12,9 +12,9 @@ afterEach(async () => {
   }
 })
 
-test('router mode: GET /ping => 200 "pong"', async () => {
+test('onRequest mode: GET /ping => 200 "pong"', async () => {
   server = await startHttpServer({
-    router: (ctx) => {
+    onRequest: (ctx) => {
       if (ctx.url() === '/ping') {
         return 'pong'
       }
@@ -27,9 +27,9 @@ test('router mode: GET /ping => 200 "pong"', async () => {
   assert.strictEqual(text, 'pong')
 })
 
-test('router mode: GET /echo?q=1 => 200 "1"', async () => {
+test('onRequest mode: GET /echo?q=1 => 200 "1"', async () => {
   server = await startHttpServer({
-    router: (ctx) => {
+    onRequest: (ctx) => {
       if (ctx.url().startsWith('/echo')) {
         return ctx.query('q') || ''
       }
@@ -42,9 +42,9 @@ test('router mode: GET /echo?q=1 => 200 "1"', async () => {
   assert.strictEqual(text, '1')
 })
 
-test('router mode: POST /echo => 404 {ok:false}', async () => {
+test('onRequest mode: POST /echo => 404 {ok:false}', async () => {
   server = await startHttpServer({
-    router: async (ctx) => {
+    onRequest: async (ctx) => {
       if (ctx.url().startsWith('/echo') && ctx.method() === 'post') {
         const body = await ctx.json()
 
@@ -62,9 +62,9 @@ test('router mode: POST /echo => 404 {ok:false}', async () => {
   assert.deepEqual(json, { ok: false, body: { req: 'test' } })
 })
 
-test('router mode: req access after async boundary', async () => {
+test('onRequest mode: req access after async boundary', async () => {
   server = await startHttpServer({
-    router: async (ctx) => {
+    onRequest: async (ctx) => {
       if (ctx.url().startsWith('/req-after-await')) {
         await new Promise((resolve) => setTimeout(resolve, 5))
 

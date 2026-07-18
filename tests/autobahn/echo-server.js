@@ -9,9 +9,8 @@ export async function startEchoServer(port = 9001) {
     backend: 'node',
     port,
     maxBodySize: 64,
-    router: () => 'ok',
+    http: null,
     ws: {
-      enabled: true,
       onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
     }
   })

@@ -56,7 +56,7 @@ async function main() {
     route.preHandler = noop
   }
 
-  const server = new Server({ port, onHttpError: console.error, routes: [route] })
+  const server = new Server({ port, http: { routes: [route], onError: console.error } })
 
   await server.listen()
 

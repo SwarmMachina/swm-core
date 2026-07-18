@@ -15,7 +15,6 @@ afterEach(async () => {
 test('ws echo: onMessage echoes text back to the sender', async () => {
   handle = await startWsServer({
     ws: {
-      enabled: true,
       onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
     }
   })
@@ -32,13 +31,21 @@ test('ws echo: onMessage echoes text back to the sender', async () => {
   sock.close()
 })
 
+test('ws-only server returns the minimal 404 for ordinary HTTP requests', async () => {
+  handle = await startWsServer({ ws: {} })
+
+  const response = await fetch(handle.httpBaseUrl)
+
+  assert.strictEqual(response.status, 404)
+  assert.strictEqual(await response.text(), 'Not Found')
+})
+
 test('ws echo: onOpen and onClose fire once per connection', async () => {
   let opens = 0
   let closes = 0
 
   handle = await startWsServer({
     ws: {
-      enabled: true,
       onOpen: () => {
         opens++
       },
@@ -68,7 +75,6 @@ test('ws echo: onOpen and onClose fire once per connection', async () => {
 test('ws upgrade selects only the subprotocol returned by onUpgrade', async () => {
   handle = await startWsServer({
     ws: {
-      enabled: true,
       onUpgrade: () => ({ isAllowed: true, protocol: 'chat' })
     }
   })
@@ -87,7 +93,6 @@ test('ws upgrade selects only the subprotocol returned by onUpgrade', async () =
 test('backend aborts an asynchronous upgrade after wsUpgradeTimeoutMs', async () => {
   handle = await startWsServer({
     ws: {
-      enabled: true,
       wsUpgradeTimeoutMs: 100,
       onUpgrade: () => new Promise(() => {})
     }

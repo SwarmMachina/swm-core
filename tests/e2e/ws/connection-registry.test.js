@@ -28,7 +28,6 @@ function connect(url) {
 test('connection registry: sendTo() delivers a message to the connection registered under a key', async () => {
   handle = await startWsServer({
     ws: {
-      enabled: true,
       onUpgrade: (meta) => ({ isAllowed: true, userData: { userId: meta.getQuery('userId') } }),
       connectionKey: (ctx) => ctx.data.userId,
       onMessage: (ctx, message) => {
@@ -59,7 +58,6 @@ test('connection registry: sendTo() delivers a message to the connection registe
 test('connection registry: closing a connection removes it from the registry', async () => {
   handle = await startWsServer({
     ws: {
-      enabled: true,
       onUpgrade: (meta) => ({ isAllowed: true, userData: { userId: meta.getQuery('userId') } }),
       connectionKey: (ctx) => ctx.data.userId
     }

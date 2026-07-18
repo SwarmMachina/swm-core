@@ -36,7 +36,6 @@ function wait(ms) {
 test('pub/sub: publish reaches every subscriber of a topic', async () => {
   handle = await startWsServer({
     ws: {
-      enabled: true,
       onOpen: (ctx) => ctx.subscribe('room')
     }
   })
@@ -62,7 +61,6 @@ test('pub/sub: publish reaches every subscriber of a topic', async () => {
 test('pub/sub: closing a subscriber decrements the topic count', async () => {
   handle = await startWsServer({
     ws: {
-      enabled: true,
       onOpen: (ctx) => ctx.subscribe('room')
     }
   })
@@ -83,7 +81,7 @@ test('pub/sub: closing a subscriber decrements the topic count', async () => {
 
 test('pub/sub: publish to an empty topic returns false', async () => {
   handle = await startWsServer({
-    ws: { enabled: true, onOpen: () => {} }
+    ws: { onOpen: () => {} }
   })
 
   await connect(handle.wsBaseUrl)

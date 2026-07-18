@@ -54,7 +54,6 @@ export interface UpgradeResult {
 }
 
 export interface WSOptions {
-  enabled?: boolean
   wsIdleTimeoutSec?: number
   /** Node backend: maximum time allowed for an asynchronous upgrade decision. @default 10000 */
   wsUpgradeTimeoutMs?: number
@@ -75,12 +74,19 @@ export interface WSOptions {
   connectionKey?: (ctx: WSContext) => string | number | null | undefined
 }
 
-export interface ServerOptions {
-  /** Universal router function (micro-like API). Provide either `router` or `routes`, not both. */
-  router?: Handler
-  /** Declarative routing API: an array of route definitions. Provide either `router` or `routes`, not both. */
-  routes?: Route[]
-  onHttpError?: (ctx: HttpContext, err: Error) => any | Promise<any>
+export interface HttpBaseOptions {
+  onError?: (ctx: HttpContext, err: Error) => any | Promise<any>
+}
+
+/** HTTP application layer. `onRequest` and `routes` are mutually exclusive. An empty object enables default 404 responses. */
+export type HttpOptions = HttpBaseOptions &
+  (
+    | { onRequest: Handler; routes?: never }
+    | { routes: Route[]; onRequest?: never }
+    | { onRequest?: never; routes?: never }
+  )
+
+export interface CommonServerOptions {
   /** Node backend transport errors emitted after the server has started listening. */
   onServerError?: (err: Error) => any | Promise<any>
   /** Address or hostname to bind. @default '127.0.0.1' */
@@ -89,7 +95,6 @@ export interface ServerOptions {
   port?: number
   /** Max request body size in MB (1-64). @default 1 */
   maxBodySize?: number
-  ws?: WSOptions
   /**
    * Transport backend. `'uws'` (default) is the native uWebSockets.js turbo
    * engine. `'node'` is the bundled, opt-in node:http backend (HTTP +
@@ -98,6 +103,10 @@ export interface ServerOptions {
    */
   backend?: 'uws' | 'node'
 }
+
+/** At least one application protocol must be configured. Nullish `http`/`ws` disables that layer. */
+export type ServerOptions = CommonServerOptions &
+  ({ http: HttpOptions; ws?: WSOptions | null } | { http?: HttpOptions | null; ws: WSOptions })
 
 /** Per-request context passed to HTTP handlers. Instances are pooled and reused. */
 export class HttpContext {

@@ -15,19 +15,21 @@ async function start(applyCors) {
 
   server = new Server({
     port,
-    routes: [
-      {
-        method: 'any',
-        path: '/*',
-        handler: (ctx) => {
-          if (applyCors(ctx)) {
-            return
-          }
+    http: {
+      routes: [
+        {
+          method: 'any',
+          path: '/*',
+          handler: (ctx) => {
+            if (applyCors(ctx)) {
+              return
+            }
 
-          return 'ok'
+            return 'ok'
+          }
         }
-      }
-    ]
+      ]
+    }
   })
 
   await server.listen()
