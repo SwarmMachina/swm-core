@@ -21,7 +21,6 @@ process.env.SWM_BACKEND = values.backend
 const { startHttpServer, startWsServer } = await import('../helpers/e2e-server.js')
 const { makeHttpScenarios } = await import('../leak/scenarios/http.js')
 const { makeWsScenarios } = await import('../leak/scenarios/ws.js')
-
 const noop = () => {}
 const wanted = values.scenarios ? new Set(values.scenarios.split(',')) : null
 const entries = []
@@ -52,6 +51,7 @@ const intervalMs = Number(values.interval) * 1000
 const maxSlope = Number(values['max-slope'])
 const startedAt = performance.now()
 const samples = []
+
 let iterations = 0
 let nextSampleAt = startedAt + intervalMs
 

@@ -22,7 +22,6 @@ export default async function wsLoad({ url, connections, durationSec, payloadByt
   let errors = 0
 
   const latency = createLatencyRecorder()
-
   const runConnection = () =>
     new Promise((resolve) => {
       const sock = new WebSocket(url, { perMessageDeflate: false })
@@ -51,10 +50,10 @@ export default async function wsLoad({ url, connections, durationSec, payloadByt
 
         resolve()
       }
-
       const sendOne = () => {
         if (performance.now() >= deadline) {
           done()
+
           return
         }
 

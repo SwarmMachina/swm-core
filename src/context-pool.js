@@ -2,7 +2,7 @@ export default class ContextPool {
   #inPool = new WeakSet()
 
   /**
-   * @param {Function} createFn
+   * @param {(pool: ContextPool) => object} createFn
    * @param {number} maxSize
    */
   constructor(createFn, maxSize = 1000) {
@@ -12,13 +12,14 @@ export default class ContextPool {
   }
 
   /**
-   * @returns {any}
+   * @returns {object}
    */
   acquire() {
     const ctx = this.pool.pop()
 
     if (ctx) {
       this.#inPool.delete(ctx)
+
       return ctx
     }
 
@@ -26,7 +27,7 @@ export default class ContextPool {
   }
 
   /**
-   * @param {any} ctx
+   * @param {object} ctx
    */
   release(ctx) {
     if (!ctx || typeof ctx.clear !== 'function') {

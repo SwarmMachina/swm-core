@@ -1,18 +1,18 @@
 /**
  * @param {object} options
- * @param {Function} [options.onCork]
+ * @param {() => void} [options.onCork]
  * @returns {object}
  */
 export function createMockRes(options = {}) {
   const calls = []
   const warnings = []
+
   let onDataCb = null
   let collectBodyCb = null
   let getProxiedRemoteAddressAsTextCallCount = 0
   let getRemoteAddressAsTextCallCount = 0
   let proxiedIp = null
   let remoteIp = null
-
   let writeOffset = 0
   let writeResultSequence = []
   let writeResultFn = null
@@ -33,6 +33,7 @@ export function createMockRes(options = {}) {
       if (!onDataCb) {
         throw new Error('onData not called yet')
       }
+
       const buffer = typeof data === 'string' ? Buffer.from(data) : Buffer.from(data)
 
       onDataCb(buffer, isLast)
@@ -54,9 +55,11 @@ export function createMockRes(options = {}) {
     },
     cork(fn) {
       calls.push(['cork'])
+
       if (options.onCork) {
         options.onCork()
       }
+
       inCork = true
       try {
         fn()
@@ -71,6 +74,7 @@ export function createMockRes(options = {}) {
       if (!inCork) {
         warnings.push('Warning: uWS.HttpResponse writes must be made from within a corked callback.')
       }
+
       calls.push(['writeHeader', k, v])
     },
     end(body) {
@@ -91,7 +95,10 @@ export function createMockRes(options = {}) {
       collectBodyCb = cb
     },
     pushCollectedBody(data) {
-      if (!collectBodyCb) throw new Error('collectBody not called yet')
+      if (!collectBodyCb) {
+        throw new Error('collectBody not called yet')
+      }
+
       collectBodyCb(data === null ? null : Uint8Array.from(data).buffer)
     },
     onData(cb) {
@@ -101,34 +108,43 @@ export function createMockRes(options = {}) {
     },
     getProxiedRemoteAddressAsText() {
       getProxiedRemoteAddressAsTextCallCount++
+
       return proxiedIp
     },
     getRemoteAddressAsText() {
       getRemoteAddressAsTextCallCount++
+
       return remoteIp
     },
     write(chunk) {
       calls.push(['write', chunk])
+
       if (writeResultFn) {
         return writeResultFn(chunk)
       }
+
       if (writeResultSequence.length > 0) {
         return writeResultSequence.shift()
       }
+
       return true
     },
     tryEnd(chunk, totalSize) {
       calls.push(['tryEnd', chunk, totalSize])
+
       if (tryEndResultFn) {
         return tryEndResultFn(chunk, totalSize)
       }
+
       if (tryEndResultSequence.length > 0) {
         return tryEndResultSequence.shift()
       }
+
       return [true, true]
     },
     getWriteOffset() {
       calls.push(['getWriteOffset'])
+
       return writeOffset
     },
     onWritable(cb) {
@@ -163,6 +179,7 @@ export function createMockRes(options = {}) {
 
         return result
       }
+
       return true
     }
   }
@@ -175,6 +192,7 @@ export function createMockRes(options = {}) {
  */
 export function createMockReadable() {
   const listeners = {}
+
   let pauseCallCount = 0
   let resumeCallCount = 0
   let destroyCallCount = 0
@@ -202,6 +220,7 @@ export function createMockReadable() {
       if (!listeners[event]) {
         listeners[event] = []
       }
+
       listeners[event].push(cb)
     },
     emit(event, arg) {
@@ -246,8 +265,11 @@ export function createMockReq(options = {}) {
   const calls = []
   const headers = { ...(options.headers || {}) }
   const query = { ...(options.query || {}) }
+
   let fullQuery = options.fullQuery
+
   const parameters = [...(options.parameters || [])]
+
   let method = options.method || ''
   let url = options.url || ''
 
@@ -255,6 +277,7 @@ export function createMockReq(options = {}) {
     calls,
     getMethod() {
       calls.push(['getMethod'])
+
       return method
     },
     setMethod(m) {
@@ -262,6 +285,7 @@ export function createMockReq(options = {}) {
     },
     getUrl() {
       calls.push(['getUrl'])
+
       return url
     },
     setUrl(u) {
@@ -269,6 +293,7 @@ export function createMockReq(options = {}) {
     },
     getHeader(name) {
       calls.push(['getHeader', name])
+
       return headers[name]
     },
     setHeader(name, value) {
@@ -301,6 +326,7 @@ export function createMockReq(options = {}) {
     },
     getParameter(i) {
       calls.push(['getParameter', i])
+
       return parameters[i]
     },
     setParameter(i, value) {
@@ -315,6 +341,7 @@ export function createMockReq(options = {}) {
     },
     snapshot(paramCount = 0) {
       calls.push(['snapshot', paramCount])
+
       return {
         method,
         url,

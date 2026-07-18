@@ -68,7 +68,6 @@ export default async function runWsSuite({ benchDir, repoRoot, outRoot }) {
     cpuProfile: p.cpuProfile ?? true,
     framework: 'core'
   }
-
   const outDir = path.join(outRoot, 'ws')
 
   await fs.mkdir(outDir, { recursive: true })
@@ -100,13 +99,11 @@ export default async function runWsSuite({ benchDir, repoRoot, outRoot }) {
   const bench = await readJson(jsonOut)
   const results = { echo: summarizeWs(bench) }
   const cpuProfiles = await copyCpuProfiles(bench, 'echo', outDir, repoRoot)
-
   const { failures: metricFailures, rows: metricRows } = metricGuard({
     cases: ['echo'],
     results,
     baselineTests: baseline.tests
   })
-
   const expectedKeys = []
 
   if (params.cpuProfile) {
@@ -120,7 +117,6 @@ export default async function runWsSuite({ benchDir, repoRoot, outRoot }) {
     guard: params.cpuProfile ? baseline.cpuProfileGuard : null,
     expectedKeys
   })
-
   const summary = {
     suite: 'ws',
     createdAt: new Date().toISOString(),

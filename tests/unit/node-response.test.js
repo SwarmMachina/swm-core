@@ -1,5 +1,5 @@
 import { describe, test } from 'node:test'
-import { strictEqual, deepStrictEqual, ok } from 'node:assert/strict'
+import { strictEqual, deepStrictEqual } from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import NodeHttpResponse from '../../src/backends/node-http/response.js'
 
@@ -25,11 +25,13 @@ class FakeRes extends EventEmitter {
 
   writeHead(code, message, headers) {
     this.head = { code, message, headers }
+
     return this
   }
 
   write(chunk) {
     this.writes.push(chunk)
+
     return this.writeReturn
   }
 
@@ -40,6 +42,7 @@ class FakeRes extends EventEmitter {
 
     this.ended = true
     this.writableFinished = true
+
     return this
   }
 }
@@ -87,6 +90,7 @@ describe('node-http NodeHttpResponse', () => {
 
   test('cork runs its callback synchronously and balances cork/uncork', () => {
     const { res, raw } = make()
+
     let ran = false
 
     res.cork(() => {
@@ -155,6 +159,7 @@ describe('node-http NodeHttpResponse', () => {
 
   test('onWritable handler fires on drain with the current offset', () => {
     const { res, raw } = make()
+
     let got = -1
 
     res.writeStatus('200 OK')
@@ -171,6 +176,7 @@ describe('node-http NodeHttpResponse', () => {
   test('onData delivers request chunks then a final empty chunk on end', () => {
     const { res, req } = make()
     const chunks = []
+
     let lastFlag = null
 
     res.onData((chunk, isLast) => {
@@ -188,6 +194,7 @@ describe('node-http NodeHttpResponse', () => {
 
   test('onAborted fires once for an aborted response, never after normal completion', () => {
     const aborted = make()
+
     let abortCount = 0
 
     aborted.res.onAborted(() => {
@@ -199,6 +206,7 @@ describe('node-http NodeHttpResponse', () => {
     strictEqual(abortCount, 1)
 
     const normal = make()
+
     let normalAbort = 0
 
     normal.res.onAborted(() => {

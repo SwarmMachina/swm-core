@@ -74,10 +74,12 @@ function parseBodyParserArgs(argv) {
       },
       '--no-verify': (out) => {
         out.verify = false
+
         return false
       },
       '--gc': (out) => {
         out.gc = true
+
         return false
       },
       '--json-out': (out, v) => {
@@ -89,15 +91,19 @@ function parseBodyParserArgs(argv) {
   if (!Number.isFinite(out.size) || out.size < 0) {
     throw new Error('bad --size')
   }
+
   if (!Number.isFinite(out.chunk) || out.chunk <= 0) {
     throw new Error('bad --chunk')
   }
+
   if (!Number.isFinite(out.iters) || out.iters <= 0) {
     throw new Error('bad --iters')
   }
+
   if (!Number.isFinite(out.warm) || out.warm < 0) {
     throw new Error('bad --warm')
   }
+
   if (!Number.isFinite(out.max) || out.max <= 0) {
     throw new Error('bad --max')
   }
@@ -120,12 +126,14 @@ function makeChunks(totalSize, chunkSize) {
 
   while (left > 0) {
     const len = left > chunkSize ? chunkSize : left
+
     let ab = cache.get(len)
 
     if (!ab) {
       ab = new ArrayBuffer(len)
       cache.set(len, ab)
     }
+
     chunks.push(ab)
     left -= len
   }
@@ -189,13 +197,23 @@ async function benchMode({ mode, parser, size, chunk, iters, warm, max, verify, 
   const sampleMem = () => {
     const mu = process.memoryUsage()
 
-    if (mu.rss > peak.rss) peak.rss = mu.rss
-    if (mu.heapUsed > peak.heapUsed) peak.heapUsed = mu.heapUsed
-    if (mu.external > peak.external) peak.external = mu.external
+    if (mu.rss > peak.rss) {
+      peak.rss = mu.rss
+    }
+
+    if (mu.heapUsed > peak.heapUsed) {
+      peak.heapUsed = mu.heapUsed
+    }
+
+    if (mu.external > peak.external) {
+      peak.external = mu.external
+    }
 
     const ab = mu.arrayBuffers || 0
 
-    if (ab > peak.arrayBuffers) peak.arrayBuffers = ab
+    if (ab > peak.arrayBuffers) {
+      peak.arrayBuffers = ab
+    }
   }
   const sampleEvery = Math.max(1, Math.floor(iters / 256))
 
@@ -211,6 +229,7 @@ async function benchMode({ mode, parser, size, chunk, iters, warm, max, verify, 
     if (verify && buf.length !== size) {
       throw new Error(`${mode}: bad length ${buf.length} != ${size}`)
     }
+
     bytes += buf.length
 
     if (i % sampleEvery === 0) {
@@ -280,14 +299,12 @@ async function main() {
   )
 
   const parser = new BodyParser()
-
   const known = await benchMode({
     mode: 'known',
     parser,
     ...args,
     doGC: args.gc
   })
-
   const unknown = await benchMode({
     mode: 'unknown',
     parser,
@@ -308,7 +325,6 @@ async function main() {
       externalMB: r.memMB.externalPeak,
       arrayBuffersMB: r.memMB.arrayBuffersPeak
     })
-
     const summary = {
       createdAt: new Date().toISOString(),
       node: process.version,

@@ -13,8 +13,10 @@ let server = null
  */
 async function start(routes) {
   const port = await getFreePort()
+
   server = new Server({ port, routes })
   await server.listen()
+
   return `http://127.0.0.1:${port}`
 }
 
@@ -36,7 +38,6 @@ test('preHandler runs before the handler and shares the context', async () => {
       handler: () => 'ok'
     }
   ])
-
   const { status, headers, text } = await reqText(`${baseUrl}/x`)
 
   assert.strictEqual(status, 200)
@@ -60,11 +61,11 @@ test('preHandler array runs in order', async () => {
       ],
       handler: () => {
         order.push('h')
+
         return 'done'
       }
     }
   ])
-
   const { text } = await reqText(`${baseUrl}/x`)
 
   assert.strictEqual(text, 'done')
@@ -73,6 +74,7 @@ test('preHandler array runs in order', async () => {
 
 test('preHandler can short-circuit; handler is skipped and context does not leak', async () => {
   let handlerCalled = false
+
   const baseUrl = await start([
     {
       method: 'get',
@@ -82,11 +84,11 @@ test('preHandler can short-circuit; handler is skipped and context does not leak
       },
       handler: () => {
         handlerCalled = true
+
         return 'should not run'
       }
     }
   ])
-
   const { status, text } = await reqText(`${baseUrl}/x`)
 
   assert.strictEqual(status, 401)
@@ -96,6 +98,7 @@ test('preHandler can short-circuit; handler is skipped and context does not leak
   // A leaked context would keep `activeHttp` > 0 and make shutdown wait for the
   // force-close timeout. A clean finalize lets shutdown resolve immediately.
   const startedAt = performance.now()
+
   await server.shutdown(3000)
   server = null
   assert.ok(performance.now() - startedAt < 500, 'shutdown should resolve immediately (no context leak)')

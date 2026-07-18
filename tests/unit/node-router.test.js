@@ -6,7 +6,7 @@ import Router from '../../src/backends/node-http/router.js'
  * @param {Router} router
  * @param {string} method
  * @param {string} path
- * @returns {{handler: Function, params: string[]}|null}
+ * @returns {{handler: (...args: unknown[]) => unknown, params: string[]}|null}
  */
 function m(router, method, path) {
   return router.match(method, path)

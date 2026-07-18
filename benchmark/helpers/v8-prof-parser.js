@@ -57,6 +57,7 @@ function parseHeader(lines) {
  */
 function parseSections(lines, cwd) {
   const sections = new Map()
+
   let section = null
 
   for (const line of lines) {

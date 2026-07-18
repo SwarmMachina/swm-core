@@ -3,12 +3,10 @@ import { encode, encodePing, encodePong, encodeClose } from './writer.js'
 
 const EMPTY = Buffer.alloc(0)
 const EMPTY_AB = new ArrayBuffer(0)
-
 // uWS default backpressure ceiling: refuse to queue past this and report DROPPED.
 const DEFAULT_MAX_BACKPRESSURE = 64 * 1024
 // Grace period for the peer to echo our close frame before we tear down.
 const CLOSE_TIMEOUT = 5000
-
 // SendStatus, matching uWS: 0 = BACKPRESSURE (queued), 1 = SUCCESS, 2 = DROPPED.
 const BACKPRESSURE = 0
 const SUCCESS = 1
@@ -145,6 +143,7 @@ export default class NodeWebSocket {
 
     if (!ok) {
       this.#backpressured = true
+
       return BACKPRESSURE
     }
 
@@ -170,6 +169,7 @@ export default class NodeWebSocket {
 
     if (!ok) {
       this.#backpressured = true
+
       return BACKPRESSURE
     }
 
@@ -266,6 +266,7 @@ export default class NodeWebSocket {
       this.#hardClose = true
       this.#code = 1006
       this.#finalize()
+
       return DROPPED
     }
 
@@ -273,6 +274,7 @@ export default class NodeWebSocket {
 
     if (!ok) {
       this.#backpressured = true
+
       return BACKPRESSURE
     }
 

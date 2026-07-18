@@ -46,7 +46,6 @@ export async function processV8Profile(profileDir) {
     const p = spawn(process.execPath, ['--no-warnings', '--prof-process', logPath], {
       stdio: ['ignore', 'pipe', 'inherit']
     })
-
     const out = createWriteStream(outPath)
 
     p.stdout.pipe(out)
@@ -54,6 +53,7 @@ export async function processV8Profile(profileDir) {
     p.on('error', reject)
     p.on('exit', (code) => {
       out.end()
+
       if (code === 0) {
         resolve(true)
       } else {

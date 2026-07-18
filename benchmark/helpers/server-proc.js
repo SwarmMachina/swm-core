@@ -22,11 +22,9 @@ const SERVER_READY_TIMEOUT_MS = 60_000
 export async function startServer({ benchDir, serverName, fw, testName, runIndex, v8prof, runStamp }) {
   const serverPath = path.join(benchDir, serverName)
   const port = await getFreePort()
-
   const profileDir = await ensureDir(
     path.join(benchDir, 'profiles', `${testName}-${runStamp}`, `run-${runIndex + 1}`, fw)
   )
-
   const nodeArgs = []
 
   if (fw === 'core-uwebsockets' || fw === 'raw-uwebsockets') {
@@ -43,7 +41,6 @@ export async function startServer({ benchDir, serverName, fw, testName, runIndex
     cwd: profileDir,
     stdio: ['ignore', 'inherit', 'inherit', 'ipc']
   })
-
   const msg = await waitForMessage(p, (m) => m && m.type === 'ready', SERVER_READY_TIMEOUT_MS).catch((e) => {
     p.kill('SIGKILL')
     throw e

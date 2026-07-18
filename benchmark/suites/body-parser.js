@@ -29,7 +29,6 @@ export default async function runBodyParserSuite({ benchDir, repoRoot, outRoot }
     cpuProfile: p.cpuProfile ?? true,
     framework: 'core'
   }
-
   const outDir = path.join(outRoot, 'body-parser')
   const profileDir = path.join(outDir, 'prof')
 
@@ -59,7 +58,6 @@ export default async function runBodyParserSuite({ benchDir, repoRoot, outRoot }
 
   const bench = await readJson(jsonOut)
   const results = { known: bench.results.known, unknown: bench.results.unknown }
-
   const cpuProfiles = []
 
   if (params.cpuProfile) {
@@ -98,13 +96,11 @@ export default async function runBodyParserSuite({ benchDir, repoRoot, outRoot }
     results,
     baselineTests: baseline.tests
   })
-
   const { failures: cpuFailures, rows: cpuRows } = cpuGuard({
     cpuProfiles,
     guard: params.cpuProfile ? baseline.cpuProfileGuard : null,
     expectedKeys: ['body-parser:1:core']
   })
-
   const summary = {
     suite: 'body-parser',
     createdAt: new Date().toISOString(),

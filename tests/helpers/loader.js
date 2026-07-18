@@ -7,7 +7,7 @@ const __dirname = dirname(__filename)
 /**
  * @param {string} specifier
  * @param {object} context
- * @param {Function} nextResolve
+ * @param {(specifier: string, context: object) => object|Promise<object>} nextResolve
  * @returns {object}
  */
 export async function resolve(specifier, context, nextResolve) {

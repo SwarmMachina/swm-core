@@ -28,7 +28,7 @@ function splitPath(path) {
  * @param {number} i
  * @param {string} method
  * @param {string[]} params
- * @returns {Function|null}
+ * @returns {((...args: unknown[]) => unknown)|null}
  */
 function matchNode(node, segments, i, method, params) {
   if (i === segments.length) {
@@ -46,6 +46,7 @@ function matchNode(node, segments, i, method, params) {
 
       if (h) {
         params.push('')
+
         return h
       }
     }
@@ -84,6 +85,7 @@ function matchNode(node, segments, i, method, params) {
 
     if (h) {
       params.push(i === segments.length ? '' : segments.slice(i).join('/'))
+
       return h
     }
   }
@@ -97,10 +99,11 @@ export default class Router {
   /**
    * @param {string} method
    * @param {string} pattern
-   * @param {Function} handler
+   * @param {(...args: unknown[]) => unknown} handler
    */
   add(method, pattern, handler) {
     const segments = splitPath(pattern)
+
     let node = this.#root
 
     for (let i = 0; i < segments.length; i++) {
@@ -146,7 +149,7 @@ export default class Router {
   /**
    * @param {string} method
    * @param {string} path
-   * @returns {{handler: Function, params: string[]}|null}
+   * @returns {{handler: (...args: unknown[]) => unknown, params: string[]}|null}
    */
   match(method, path) {
     const params = []

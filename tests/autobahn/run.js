@@ -11,6 +11,9 @@ const PORT = 9001
 const AGENT = 'swm-core-node'
 const ACCEPT = new Set(['OK', 'NON-STRICT', 'INFORMATIONAL'])
 
+/**
+ *
+ */
 async function main() {
   fs.mkdirSync(reportsDir, { recursive: true })
 

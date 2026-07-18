@@ -57,6 +57,7 @@ if (lockedSwmVersion !== swmVersion || lockedUpstreamVersion !== upstreamTag.sli
 }
 
 const readmePath = resolve(root, 'README.md')
+
 let readme = readFileSync(readmePath, 'utf8')
   .replaceAll(`@swarmmachina/swm-uws@${previousSwmVersion}`, `@swarmmachina/swm-uws@${swmVersion}`)
   .replaceAll(previousUpstream.replace('github:', ''), `uNetworking/uWebSockets.js#${upstreamTag}`)
@@ -64,6 +65,7 @@ let readme = readFileSync(readmePath, 'utf8')
 if (previousUpstreamTag) {
   readme = readme.replaceAll(`uWebSockets.js@${previousUpstreamTag.slice(1)}`, `uWebSockets.js@${upstreamTag.slice(1)}`)
 }
+
 writeFileSync(readmePath, readme)
 
 console.log(`Updated @swarmmachina/swm-uws=${swmVersion}, uWebSockets.js=${upstreamTag}`)

@@ -25,6 +25,7 @@ describe('BodyParser', () => {
       await rejects(p, (err) => {
         strictEqual(err.message, 'Request body too large')
         strictEqual(err.status, 413)
+
         return true
       })
     })
@@ -92,6 +93,7 @@ describe('BodyParser', () => {
 
       return rejects(parser.body(), (err) => {
         strictEqual(err.message, 'Internal Server Error')
+
         return true
       })
     })
@@ -113,11 +115,13 @@ describe('BodyParser', () => {
       await rejects(p, (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+
         return true
       })
 
       await rejects(parser.body(), (err) => {
         strictEqual(err.message, 'Internal Server Error')
+
         return true
       })
     })
@@ -223,6 +227,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request body size mismatch')
         strictEqual(err.status, 400)
+
         return true
       })
     })
@@ -244,6 +249,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request body size mismatch')
         strictEqual(err.status, 400)
+
         return true
       })
     })
@@ -261,6 +267,7 @@ describe('BodyParser', () => {
       await rejects(parser.body(), (err) => {
         strictEqual(err.message, 'Request body too large')
         strictEqual(err.status, 413)
+
         return true
       })
     })
@@ -283,6 +290,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+
         return true
       })
     })
@@ -306,6 +314,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+
         return true
       })
     })
@@ -394,6 +403,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request body too large')
         strictEqual(err.status, 413)
+
         return true
       })
     })
@@ -409,7 +419,6 @@ describe('BodyParser', () => {
       parser.reset(ctx, 1000)
 
       const promise = parser.body()
-
       const chunk1 = 'a'.repeat(100)
       const chunk2 = 'b'.repeat(200)
       const chunk3 = 'c'.repeat(300)
@@ -462,6 +471,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+
         return true
       })
     })
@@ -503,6 +513,7 @@ describe('BodyParser', () => {
       await rejects(p, (err) => {
         strictEqual(err.message, 'Request body too large')
         strictEqual(err.status, 413)
+
         return true
       })
     })
@@ -561,7 +572,6 @@ describe('BodyParser', () => {
 
       res.pushData(Buffer.from([1, 2]), true)
       const result1 = await promise1
-
       const promise2 = parser.body()
       const result2 = await promise2
 
@@ -585,11 +595,13 @@ describe('BodyParser', () => {
 
       await rejects(promise1, (err) => {
         strictEqual(err.message, 'Request body size mismatch')
+
         return true
       })
 
       await rejects(parser.body(), (err) => {
         strictEqual(err.message, 'Request body size mismatch')
+
         return true
       })
     })
@@ -615,6 +627,7 @@ describe('BodyParser', () => {
 
       await rejects(parser.body(5), (err) => {
         strictEqual(err.message, 'Request body too large')
+
         return true
       })
     })
@@ -631,6 +644,7 @@ describe('BodyParser', () => {
 
       await rejects(parser.body(), (err) => {
         strictEqual(err.message, 'Request body too large')
+
         return true
       })
     })
@@ -643,6 +657,7 @@ describe('BodyParser', () => {
       await rejects(parser.body(), (err) => {
         strictEqual(err.message, 'Internal Server Error')
         strictEqual(err.status, 500)
+
         return true
       })
     })
@@ -661,6 +676,7 @@ describe('BodyParser', () => {
       await rejects(parser.body(), (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+
         return true
       })
     })
@@ -758,6 +774,7 @@ describe('BodyParser', () => {
 
       await rejects(parser.text(), (err) => {
         strictEqual(err.message, 'Request body too large')
+
         return true
       })
     })
@@ -834,6 +851,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Invalid JSON')
         strictEqual(err.status, 400)
+
         return true
       })
     })
@@ -855,6 +873,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Invalid JSON')
         strictEqual(err.status, 400)
+
         return true
       })
     })
@@ -871,6 +890,7 @@ describe('BodyParser', () => {
 
       await rejects(parser.json(), (err) => {
         strictEqual(err.message, 'Request body too large')
+
         return true
       })
     })
@@ -894,6 +914,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+
         return true
       })
     })
@@ -938,6 +959,7 @@ describe('BodyParser', () => {
       await rejects(promise, (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+
         return true
       })
     })
@@ -1003,6 +1025,7 @@ describe('BodyParser', () => {
 
       await rejects(parser.text(5), (err) => {
         strictEqual(err.message, 'Request body too large')
+
         return true
       })
     })
@@ -1019,6 +1042,7 @@ describe('BodyParser', () => {
 
       await rejects(parser.json(5), (err) => {
         strictEqual(err.message, 'Request body too large')
+
         return true
       })
     })

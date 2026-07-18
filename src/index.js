@@ -41,7 +41,7 @@ function selectWsProtocol(requestedHeader, selected) {
 /**
  * Resolve a backend module to the uWS-shaped surface and its optional capabilities.
  * @param {'uws'|'node'} name
- * @returns {Promise<{App: Function, us_listen_socket_close: Function, capabilities?: object}>}
+ * @returns {Promise<{App: (...args: unknown[]) => object, us_listen_socket_close: (socket: unknown) => void, capabilities?: object}>}
  */
 async function loadBackend(name) {
   if (name === 'node') {
@@ -58,13 +58,13 @@ async function loadBackend(name) {
  * @property {boolean} [enabled]
  * @property {number} [wsIdleTimeoutSec]
  * @property {number} [wsUpgradeTimeoutMs]
- * @property {(ctx: WSContext) => any} [onOpen]
- * @property {(ctx: WSContext) => any} [onDrain]
+ * @property {(ctx: WSContext) => unknown} [onOpen]
+ * @property {(ctx: WSContext) => unknown} [onDrain]
  * @property {(meta: object) => ({isAllowed: boolean, userData?: object, protocol?: string}|Promise<{isAllowed: boolean, userData?: object, protocol?: string}>)} [onUpgrade]
- * @property {(ctx: WSContext|null, err: Error) => any} [onError]
- * @property {(ctx: WSContext, code: number, reason: ArrayBuffer) => any} [onClose]
- * @property {(ctx: WSContext, msg: ArrayBuffer, isBinary: boolean) => any} [onMessage]
- * @property {(ctx: WSContext, topic: ArrayBuffer, newCount: number, oldCount: number) => any} [onSubscription]
+ * @property {(ctx: WSContext|null, err: Error) => unknown} [onError]
+ * @property {(ctx: WSContext, code: number, reason: ArrayBuffer) => unknown} [onClose]
+ * @property {(ctx: WSContext, msg: ArrayBuffer, isBinary: boolean) => unknown} [onMessage]
+ * @property {(ctx: WSContext, topic: ArrayBuffer, newCount: number, oldCount: number) => unknown} [onSubscription]
  * @property {(ctx: WSContext) => (string|number|null|undefined)} [connectionKey] - Opt-in. Derive a stable key for the connection (e.g. a user id) so it can be addressed via server.sendTo(). Computed once in onOpen.
  */
 
@@ -72,8 +72,8 @@ async function loadBackend(name) {
  * @typedef {object} Route
  * @property {'get'|'post'|'put'|'delete'|'del'|'patch'|'options'|'head'|'any'} method
  * @property {string} path - '/users/:id','/*'
- * @property {(ctx: HttpContext) => any|Promise<any>} handler
- * @property {((ctx: HttpContext) => any|Promise<any>)|((ctx: HttpContext) => any|Promise<any>)[]} [preHandler]
+ * @property {(ctx: HttpContext) => unknown|Promise<unknown>} handler
+ * @property {((ctx: HttpContext) => unknown|Promise<unknown>)|((ctx: HttpContext) => unknown|Promise<unknown>)[]} [preHandler]
  */
 
 export default class Server {
@@ -104,10 +104,10 @@ export default class Server {
 
   /**
    * @param {object} opt
-   * @param {(ctx: HttpContext) => any|Promise<any>} [opt.router] - Universal router function (micro like API)
+   * @param {(ctx: HttpContext) => unknown|Promise<unknown>} [opt.router] - Universal router function (micro like API)
    * @param {Route[]} [opt.routes] - Array of route definitions (native routing API)
-   * @param {(ctx: HttpContext, err: Error) => any|Promise<any>} [opt.onHttpError]
-   * @param {(err: Error) => any|Promise<any>} [opt.onServerError]
+   * @param {(ctx: HttpContext, err: Error) => unknown|Promise<unknown>} [opt.onHttpError]
+   * @param {(err: Error) => unknown|Promise<unknown>} [opt.onServerError]
    * @param {string} [opt.host]
    * @param {number} [opt.port]
    * @param {number} [opt.maxBodySize] - in mb
@@ -315,9 +315,9 @@ export default class Server {
   }
 
   /**
-   * @param {(ctx: HttpContext) => any|Promise<any>} handler
-   * @param {((ctx: HttpContext) => any|Promise<any>)|((ctx: HttpContext) => any|Promise<any>)[]} [preHandler]
-   * @returns {(ctx: HttpContext) => any|Promise<any>}
+   * @param {(ctx: HttpContext) => unknown|Promise<unknown>} handler
+   * @param {((ctx: HttpContext) => unknown|Promise<unknown>)|((ctx: HttpContext) => unknown|Promise<unknown>)[]} [preHandler]
+   * @returns {(ctx: HttpContext) => unknown|Promise<unknown>}
    */
   #composeRouteHandler(handler, preHandler) {
     if (preHandler == null) {
@@ -342,6 +342,7 @@ export default class Server {
 
         if ((ctx.replied && !ctx.streaming) || ctx.aborted) {
           ctx.finalize()
+
           return
         }
       }
@@ -351,8 +352,8 @@ export default class Server {
   }
 
   /**
-   * @param {Function} fn
-   * @param  {...any} args
+   * @param {(...args: unknown[]) => unknown|Promise<unknown>} fn
+   * @param {...unknown} args
    * @returns {Promise<void>}
    */
   async safeCall(fn, ...args) {
@@ -369,7 +370,7 @@ export default class Server {
 
   /**
    * @param {WSContext|null} ctx
-   * @param {any} err
+   * @param {unknown} err
    * @returns {Promise<void>}
    */
   safeWsError(ctx, err) {
@@ -378,7 +379,7 @@ export default class Server {
 
   /**
    * @param {HttpContext} ctx
-   * @param {any} err
+   * @param {unknown} err
    * @returns {Promise<void>}
    */
   safeHttpError(ctx, err) {
@@ -428,6 +429,7 @@ export default class Server {
       key = this.wsConnectionKey(ctx)
     } catch (err) {
       void this.safeWsError(ctx, err)
+
       return
     }
 
@@ -496,7 +498,7 @@ export default class Server {
   /**
    * @param {import('@swarmmachina/swm-uws').HttpResponse} res
    * @param {import('@swarmmachina/swm-uws').HttpRequest} req
-   * @param {(ctx: HttpContext) => any|Promise<any>} handler
+   * @param {(ctx: HttpContext) => unknown|Promise<unknown>} handler
    * @param {string[]} [paramNames] - route :param names, in path order (native routing only)
    * @returns {void}
    */
@@ -542,6 +544,7 @@ export default class Server {
 
       // eslint-disable-next-line promise/catch-or-return
       result.then(ctx.onResolve, ctx.onReject)
+
       return
     }
 
@@ -581,7 +584,6 @@ export default class Server {
     const secWebSocketKey = req.getHeader('sec-websocket-key')
     const secWebSocketProtocol = req.getHeader('sec-websocket-protocol')
     const secWebSocketExtensions = req.getHeader('sec-websocket-extensions')
-
     const meta = {
       url: () => req.getUrl(),
       ip: () => {
@@ -628,6 +630,7 @@ export default class Server {
 
     if (isAsync) {
       let settled = false
+
       upgradeTimer = setTimeout(() => {
         if (settled || meta.aborted) {
           return
@@ -641,6 +644,7 @@ export default class Server {
         })
 
         const error = new Error(`WebSocket upgrade timed out after ${this.wsUpgradeTimeoutMs}ms`)
+
         error.code = 'WS_UPGRADE_TIMEOUT'
         void this.safeWsError(null, error)
       }, this.wsUpgradeTimeoutMs)
@@ -682,6 +686,7 @@ export default class Server {
 
           void this.safeWsError(null, err)
         })
+
       return
     }
 
@@ -718,6 +723,7 @@ export default class Server {
         res.end()
       })
       void this.safeWsError(null, err)
+
       return
     }
 
@@ -732,6 +738,7 @@ export default class Server {
   onOpen(ws) {
     if (this.#draining) {
       ws.end(1001, 'server shutting down')
+
       return
     }
 
@@ -756,6 +763,7 @@ export default class Server {
 
     if (error) {
       void this.safeWsError(ctx, error)
+
       return
     }
 
@@ -785,6 +793,7 @@ export default class Server {
 
     if (error) {
       void this.safeWsError(ctx, error)
+
       return
     }
 
@@ -815,6 +824,7 @@ export default class Server {
 
     if (error) {
       void this.safeWsError(ctx, error)
+
       return
     }
 
@@ -842,6 +852,7 @@ export default class Server {
 
     if (error) {
       void this.safeWsError(ctx, error)
+
       return
     }
 
@@ -875,6 +886,7 @@ export default class Server {
       void this.safeWsError(ctx, error)
       this.deleteWsContext(ws)
       this.#finishShutdownIfNeed()
+
       return
     }
 
@@ -885,6 +897,7 @@ export default class Server {
           this.deleteWsContext(ws)
           this.#finishShutdownIfNeed()
         })
+
       return
     }
 
@@ -1025,6 +1038,7 @@ export default class Server {
 
     if (!this.app) {
       this.#resolveShutdownIfNeeded()
+
       return
     }
 

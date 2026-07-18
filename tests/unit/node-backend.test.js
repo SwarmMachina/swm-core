@@ -20,6 +20,7 @@ describe('node-http backend lifecycle', () => {
     const raw = new FakeServer()
     const app = App(() => raw)
     const error = new Error('transport failed')
+
     let received = null
     let listenToken = null
 
@@ -54,6 +55,7 @@ describe('node-http backend lifecycle', () => {
   test('reports a pre-listen bind error through the listen callback', () => {
     const raw = new FakeServer()
     const app = App(() => raw)
+
     let result = 'unset'
 
     app.listen('localhost', 7000, (token) => {

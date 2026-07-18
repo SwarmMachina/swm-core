@@ -6,8 +6,8 @@ import delay from '../../../helpers/delay.js'
 
 test('shutdown: rejects all conections while stopping', async () => {
   let inFlightResolve
-  const inFlight = new Promise((resolve) => (inFlightResolve = resolve))
 
+  const inFlight = new Promise((resolve) => (inFlightResolve = resolve))
   const server = await startHttpServer({
     routes: [
       {
@@ -16,6 +16,7 @@ test('shutdown: rejects all conections while stopping', async () => {
         handler: async () => {
           inFlightResolve()
           await delay(150)
+
           return 'ok'
         }
       },
@@ -28,7 +29,6 @@ test('shutdown: rejects all conections while stopping', async () => {
       }
     ]
   })
-
   const reqP = reqText(`${server.baseUrl}/slow`)
 
   await inFlight
@@ -68,7 +68,6 @@ test('shutdown: finalizes context after async handler replies itself (no leak)',
       }
     ]
   })
-
   const { status } = await reqText(`${server.baseUrl}/self-reply`)
 
   assert.strictEqual(status, 401)

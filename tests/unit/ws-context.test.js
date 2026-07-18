@@ -33,7 +33,6 @@ describe('WSContext', () => {
       const server = { publish: () => {} }
       const ws = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const userData = { userId: 123 }
-
       const ctx = new WSContext(pool)
       const result = ctx.reset(server, ws, userData)
 
@@ -48,7 +47,6 @@ describe('WSContext', () => {
       const server = { publish: () => {} }
       const ws = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const userData = { userId: 456 }
-
       const ctx = new WSContext(pool)
       const result = ctx.reset(server, ws, userData)
 
@@ -63,7 +61,6 @@ describe('WSContext', () => {
       const ws2 = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const userData1 = { userId: 1 }
       const userData2 = { userId: 2 }
-
       const ctx = new WSContext(pool)
 
       ctx.reset(server1, ws1, userData1)
@@ -86,7 +83,6 @@ describe('WSContext', () => {
       const server = { publish: () => {} }
       const ws = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const userData = { userId: 789 }
-
       const ctx = new WSContext(pool)
 
       ctx.reset(server, ws, userData)
@@ -242,6 +238,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 42
         },
         end: () => {},
@@ -266,6 +263,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 43
         },
         end: () => {},
@@ -290,6 +288,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 44
         },
         end: () => {},
@@ -314,6 +313,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 45
         },
         end: () => {},
@@ -339,6 +339,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 46
         },
         end: () => {},
@@ -364,6 +365,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 47
         },
         end: () => {},
@@ -454,6 +456,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 48
         },
         end: () => {},
@@ -479,6 +482,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 49
         },
         end: () => {},
@@ -505,6 +509,7 @@ describe('WSContext', () => {
       const ws = {
         send: (data, isBinary) => {
           sendCalls.push({ data, isBinary })
+
           return 50
         },
         end: () => {},
@@ -664,6 +669,7 @@ describe('WSContext', () => {
         end: () => {},
         subscribe: (topic) => {
           subscribeCalls.push(topic)
+
           return true
         },
         unsubscribe: () => {}
@@ -704,6 +710,7 @@ describe('WSContext', () => {
         end: () => {},
         subscribe: (topic) => {
           subscribeCalls.push(topic)
+
           return true
         },
         unsubscribe: () => {}
@@ -746,6 +753,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: (topic) => {
           unsubscribeCalls.push(topic)
+
           return true
         }
       }
@@ -786,6 +794,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: (topic) => {
           unsubscribeCalls.push(topic)
+
           return true
         }
       }
@@ -832,6 +841,7 @@ describe('WSContext', () => {
       const server = {
         publish: (topic, msg, isBinary) => {
           publishCalls.push({ topic, msg, isBinary })
+
           return true
         }
       }
@@ -860,6 +870,7 @@ describe('WSContext', () => {
       const server = {
         publish: (topic, msg, isBinary) => {
           publishCalls.push({ topic, msg, isBinary })
+
           return true
         }
       }
@@ -909,6 +920,7 @@ describe('WSContext', () => {
       const server = {
         publish: (topic, msg, isBinary) => {
           publishCalls.push({ topic, msg, isBinary })
+
           return true
         }
       }
@@ -944,6 +956,7 @@ describe('WSContext', () => {
       const server = {
         publish: (topic, msg, isBinary) => {
           publishCalls.push({ topic, msg, isBinary })
+
           return true
         }
       }
@@ -971,6 +984,7 @@ describe('WSContext', () => {
       const server = {
         publish: (topic, msg, isBinary) => {
           publishCalls.push({ topic, msg, isBinary })
+
           return true
         }
       }

@@ -18,6 +18,7 @@ function decodeServerFrame(buf) {
   const fin = (buf[0] & 0x80) === 0x80
   const opcode = buf[0] & 0x0f
   const masked = (buf[1] & 0x80) === 0x80
+
   let len = buf[1] & 0x7f
   let offset = 2
 
@@ -59,6 +60,7 @@ describe('ws writer', () => {
     strictEqual(buf.readUInt16BE(2), 200)
 
     const f = decodeServerFrame(buf)
+
     strictEqual(f.payload.length, 200)
   })
 
@@ -71,6 +73,7 @@ describe('ws writer', () => {
     strictEqual(buf.readUInt32BE(6), 70000)
 
     const f = decodeServerFrame(buf)
+
     strictEqual(f.payload.length, 70000)
   })
 

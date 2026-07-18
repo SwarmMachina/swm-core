@@ -33,7 +33,6 @@ const PARAMS = {
   wsMessageBytes: numEnv('BINDING_BENCH_WS_MESSAGE_BYTES', 64),
   sampleMs: numEnv('BINDING_BENCH_SAMPLE_MS', 250)
 }
-
 const GUARDS = {
   maxThroughputRegressionPct: numEnv('BINDING_BENCH_MAX_THROUGHPUT_REGRESSION_PCT', 5),
   maxLatencyRegressionPct: numEnv('BINDING_BENCH_MAX_LATENCY_REGRESSION_PCT', 20),
@@ -190,7 +189,6 @@ function renderSuite(suite, throughputLabel, candidate, reference, tailKey, tail
     fmt(row.heapMB, 'MB'),
     row.errors
   ])
-
   const deltas = [
     ['throughput', fmt(deltaPct(candidate.throughput, reference.throughput), '%')],
     [tailLabel, fmt(deltaPct(candidate[tailKey], reference[tailKey]), '%')],
@@ -311,7 +309,6 @@ async function main() {
     ...guard('ws/echo', ws.candidate, ws.reference, 'latencyP95Ms', 'p95')
   ]
   const status = failures.length ? 'fail' : 'pass'
-
   const summary = {
     schemaVersion: 'binding-compare/v1',
     createdAt: new Date().toISOString(),

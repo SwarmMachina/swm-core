@@ -18,6 +18,7 @@ class FakeSocket extends EventEmitter {
 
   write(data) {
     this.written.push(Buffer.from(data))
+
     return true
   }
 
@@ -91,6 +92,7 @@ describe('ws WsLayer upgrade', () => {
 
     for (const req of cases) {
       let called = false
+
       const wsLayer = layer(() => {
         called = true
       })
@@ -107,6 +109,7 @@ describe('ws WsLayer upgrade', () => {
 
   test('passes a valid handshake to the upgrade behavior', () => {
     let called = false
+
     const wsLayer = layer((res) => {
       called = true
       res.writeStatus('403 Forbidden')
@@ -125,6 +128,7 @@ describe('ws WsLayer upgrade', () => {
 
   test('destroys an upgrade whose async decision exceeds the deadline', async () => {
     let aborted = 0
+
     const wsLayer = layer((res) => {
       res.onAborted(() => {
         aborted++
@@ -152,6 +156,7 @@ describe('ws WsLayer upgrade', () => {
 
   test('terminates a partial message that exceeds the assembly deadline', () => {
     let connection = null
+
     const wsLayer = new WsLayer({
       maxPayloadLength: 1024,
       idleTimeout: 0.1,

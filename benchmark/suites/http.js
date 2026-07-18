@@ -110,7 +110,6 @@ function summarizeCore(bench) {
 export default async function runHttpSuite({ benchDir, repoRoot, outRoot }) {
   const baseline = await readJson(path.join(benchDir, 'baselines', 'http.json'))
   const params = resolveHttpParams(baseline)
-
   const outDir = path.join(outRoot, 'http')
 
   await fs.mkdir(outDir, { recursive: true })
@@ -154,7 +153,6 @@ export default async function runHttpSuite({ benchDir, repoRoot, outRoot }) {
     results,
     baselineTests: baseline.tests
   })
-
   const expectedKeys = []
 
   if (params.cpuProfile) {
@@ -170,7 +168,6 @@ export default async function runHttpSuite({ benchDir, repoRoot, outRoot }) {
     guard: params.cpuProfile ? baseline.cpuProfileGuard : null,
     expectedKeys
   })
-
   const summary = {
     suite: 'http',
     createdAt: new Date().toISOString(),

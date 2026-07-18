@@ -20,6 +20,7 @@ export function resetMocks() {
  */
 export function createMockApp() {
   const calls = []
+
   let listenCallback = null
   let closeCallCount = 0
   let numSubscribersResult = 0
@@ -41,65 +42,80 @@ export function createMockApp() {
     },
     any(path, handler) {
       calls.push({ method: 'any', path, handler })
+
       return app
     },
     get(path, handler) {
       calls.push({ method: 'get', path, handler })
+
       return app
     },
     post(path, handler) {
       calls.push({ method: 'post', path, handler })
+
       return app
     },
     put(path, handler) {
       calls.push({ method: 'put', path, handler })
+
       return app
     },
     del(path, handler) {
       calls.push({ method: 'del', path, handler })
+
       return app
     },
     patch(path, handler) {
       calls.push({ method: 'patch', path, handler })
+
       return app
     },
     options(path, handler) {
       calls.push({ method: 'options', path, handler })
+
       return app
     },
     head(path, handler) {
       calls.push({ method: 'head', path, handler })
+
       return app
     },
     ws(path, config) {
       calls.push({ method: 'ws', path, config })
+
       return app
     },
     listen(host, port, cb) {
       mockCalls.listen.push({ host, port, cb })
+
       if (listenCallback) {
         listenCallback(cb)
       } else {
         cb({ sock: 1 })
       }
+
       return app
     },
     close() {
       closeCallCount++
       mockCalls.close.push({})
+
       return app
     },
     publish(topic, message, isBinary) {
       calls.push({ method: 'publish', topic, message, isBinary })
+
       return publishResult
     },
     numSubscribers(topic) {
       calls.push({ method: 'numSubscribers', topic })
+
       return numSubscribersResult
     }
   }
 
   mockCalls.app.push(app)
+
   return app
 }
 
@@ -109,6 +125,7 @@ export function createMockApp() {
  */
 export function createMockWebSocket(userData = {}) {
   const calls = []
+
   let endCallCount = 0
 
   return {
@@ -125,14 +142,17 @@ export function createMockWebSocket(userData = {}) {
     },
     send(data, isBinary) {
       calls.push({ method: 'send', data, isBinary })
+
       return 0
     },
     subscribe(topic) {
       calls.push({ method: 'subscribe', topic })
+
       return true
     },
     unsubscribe(topic) {
       calls.push({ method: 'unsubscribe', topic })
+
       return true
     }
   }
@@ -143,9 +163,12 @@ export function createMockWebSocket(userData = {}) {
  */
 export function createMockHttpResponse() {
   const calls = []
+
   let abortedCallback = null
   let status = null
+
   const headers = {}
+
   let ended = false
   let upgraded = false
 
@@ -200,10 +223,12 @@ export function createMockHttpResponse() {
     },
     tryEnd(chunk) {
       calls.push({ method: 'tryEnd', chunk })
+
       return [true, true]
     },
     write(chunk) {
       calls.push({ method: 'write', chunk })
+
       return true
     },
     getRemoteAddressAsText() {
@@ -220,11 +245,15 @@ export function createMockHttpResponse() {
  */
 export function createMockHttpRequest() {
   const calls = []
+
   let method = 'get'
   let url = '/'
+
   const headers = {}
   const query = {}
+
   let fullQuery = undefined
+
   const parameters = []
 
   return {
@@ -250,14 +279,17 @@ export function createMockHttpRequest() {
     },
     getMethod() {
       calls.push({ method: 'getMethod' })
+
       return method
     },
     getUrl() {
       calls.push({ method: 'getUrl' })
+
       return url
     },
     getHeader(name) {
       calls.push({ method: 'getHeader', name })
+
       return headers[name]
     },
     getQuery(key) {
@@ -283,6 +315,7 @@ export function createMockHttpRequest() {
     },
     getParameter(index) {
       calls.push({ method: 'getParameter', index })
+
       return parameters[index]
     },
     forEach(cb) {
@@ -297,7 +330,7 @@ export function createMockHttpRequest() {
 
 /**
  *
- * @param {any} socket
+ * @param {unknown} socket
  */
 export function us_listen_socket_close(socket) {
   mockCalls.us_listen_socket_close.push({ socket })

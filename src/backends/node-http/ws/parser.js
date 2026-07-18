@@ -1,5 +1,4 @@
 const EMPTY = Buffer.alloc(0)
-
 const GET_INFO = 0
 const GET_LEN16 = 1
 const GET_LEN64 = 2
@@ -77,6 +76,7 @@ class BufferQueue {
     }
 
     const out = Buffer.allocUnsafe(n)
+
     let offset = 0
 
     while (offset < n) {
@@ -250,6 +250,7 @@ export default class FrameParser {
 
         if (this.#payloadLen < 126) {
           this.#fail(1002, 'non-canonical 16-bit payload length')
+
           return
         }
 
@@ -260,22 +261,24 @@ export default class FrameParser {
         }
 
         const buf = this.#consume(8)
-
         const high = buf.readUInt32BE(0)
         const low = buf.readUInt32BE(4)
 
         if ((high & 0x80000000) !== 0) {
           this.#fail(1002, 'invalid 64-bit payload length')
+
           return
         }
 
         if (high !== 0) {
           this.#fail(1009, 'message too large')
+
           return
         }
 
         if (low < 65536) {
           this.#fail(1002, 'non-canonical 64-bit payload length')
+
           return
         }
 
@@ -383,6 +386,7 @@ export default class FrameParser {
 
   /**
    * @param {Buffer} payload
+   * @returns {void}
    */
   #handleFrame(payload) {
     const opcode = this.#opcode
@@ -413,6 +417,7 @@ export default class FrameParser {
 
     if (!this.#fin) {
       this.#fragmented = true
+
       return
     }
 
@@ -437,6 +442,7 @@ export default class FrameParser {
 
   /**
    * @param {Buffer} payload
+   * @returns {void}
    */
   #handleClose(payload) {
     const len = payload.length

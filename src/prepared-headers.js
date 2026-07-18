@@ -64,6 +64,7 @@ export function prepareHeaders(headers) {
   const prepared = Object.freeze(Object.create(null))
 
   PREPARED_HEADERS.set(prepared, Object.freeze({ groups, lines: Object.freeze(lines) }))
+
   return prepared
 }
 

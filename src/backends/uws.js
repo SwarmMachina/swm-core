@@ -1,4 +1,5 @@
 let cached = null
+
 const DEFAULT_NATIVE_FAST_PATHS = new Set(['beginWrite', 'collectBody', 'requestPause'])
 
 /**
@@ -8,7 +9,9 @@ const DEFAULT_NATIVE_FAST_PATHS = new Set(['beginWrite', 'collectBody', 'request
 function selectCapabilities(advertised) {
   const configured = process.env.SWM_UWS_NATIVE_FAST_PATHS
 
-  if (configured === 'all') return advertised
+  if (configured === 'all') {
+    return advertised
+  }
 
   const enabled =
     configured === undefined
@@ -26,7 +29,7 @@ function selectCapabilities(advertised) {
 }
 
 /**
- * @returns {Promise<{App: Function, us_listen_socket_close: Function, capabilities: object}>}
+ * @returns {Promise<{App: (...args: unknown[]) => object, us_listen_socket_close: (socket: unknown) => void, capabilities: object}>}
  */
 export async function load() {
   if (!cached) {
@@ -43,6 +46,7 @@ export async function load() {
 
     const advertised = typeof mod.capabilities === 'function' ? mod.capabilities() : {}
     const capabilities = selectCapabilities(advertised)
+
     cached = { App: mod.App, us_listen_socket_close: mod.us_listen_socket_close, capabilities }
   }
 

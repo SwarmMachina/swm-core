@@ -21,7 +21,6 @@ test('ws echo: onMessage echoes text back to the sender', async () => {
   })
 
   const sock = new WebSocket(handle.wsBaseUrl, { perMessageDeflate: false })
-
   const received = await new Promise((resolve, reject) => {
     sock.on('open', () => sock.send('hello'))
     sock.on('message', (data) => resolve(data.toString()))

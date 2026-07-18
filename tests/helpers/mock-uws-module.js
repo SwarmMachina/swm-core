@@ -28,7 +28,7 @@ export function App() {
 }
 
 /**
- * @param {any} socket
+ * @param {unknown} socket
  * @returns {void}
  */
 export function us_listen_socket_close(socket) {
@@ -54,7 +54,7 @@ export function resetMockApp() {
 }
 
 /**
- * @param {Function} cb
+ * @param {(socket: object) => void} cb
  */
 export function setListenCallback(cb) {
   if (currentApp) {

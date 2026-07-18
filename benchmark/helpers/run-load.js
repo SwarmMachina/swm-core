@@ -15,6 +15,7 @@ export default function runLoad(name, opts, { track = false, verbose = false }) 
       if (err) {
         return reject(err)
       }
+
       resolve({ result })
     })
 

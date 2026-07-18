@@ -23,7 +23,9 @@ for (const scenario of makeHttpScenarios()) {
 
     // Close the server if an assertion or scenario fails before measured shutdown.
     t.after(() => {
-      if (!closed) return handle.close()
+      if (!closed) {
+        return handle.close()
+      }
     })
 
     for (let i = 0; i < scenario.iterations; i++) {
@@ -64,7 +66,9 @@ test('http leak: retained memory does not grow across sustained churn', async (t
   let closed = false
 
   t.after(() => {
-    if (!closed) return handle.close()
+    if (!closed) {
+      return handle.close()
+    }
   })
 
   await assertNoMemoryGrowth(

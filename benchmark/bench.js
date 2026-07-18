@@ -13,7 +13,6 @@ import { startServer, stopServer } from './helpers/server-proc.js'
 import { processV8Profile } from './helpers/v8-prof-run.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
 const BASE_ORDER = ['core', 'micro', 'fastify', 'express']
 const WANTED = new Set(BASE_ORDER)
 
@@ -93,7 +92,6 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
   console.log(`\n[bench] ${fw}: start (run=${runIndex + 1}, test=${test.name})`)
 
   const tAll0 = performance.now()
-
   const { proc, port, profileDir } = await startServer({
     benchDir: __dirname,
     serverName: 'server.js',
@@ -103,9 +101,7 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
     v8prof,
     runStamp
   })
-
   const url = `http://127.0.0.1:${port}${test.path}`
-
   const baseOpts = {
     method: test.method,
     url,
@@ -140,10 +136,8 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
   await stopServer(proc)
 
   const prof = v8prof ? await processV8Profile(profileDir).catch(() => null) : null
-
   const r = runTimed.result.result
   const totalMs = performance.now() - tAll0
-
   const out = {
     rps: r.requests?.average || 0,
     latencyP97_5: r.latency?.p97_5 ?? null,
@@ -279,7 +273,6 @@ async function main() {
 
   const extra = args.frameworks.filter((fw) => !WANTED.has(fw))
   const list = [...BASE_ORDER.filter((fw) => args.frameworks.includes(fw)), ...extra]
-
   const medians = list.map((fw) => {
     const arr = perFw[fw] || []
     const rps = arr.map((x) => x.rps)

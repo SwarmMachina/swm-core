@@ -9,7 +9,6 @@ import runWsSuite from './suites/ws.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.dirname(__dirname)
-
 const SUITES = {
   http: runHttpSuite,
   'body-parser': runBodyParserSuite,
@@ -79,6 +78,7 @@ function renderMarkdown(res) {
 
   if (res.failures.length) {
     lines.push(`**Result:** ❌ ${res.failures.length} failure(s)`)
+
     for (const f of res.failures) {
       lines.push(`- ${f}`)
     }
@@ -158,9 +158,11 @@ async function main() {
 
   if (allFailures.length) {
     console.error('\n[regression-ci] FAILURES')
+
     for (const f of allFailures) {
       console.error(`- ${f}`)
     }
+
     process.exitCode = 1
   } else {
     console.log('\n[regression-ci] all suites passed')

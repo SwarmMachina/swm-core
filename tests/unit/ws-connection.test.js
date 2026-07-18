@@ -57,6 +57,7 @@ class FakeSocket extends EventEmitter {
 
   write(buf) {
     this.written.push(Buffer.from(buf))
+
     return this.writeReturn
   }
 
@@ -77,6 +78,7 @@ class FakeSocket extends EventEmitter {
 
 /**
  * @param {object} [opt]
+ * @param {object} [opt.userData]
  * @param {number} [opt.maxBackpressure]
  * @returns {{ws: NodeWebSocket, socket: FakeSocket, events: object[], hub: object}}
  */
@@ -107,13 +109,13 @@ describe('ws NodeWebSocket', () => {
 
   test('send writes a text frame and reports SUCCESS (1)', () => {
     const { ws, socket } = make()
-
     const status = ws.send('hi', false)
 
     strictEqual(status, 1)
     strictEqual(socket.written.length, 1)
 
     const f = readServerFrame(socket.written[0])
+
     strictEqual(f.opcode, 1)
     strictEqual(f.payload.toString(), 'hi')
   })
@@ -145,17 +147,18 @@ describe('ws NodeWebSocket', () => {
   })
 
   test('delivers an incoming message to behavior.message', () => {
-    const { ws, socket, events } = make()
+    const { socket, events } = make()
 
     socket.emit('data', clientFrame(0x1, 'hello'))
 
     const msg = events.find((e) => e.type === 'message')
+
     strictEqual(msg.isBinary, false)
     strictEqual(msg.payload.toString(), 'hello')
   })
 
   test('auto-replies pong to an incoming ping without a message callback', () => {
-    const { ws, socket, events } = make()
+    const { socket, events } = make()
 
     socket.emit('data', clientFrame(0x9, 'pp'))
 
@@ -164,6 +167,7 @@ describe('ws NodeWebSocket', () => {
       false
     )
     const pong = socket.written.map(readServerFrame).find((f) => f.opcode === 0xa)
+
     ok(pong)
     strictEqual(pong.payload.toString(), 'pp')
   })
@@ -192,15 +196,17 @@ describe('ws NodeWebSocket', () => {
   })
 
   test('peer close echoes a close frame and fires behavior.close once', () => {
-    const { ws, socket, events } = make()
-
+    const { socket, events } = make()
     const payload = Buffer.concat([Buffer.from([0x03, 0xe8]), Buffer.from('bye')]) // 1000 "bye"
+
     socket.emit('data', clientFrame(0x8, payload))
 
     const closeFrame = socket.written.map(readServerFrame).find((f) => f.opcode === 8)
+
     ok(closeFrame, 'a close frame is echoed')
 
     const closes = events.filter((e) => e.type === 'close')
+
     strictEqual(closes.length, 1)
     strictEqual(closes[0].code, 1000)
   })
@@ -212,6 +218,7 @@ describe('ws NodeWebSocket', () => {
     socket.emit('data', Buffer.concat([clientFrame(0x8, Buffer.from([0x03, 0xe8])), clientFrame(0x9, 'late')]))
 
     const pong = socket.written.map(readServerFrame).find((f) => f.opcode === 0xa)
+
     strictEqual(pong, undefined)
     strictEqual(events.filter((e) => e.type === 'close').length, 1)
 
@@ -226,6 +233,7 @@ describe('ws NodeWebSocket', () => {
     ws.end(1000, 'done')
 
     const closeFrame = socket.written.map(readServerFrame).find((f) => f.opcode === 8)
+
     ok(closeFrame, 'a close frame is sent')
     strictEqual(
       events.some((e) => e.type === 'close'),
@@ -238,12 +246,13 @@ describe('ws NodeWebSocket', () => {
   })
 
   test('a protocol error sends a close frame and fires close', () => {
-    const { ws, socket, events } = make()
+    const { socket, events } = make()
 
     // unmasked frame -> 1002
     socket.emit('data', Buffer.from([0x81, 0x01, 0x41]))
 
     const closeFrame = socket.written.map(readServerFrame).find((f) => f.opcode === 8)
+
     ok(closeFrame)
     strictEqual(closeFrame.payload.readUInt16BE(0), 1002)
     strictEqual(events.filter((e) => e.type === 'close').length, 1)
@@ -251,12 +260,13 @@ describe('ws NodeWebSocket', () => {
   })
 
   test('an abnormal socket close fires behavior.close with 1006 exactly once', () => {
-    const { ws, socket, events } = make()
+    const { socket, events } = make()
 
     socket.emit('error', new Error('reset'))
     socket.emit('close')
 
     const closes = events.filter((e) => e.type === 'close')
+
     strictEqual(closes.length, 1)
     strictEqual(closes[0].code, 1006)
   })
@@ -284,6 +294,7 @@ describe('ws NodeWebSocket', () => {
 
     strictEqual(socket.corks, 0) // balanced
     const pongs = socket.written.map(readServerFrame).filter((f) => f.opcode === 0xa)
+
     strictEqual(pongs.length, 2)
   })
 })

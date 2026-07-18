@@ -13,7 +13,7 @@ export async function reqText(url, opt = {}) {
 /**
  * @param {string} url
  * @param {RequestInit} [opt]
- * @returns {Promise<{status: number, headers: Headers, json: any}>}
+ * @returns {Promise<{status: number, headers: Headers, json: unknown}>}
  */
 export async function reqJson(url, opt = {}) {
   const res = await fetch(url, opt)

@@ -10,7 +10,6 @@ import waitForMessage from './helpers/wait-for-message.js'
 import { startServer, stopServer } from './helpers/server-proc.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
 // 'plain' = native route, handler only; 'pre' = same route plus a no-op preHandler.
 const VARIANTS = ['plain', 'pre']
 
@@ -63,7 +62,6 @@ async function runOne({ variant, warmupSec, durationSec, connections, runIndex, 
     v8prof: false,
     runStamp
   })
-
   const url = `http://127.0.0.1:${port}/`
   const baseOpts = {
     method: 'GET',

@@ -24,6 +24,7 @@ function percentile(buf, count, p) {
  */
 export default function createLatencyRecorder() {
   const lat = new Float64Array(MAX_LAT_SAMPLES)
+
   let sum = 0
   let count = 0
   let idx = 0

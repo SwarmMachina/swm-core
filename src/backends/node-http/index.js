@@ -57,13 +57,14 @@ export function App(createHttpServer = createServer) {
 
   /**
    * @param {string} method
-   * @returns {(path: string, handler: Function) => object}
+   * @returns {(path: string, handler: (response: object, request: object) => unknown) => object}
    */
   function register(method) {
     const routeMethod = METHOD_TO_ROUTE[method] ?? method
 
     return (path, handler) => {
       router.add(routeMethod, path, handler)
+
       return app
     }
   }
@@ -80,11 +81,13 @@ export function App(createHttpServer = createServer) {
 
     ws(pattern, behavior) {
       state.wsLayer = new WsLayer(behavior)
+
       return app
     },
 
     onError(handler) {
       state.errorHandler = typeof handler === 'function' ? handler : null
+
       return app
     },
 
@@ -111,6 +114,7 @@ export function App(createHttpServer = createServer) {
         if (!settled) {
           settled = true
           cb(null)
+
           return
         }
 

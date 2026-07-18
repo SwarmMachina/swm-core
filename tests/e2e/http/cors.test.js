@@ -12,6 +12,7 @@ let server = null
  */
 async function start(applyCors) {
   const port = await getFreePort()
+
   server = new Server({
     port,
     routes: [
@@ -30,6 +31,7 @@ async function start(applyCors) {
   })
 
   await server.listen()
+
   return `http://127.0.0.1:${port}`
 }
 
@@ -42,7 +44,6 @@ afterEach(async () => {
 
 test('cors: normal GET carries allow-origin header and body', async () => {
   const baseUrl = await start(cors({ origin: '*' }))
-
   const { status, headers, text } = await reqText(`${baseUrl}/data`)
 
   assert.strictEqual(status, 200)
@@ -52,7 +53,6 @@ test('cors: normal GET carries allow-origin header and body', async () => {
 
 test('cors: OPTIONS preflight short-circuits with 204 and preflight headers', async () => {
   const baseUrl = await start(cors({ origin: 'https://app.example', credentials: true, maxAge: 600 }))
-
   const { status, headers, text } = await reqText(`${baseUrl}/data`, { method: 'OPTIONS' })
 
   assert.strictEqual(status, 204)

@@ -13,6 +13,7 @@ if (process.send) {
 
     if (msg.type === 'metrics:start') {
       METRICS.start({ sampleMs: msg.sampleMs })
+
       return
     }
 
@@ -36,7 +37,6 @@ const { fw, port } = parseArgs(
     }
   }
 )
-
 const HEADERS_TEST = TESTS.get('headers')
 
 /**
@@ -68,7 +68,6 @@ function sendReady(port) {
 async function runCore(port, backend) {
   const { default: Server, prepareHeaders } = await import('../src/index.js')
   const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
-
   const router = async (ctx) => {
     const method = ctx.method()
     const url = ctx.url()
@@ -90,9 +89,9 @@ async function runCore(port, backend) {
     }
 
     ctx.status(404)
+
     return 'Not Found'
   }
-
   const server = new Server({ port, onHttpError: console.error, router, backend })
 
   await server.listen()
@@ -178,22 +177,24 @@ async function runRawBinding(port) {
 async function main() {
   if (fw === 'core' || fw === 'core-swm-uws' || fw === 'core-uwebsockets') {
     await runCore(port, 'uws')
+
     return
   }
 
   if (fw === 'core-node') {
     await runCore(port, 'node')
+
     return
   }
 
   if (fw === 'raw-swm-uws' || fw === 'raw-uwebsockets') {
     await runRawBinding(port)
+
     return
   }
 
   if (fw === 'express') {
     const { default: express } = await import('express')
-
     const app = express()
 
     app.disable('x-powered-by')
@@ -218,11 +219,11 @@ async function main() {
     app.use((req, res) => res.status(404).send('Not Found'))
 
     const srv = app.listen(port, () => sendReady(srv.address().port))
-
     const shutdown = () => new Promise((resolve) => srv.close(resolve))
 
     process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
     process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+
     return
   }
 
@@ -255,12 +256,12 @@ async function main() {
 
     process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
     process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+
     return
   }
 
   if (fw === 'micro') {
     const { serve, json } = await import('micro')
-
     const router = async (req, res) => {
       if (req.method === 'GET' && req.url === '/base') {
         return TESTS.get('base').payload
@@ -272,6 +273,7 @@ async function main() {
         res.setHeader('X-Trace-Id', HEADERS_TEST.responseHeaders['x-trace-id'])
         res.setHeader('X-Response-Id', HEADERS_TEST.responseHeaders['x-response-id'])
         res.setHeader('Set-Cookie', HEADERS_TEST.responseHeaders['set-cookie'])
+
         return HEADERS_TEST.responseText
       }
 
@@ -280,9 +282,9 @@ async function main() {
       }
 
       res.statusCode = 404
+
       return 'Not Found'
     }
-
     const server = new http.Server(serve(router))
 
     server.listen(port, () => sendReady(server.address().port))
@@ -291,6 +293,7 @@ async function main() {
 
     process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
     process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+
     return
   }
 

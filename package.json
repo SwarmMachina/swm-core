@@ -81,7 +81,7 @@
     "release": "npm run release:gate && npm run release:artifact && node release-artifact/publish-release-artifact.js"
   },
   "devDependencies": {
-    "@swarmmachina/standards": "^1.0.4",
+    "@swarmmachina/standards": "^1.1.2",
     "autocannon": "^8.0.0",
     "express": "^5.2.1",
     "fastify": "^5.8.5",

@@ -21,7 +21,6 @@ const MIME_TYPES = {
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf'
 }
-
 const OCTET_STREAM = 'application/octet-stream'
 
 /**
@@ -97,6 +96,7 @@ export default function serveStatic(root, options = {}) {
 
     if (method !== 'get' && method !== 'head') {
       ctx.status(405).send('Method Not Allowed')
+
       return
     }
 
@@ -106,6 +106,7 @@ export default function serveStatic(root, options = {}) {
       pathname = decodeURIComponent(ctx.url())
     } catch {
       ctx.status(400).send('Bad Request')
+
       return
     }
 
@@ -118,6 +119,7 @@ export default function serveStatic(root, options = {}) {
 
     if (absPath !== rootDir && !absPath.startsWith(rootDir + sep)) {
       ctx.status(403).send('Forbidden')
+
       return
     }
 
@@ -129,6 +131,7 @@ export default function serveStatic(root, options = {}) {
 
     if (!entry) {
       ctx.status(404).send('Not Found')
+
       return
     }
 

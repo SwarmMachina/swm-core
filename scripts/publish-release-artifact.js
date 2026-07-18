@@ -71,6 +71,7 @@ async function main() {
     }
 
     console.log(`[release] ${spec} is already published with the verified integrity`)
+
     return
   }
 

@@ -4,6 +4,7 @@
  */
 export function fmtBytes(n) {
   const u = ['B', 'KiB', 'MiB', 'GiB']
+
   let i = 0
   let x = n
 
@@ -11,6 +12,7 @@ export function fmtBytes(n) {
     x /= 1024
     i++
   }
+
   return `${x.toFixed(i === 0 ? 0 : 2)} ${u[i]}`
 }
 
@@ -48,14 +50,17 @@ export function msToHuman(ms) {
   if (!isFinite(ms)) {
     return 'n/a'
   }
+
   if (ms < 1000) {
     return `${ms.toFixed(0)}ms`
   }
+
   const s = ms / 1000
 
   if (s < 60) {
     return `${s.toFixed(2)}s`
   }
+
   const m = (s / 60) | 0
   const rest = s - m * 60
 

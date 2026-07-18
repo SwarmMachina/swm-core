@@ -247,6 +247,7 @@ export class UpgradeResponse {
     if (protocol && !WS_PROTOCOL_TOKEN.test(protocol)) {
       this.#finish()
       this.#socket.destroy()
+
       return
     }
 
@@ -321,6 +322,7 @@ export default class WsLayer {
     ) {
       socket.write('HTTP/1.1 400 Bad Request\r\nconnection: close\r\n\r\n')
       socket.destroy()
+
       return
     }
 
@@ -368,6 +370,7 @@ export default class WsLayer {
    */
   subscribe(conn, topic) {
     let set = this.#topics.get(topic)
+
     const oldCount = set ? set.size : 0
 
     if (!set) {

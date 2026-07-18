@@ -48,6 +48,7 @@ export default function cors(options = {}) {
     }
 
     ctx.reply(204, null, null)
+
     return true
   }
 }

@@ -12,9 +12,9 @@ export default class ResStreamer {
 
   /** @type {Promise<void>} */
   #streamPromise = null
-  /** @type {Function} */
+  /** @type {() => void} */
   #streamResolve = null
-  /** @type {Function} */
+  /** @type {(reason: Error) => void} */
   #streamReject = null
 
   /** @type {boolean} */
@@ -24,7 +24,7 @@ export default class ResStreamer {
   /** @type {boolean} */
   #started = false
 
-  /** @type {Function} */
+  /** @type {(offset: number) => boolean} */
   #onWritableCallback = null
   /** @type {boolean} */
   #uwsWritableInstalled = false
@@ -108,12 +108,14 @@ export default class ResStreamer {
     res.cork(() => {
       res.writeStatus(typeof status === 'string' ? status : this.#ctx.getStatus(status))
       this.#ctx.flushHeaders(headers)
+
       if (this.#ctx.server?.bindingCapabilities?.beginWrite === true && typeof res.beginWrite === 'function') {
         res.beginWrite()
       }
     })
 
     this.#started = true
+
     return this
   }
 
@@ -191,6 +193,7 @@ export default class ResStreamer {
     if (this.#ctx.aborted) {
       this.#started = false
       this.#ctx.streaming = false
+
       return
     }
 
@@ -343,6 +346,7 @@ export default class ResStreamer {
 
     this.#onWritableCallback = null
     cb(offset)
+
     return false
   }
 
@@ -350,6 +354,7 @@ export default class ResStreamer {
     if (this.#done) {
       return
     }
+
     this.#done = true
 
     this.#streamResolve?.()
@@ -360,6 +365,7 @@ export default class ResStreamer {
     if (this.#done) {
       return
     }
+
     this.#done = true
 
     this.#streamReject?.(err)

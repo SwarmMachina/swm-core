@@ -68,6 +68,7 @@ describe('HttpContext', () => {
 
         await rejects(bodyPromise, (err) => {
           strictEqual(err.message, 'Request body too large')
+
           return true
         })
       })
@@ -1167,7 +1168,6 @@ describe('HttpContext', () => {
       const res2 = createMockRes()
       const res3 = createMockRes()
       const req = createMockReq()
-
       const buf = Buffer.from('test')
       const u8 = new Uint8Array([1, 2, 3])
       const ab = new ArrayBuffer(4)
@@ -1315,6 +1315,7 @@ describe('HttpContext', () => {
 
       await rejects(ctx.body(), (err) => {
         strictEqual(err.message, 'Request aborted')
+
         return true
       })
     })
@@ -1328,6 +1329,7 @@ describe('HttpContext', () => {
 
       await rejects(ctx.body(4), (err) => {
         strictEqual(err.message, 'Request body too large')
+
         return true
       })
     })
@@ -1378,6 +1380,7 @@ describe('HttpContext', () => {
 
       await rejects(bodyPromise, (err) => {
         strictEqual(err.message, 'Request body size mismatch')
+
         return true
       })
     })
@@ -1395,6 +1398,7 @@ describe('HttpContext', () => {
 
       await rejects(bodyPromise, (err) => {
         strictEqual(err.message, 'Request body size mismatch')
+
         return true
       })
     })
@@ -1430,6 +1434,7 @@ describe('HttpContext', () => {
 
       await rejects(bodyPromise, (err) => {
         strictEqual(err.message, 'Request body too large')
+
         return true
       })
     })
@@ -1462,7 +1467,6 @@ describe('HttpContext', () => {
 
       res.pushData(Buffer.from([1, 2]), true)
       const result1 = await promise1
-
       const promise2 = ctx.body()
       const result2 = await promise2
 
@@ -1483,11 +1487,13 @@ describe('HttpContext', () => {
 
       await rejects(promise1, (err) => {
         strictEqual(err.message, 'Request body size mismatch')
+
         return true
       })
 
       await rejects(ctx.body(), (err) => {
         strictEqual(err.message, 'Request body size mismatch')
+
         return true
       })
     })
@@ -1555,6 +1561,7 @@ describe('HttpContext', () => {
 
       await rejects(jsonPromise, (err) => {
         strictEqual(err.message.startsWith('Invalid JSON'), true)
+
         return true
       })
     })
@@ -1774,7 +1781,9 @@ describe('HttpContext', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq()
+
         let finalizeCallCount = 0
+
         const finalizeHttpContext = () => {
           finalizeCallCount++
         }
@@ -1816,7 +1825,9 @@ describe('HttpContext', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq()
+
         let finalizeCallCount = 0
+
         const finalizeHttpContext = () => {
           finalizeCallCount++
         }
@@ -2007,7 +2018,9 @@ describe('HttpContext', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq()
+
         let finalizeCallCount = 0
+
         const finalizeHttpContext = () => {
           finalizeCallCount++
         }
@@ -2023,6 +2036,7 @@ describe('HttpContext', () => {
 
         await rejects(p, (err) => {
           strictEqual(err.message, 'boom')
+
           return true
         })
 
@@ -2035,6 +2049,7 @@ describe('HttpContext', () => {
   describe('abort()', () => {
     test('should set aborted=true, stop streaming flags, clear onWritableCallback, call finalizeHttpContext once', () => {
       let finalizeCount = 0
+
       const server = {
         finalizeHttpContext() {
           finalizeCount++
@@ -2086,6 +2101,7 @@ describe('HttpContext', () => {
       await rejects(p, (err) => {
         strictEqual(err.message, 'Request aborted')
         strictEqual(err.status, 418)
+
         return true
       })
     })
@@ -2095,6 +2111,7 @@ describe('HttpContext', () => {
     test('onResolve should send(result) and finalize if not streaming', () => {
       let finalizeCount = 0
       let safeErrCount = 0
+
       const server = {
         finalizeHttpContext() {
           finalizeCount++
@@ -2126,6 +2143,7 @@ describe('HttpContext', () => {
       let finalizeCount = 0
       let safeErrCount = 0
       let lastErr = null
+
       const server = {
         finalizeHttpContext() {
           finalizeCount++
@@ -2135,7 +2153,6 @@ describe('HttpContext', () => {
           lastErr = err
         }
       }
-
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
@@ -2167,6 +2184,7 @@ describe('HttpContext', () => {
       let finalizeCount = 0
       let safeErrCount = 0
       let lastErr = null
+
       const server = {
         finalizeHttpContext() {
           finalizeCount++
@@ -2200,6 +2218,7 @@ describe('HttpContext', () => {
 
     test('onResolve should NOT finalize when streaming=true', () => {
       let finalizeCount = 0
+
       const server = {
         finalizeHttpContext() {
           finalizeCount++
@@ -2230,6 +2249,7 @@ describe('HttpContext', () => {
 
     test('onReject should NOT finalize when streaming=true', () => {
       let finalizeCount = 0
+
       const server = {
         finalizeHttpContext() {
           finalizeCount++
@@ -2256,6 +2276,7 @@ describe('HttpContext', () => {
 
     test('onResolve/onReject finalize when already replied, but no-op when aborted or done', () => {
       let finalizeCount = 0
+
       const server = {
         finalizeHttpContext() {
           finalizeCount++
@@ -2379,7 +2400,6 @@ describe('HttpContext', () => {
           ctx.clear()
         }
       }
-
       const server = {
         finalizeCalls: 0,
         /**
@@ -2393,7 +2413,6 @@ describe('HttpContext', () => {
           /* noop */
         }
       }
-
       const ctx = new HttpContext(pool)
 
       return { ctx, server, pool }

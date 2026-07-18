@@ -70,6 +70,7 @@ test('body parsing: POST /badjson with invalid JSON => 400', async () => {
         path: '/badjson',
         handler: async (ctx) => {
           await ctx.json()
+
           return 'ok'
         }
       }

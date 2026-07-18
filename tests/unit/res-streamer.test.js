@@ -49,6 +49,7 @@ describe('ResStreamer', () => {
 
       await rejects(promise, (err) => {
         strictEqual(err, CACHED_ERRORS.aborted)
+
         return true
       })
     })
@@ -69,6 +70,7 @@ describe('ResStreamer', () => {
 
       await rejects(promise, (err) => {
         strictEqual(err, CACHED_ERRORS.aborted)
+
         return true
       })
 
@@ -135,6 +137,7 @@ describe('ResStreamer', () => {
 
       await rejects(promise, (err) => {
         strictEqual(err, CACHED_ERRORS.aborted)
+
         return true
       })
     })
@@ -155,6 +158,7 @@ describe('ResStreamer', () => {
 
       await rejects(promise, (err) => {
         strictEqual(err, CACHED_ERRORS.aborted)
+
         return true
       })
 
@@ -191,6 +195,7 @@ describe('ResStreamer', () => {
       streamer.reset(ctx, res)
 
       const readable = createMockReadable()
+
       let destroyCallCount = 0
 
       readable.destroy = () => {
@@ -654,6 +659,7 @@ describe('ResStreamer', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
+
       let finalizeCallCount = 0
 
       ctx.reset(res, req, {
@@ -681,6 +687,7 @@ describe('ResStreamer', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
+
       let finalizeCallCount = 0
 
       ctx.reset(res, req, {
@@ -780,6 +787,7 @@ describe('ResStreamer', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
+
       let finalizeCallCount = 0
 
       ctx.reset(res, req, {
@@ -850,6 +858,7 @@ describe('ResStreamer', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
+
       let finalizeCallCount = 0
 
       ctx.reset(res, req, {
@@ -1024,7 +1033,6 @@ describe('ResStreamer', () => {
 
       const readable1 = createMockReadable()
       const promise1 = streamer.stream(readable1, 200)
-
       const readable2 = createMockReadable()
 
       throws(
@@ -1226,6 +1234,7 @@ describe('ResStreamer', () => {
 
       await rejects(promise, (err) => {
         strictEqual(err, CACHED_ERRORS.aborted)
+
         return true
       })
 
@@ -1286,6 +1295,7 @@ describe('ResStreamer', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
+
       let finalizeCallCount = 0
 
       ctx.reset(res, req, {
@@ -1304,6 +1314,7 @@ describe('ResStreamer', () => {
 
       await rejects(promise, (err) => {
         strictEqual(err.message, 'boom')
+
         return true
       })
 
@@ -1330,6 +1341,7 @@ describe('ResStreamer', () => {
 
       await rejects(promise, (err) => {
         strictEqual(err.message, 'boom')
+
         return true
       })
 
@@ -1391,6 +1403,7 @@ describe('ResStreamer', () => {
 
       await rejects(promise, (err) => {
         strictEqual(err.message, 'boom')
+
         return true
       })
 

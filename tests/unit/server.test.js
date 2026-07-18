@@ -272,7 +272,6 @@ describe('Server', () => {
       const onDrain = () => {}
       const onSubscription = () => {}
       const onUpgrade = () => Promise.resolve({ isAllowed: true })
-
       const server = makeServer({
         router: () => {},
         ws: {
@@ -388,7 +387,6 @@ describe('Server', () => {
 
     test('should return server instance on successful listen', async () => {
       const server = makeServer({ router: () => {} })
-
       const result = await server.listen()
 
       strictEqual(result, server)
@@ -645,6 +643,7 @@ describe('Server', () => {
   describe('safeCall()', () => {
     test('should call function and swallow errors', async () => {
       const server = makeServer({ router: () => {} })
+
       let called = 0
 
       await server.safeCall(() => {
@@ -657,6 +656,7 @@ describe('Server', () => {
 
     test('should handle async functions', async () => {
       const server = makeServer({ router: () => {} })
+
       let called = 0
 
       await server.safeCall(async () => {
@@ -678,6 +678,7 @@ describe('Server', () => {
 
     test('should pass arguments correctly', async () => {
       const server = makeServer({ router: () => {} })
+
       let receivedArgs = null
 
       await server.safeCall(
@@ -710,7 +711,6 @@ describe('Server', () => {
           }
         }
       })
-
       const ctx = { test: 'context' }
       const err = new Error('test error')
 
@@ -750,7 +750,6 @@ describe('Server', () => {
           receivedErr = err
         }
       })
-
       const ctx = { test: 'context' }
       const err = new Error('test error')
 
@@ -779,7 +778,6 @@ describe('Server', () => {
         router: () => {},
         ws: { enabled: true }
       })
-
       const ws = createMockWebSocket()
       const ctx1 = server.getWsContext(ws)
       const ctx2 = server.getWsContext(ws)
@@ -794,10 +792,8 @@ describe('Server', () => {
         router: () => {},
         ws: { enabled: true }
       })
-
       const wsA = createMockWebSocket()
       const wsB = createMockWebSocket()
-
       const ctxA = server.getWsContext(wsA)
       const ctxB = server.getWsContext(wsB)
 
@@ -819,7 +815,6 @@ describe('Server', () => {
         router: () => {},
         ws: { enabled: true }
       })
-
       const ws = createMockWebSocket()
       const ctx1 = server.getWsContext(ws)
 
@@ -842,15 +837,16 @@ describe('Server', () => {
         router: () => {},
         ws: { enabled: true }
       })
-
       const ws = createMockWebSocket()
       const ctx = server.getWsContext(ws)
 
       let called = 0
+
       const orig = ctx.release.bind(ctx)
 
       ctx.release = () => {
         called++
+
         return orig()
       }
 
@@ -864,7 +860,6 @@ describe('Server', () => {
         router: () => {},
         ws: { enabled: true }
       })
-
       const ws = createMockWebSocket()
 
       server.deleteWsContext(ws)
@@ -940,6 +935,7 @@ describe('Server', () => {
           enabled: true,
           connectionKey: (ctx) => {
             ctx.end(4001, 'rejected')
+
             return 'u1'
           },
           onOpen: (ctx) => opened.push(ctx),
@@ -1098,6 +1094,7 @@ describe('Server', () => {
 
     test('should unregister before onClose runs so sendTo cannot hit the closing socket', () => {
       let sendToResult = null
+
       const server = makeServer({
         router: () => {},
         ws: {
@@ -1119,6 +1116,7 @@ describe('Server', () => {
 
     test('should unregister during async onClose before its promise settles', async () => {
       let resolveClose = null
+
       const server = makeServer({
         router: () => {},
         ws: {
@@ -1388,7 +1386,6 @@ describe('Server', () => {
 
     test('should return same promise for concurrent shutdown calls', async () => {
       const server = makeServer({ router: () => {} })
-
       const promise1 = server.shutdown(0)
       const promise2 = server.shutdown(0)
 
@@ -1430,7 +1427,6 @@ describe('Server', () => {
           onUpgrade: () => ({ isAllowed: true, userData, protocol: 'protocol123' })
         }
       })
-
       const res = createMockHttpResponse()
       const req = createMockHttpRequest()
 
@@ -1464,7 +1460,6 @@ describe('Server', () => {
           onUpgrade: () => ({ isAllowed: false })
         }
       })
-
       const res = createMockHttpResponse()
       const req = createMockHttpRequest()
       const context = {}
@@ -1478,6 +1473,7 @@ describe('Server', () => {
 
     test('should return 403 and call safeWsError when onUpgrade throws', async () => {
       const error = new Error('x')
+
       let errorCalled = false
       let errorCtx = null
       let errorErr = null
@@ -1496,7 +1492,6 @@ describe('Server', () => {
           }
         }
       })
-
       const res = createMockHttpResponse()
       const req = createMockHttpRequest()
       const context = {}
@@ -1515,10 +1510,10 @@ describe('Server', () => {
 
     test('should snapshot sec-websocket-* headers synchronously, not read them after an async onUpgrade resolves', async () => {
       let resolveFn
+
       const upgradePromise = new Promise((resolve) => {
         resolveFn = resolve
       })
-
       const server = makeServer({
         router: () => {},
         ws: {
@@ -1526,7 +1521,6 @@ describe('Server', () => {
           onUpgrade: () => upgradePromise
         }
       })
-
       const res = createMockHttpResponse()
       const req = createMockHttpRequest()
 
@@ -1557,6 +1551,7 @@ describe('Server', () => {
 
     test('should reject an unrequested subprotocol', async () => {
       let receivedError = null
+
       const server = makeServer({
         router: () => {},
         ws: {
@@ -1583,10 +1578,10 @@ describe('Server', () => {
 
     test('should not upgrade when aborted before async resolve', async () => {
       let resolveFn
+
       const upgradePromise = new Promise((resolve) => {
         resolveFn = resolve
       })
-
       const server = makeServer({
         router: () => {},
         ws: {
@@ -1594,7 +1589,6 @@ describe('Server', () => {
           onUpgrade: () => upgradePromise
         }
       })
-
       const res = createMockHttpResponse()
       const req = createMockHttpRequest()
 
@@ -1621,6 +1615,7 @@ describe('Server', () => {
 
     test('should terminate an async upgrade that exceeds wsUpgradeTimeoutMs', async () => {
       let receivedError = null
+
       const server = makeServer({
         router: () => {},
         ws: {
@@ -1700,6 +1695,7 @@ describe('Server', () => {
       const server = makeServer({ router: () => 'ok' })
 
       let resolveFirst = null
+
       const res1 = createMockHttpResponse()
       const req1 = createMockHttpRequest()
 
@@ -1740,11 +1736,11 @@ describe('Server', () => {
           safeErrCalled++
         }
       })
-
       const originalFinalize = server.finalizeHttpContext.bind(server)
 
       server.finalizeHttpContext = (ctx) => {
         finalizeCalled++
+
         return originalFinalize(ctx)
       }
 
@@ -1774,11 +1770,11 @@ describe('Server', () => {
           safeErrCalled++
         }
       })
-
       const originalFinalize = server.finalizeHttpContext.bind(server)
 
       server.finalizeHttpContext = (ctx) => {
         finalizeCalled++
+
         return originalFinalize(ctx)
       }
 
@@ -1799,11 +1795,11 @@ describe('Server', () => {
       const server = makeServer({
         router: () => Promise.resolve('ok')
       })
-
       const originalFinalize = server.finalizeHttpContext.bind(server)
 
       server.finalizeHttpContext = (ctx) => {
         finalizeCalled++
+
         return originalFinalize(ctx)
       }
 
@@ -1829,11 +1825,11 @@ describe('Server', () => {
           safeErrCalled++
         }
       })
-
       const originalFinalize = server.finalizeHttpContext.bind(server)
 
       server.finalizeHttpContext = (ctx) => {
         finalizeCalled++
+
         return originalFinalize(ctx)
       }
 
@@ -1864,7 +1860,6 @@ describe('Server', () => {
           safeErrCalled++
         }
       })
-
       const res = createMockHttpResponse()
       const req = createMockHttpRequest()
 
@@ -1894,7 +1889,6 @@ describe('Server', () => {
           }
         }
       })
-
       const ws = createMockWebSocket()
 
       server.onOpen(ws)
@@ -1920,7 +1914,6 @@ describe('Server', () => {
           }
         }
       })
-
       const ws = createMockWebSocket()
 
       server.onOpen(ws)
@@ -1947,7 +1940,6 @@ describe('Server', () => {
           }
         }
       })
-
       const ws = createMockWebSocket()
 
       server.onOpen(ws)
@@ -1977,7 +1969,6 @@ describe('Server', () => {
             })
         }
       })
-
       const ws = createMockWebSocket()
 
       server.onOpen(ws)
@@ -2005,7 +1996,6 @@ describe('Server', () => {
 
       await server.listen()
       const mockApp = getCurrentMockApp()
-
       const ws = createMockWebSocket()
 
       server.onOpen(ws)

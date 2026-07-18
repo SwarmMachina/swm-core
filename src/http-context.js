@@ -237,10 +237,12 @@ export default class HttpContext {
       this.#headersCached = true
 
       const values = Array.isArray(snapshot?.params) ? snapshot.params : []
+
       for (let i = 0; i < names.length; i++) {
         this.#params[i] = values[i]
         this.#params[names[i]] = values[i]
       }
+
       return
     }
 
@@ -284,6 +286,7 @@ export default class HttpContext {
 
     if (!fullQuery) {
       this.#fullQueryParsed = true
+
       return
     }
 
@@ -340,6 +343,7 @@ export default class HttpContext {
     }
 
     this.#method = this.req.getMethod()
+
     return this.#method
   }
 
@@ -353,6 +357,7 @@ export default class HttpContext {
     }
 
     this.#url = this.req.getUrl()
+
     return this.#url
   }
 
@@ -394,6 +399,7 @@ export default class HttpContext {
       }
 
       this.#query[name] = undefined
+
       return undefined
     }
 
@@ -404,6 +410,7 @@ export default class HttpContext {
     const value = this.req.getQuery(name)
 
     this.#query[name] = value
+
     return value
   }
 
@@ -423,6 +430,7 @@ export default class HttpContext {
     const value = this.req.getParameter(i)
 
     this.#params[i] = value
+
     return value
   }
 
@@ -460,6 +468,7 @@ export default class HttpContext {
     const value = this.req.getHeader(headerName)
 
     this.#headers[headerName] = value
+
     return value
   }
 
@@ -472,6 +481,7 @@ export default class HttpContext {
 
     if (clh === undefined || clh == null || clh === '') {
       this.#contentLength = null
+
       return this.#contentLength
     }
 
@@ -479,10 +489,12 @@ export default class HttpContext {
 
     if (!Number.isInteger(n) || n < 0) {
       this.#contentLength = null
+
       return this.#contentLength
     }
 
     this.#contentLength = n
+
     return this.#contentLength
   }
 
@@ -492,12 +504,13 @@ export default class HttpContext {
    */
   status(code) {
     this.#statusOverride = code
+
     return this
   }
 
   /**
    * @param {string|number} status
-   * @returns {any}
+   * @returns {string}
    */
   getStatus(status) {
     const finalStatus = this.#statusOverride !== null ? this.#statusOverride : status
@@ -534,6 +547,7 @@ export default class HttpContext {
     const headerKey = key.toLowerCase()
 
     this.#pendingHeaders.set(headerKey, [key, headerValue])
+
     return this
   }
 
@@ -564,6 +578,7 @@ export default class HttpContext {
 
     if (!pendingHeader) {
       this.#pendingHeaders.set(headerKey, [key, headerValue])
+
       return this
     }
 
@@ -616,6 +631,7 @@ export default class HttpContext {
 
       if (!append) {
         this.#pendingHeaders.set(headerKey, [key, headerValue])
+
         return
       }
 
@@ -623,6 +639,7 @@ export default class HttpContext {
 
       if (!pendingHeader) {
         this.#pendingHeaders.set(headerKey, [key, headerValue])
+
         return
       }
 
@@ -711,6 +728,7 @@ export default class HttpContext {
   #flushPendingHeaders(headers = null) {
     if (!this.res) {
       this.#pendingHeaders.clear()
+
       return
     }
 
@@ -749,7 +767,7 @@ export default class HttpContext {
   }
 
   /**
-   * @param {any} result
+   * @param {unknown} result
    * @returns {void}
    */
   send(result) {
@@ -826,6 +844,7 @@ export default class HttpContext {
     this.replied = true
 
     const prepared = getPreparedHeaders(headers)
+
     if (
       this.server?.bindingCapabilities?.responseBatch === true &&
       prepared &&
@@ -833,6 +852,7 @@ export default class HttpContext {
       typeof this.res?.endBatch === 'function'
     ) {
       this.res.endBatch(this.getStatus(status), prepared.lines, body ?? undefined)
+
       return
     }
 
@@ -884,6 +904,7 @@ export default class HttpContext {
     }
 
     this.streamingStarted = true
+
     return this.#resStreamer.write(chunk)
   }
 
@@ -896,6 +917,7 @@ export default class HttpContext {
     if (this.aborted) {
       return [false, false]
     }
+
     if (!this.streaming) {
       throw new Error('Must call startStreaming() before tryEnd()')
     }
@@ -916,6 +938,7 @@ export default class HttpContext {
     if (this.aborted) {
       return
     }
+
     if (!this.streaming) {
       throw new Error('Must call startStreaming() before end()')
     }
@@ -928,6 +951,7 @@ export default class HttpContext {
     if (this.aborted) {
       return
     }
+
     this.#resStreamer.onWritable(callback)
   }
 

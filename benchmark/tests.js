@@ -11,7 +11,7 @@ import crypto from 'node:crypto'
  * @property {object} [headers] - Custom headers
  * @property {string|Buffer|null} [body] - Request body (null for GET)
  * @property {string} [description] - Human-readable description
- * @property {any} [payload] - Payload from server
+ * @property {unknown} [payload] - Payload from server
  */
 
 /**

@@ -26,10 +26,8 @@ const PARAMS = {
   duration: numEnv('DEEP_BINDING_DURATION', 5),
   sampleMs: numEnv('DEEP_BINDING_SAMPLE_MS', 250)
 }
-
 const CORE = { candidate: 'core-swm-uws', reference: 'core-uwebsockets' }
 const RAW = { candidate: 'raw-swm-uws', reference: 'raw-uwebsockets' }
-
 const SCENARIOS = [
   { name: 'http-core-c10-p1', kind: 'http', test: 'base', pair: CORE, connections: 10, pipelining: 1 },
   { name: 'http-core-c100-p1', kind: 'http', test: 'base', pair: CORE, connections: 100, pipelining: 1 },
@@ -58,14 +56,18 @@ async function readJson(file) {
  * @returns {number|null}
  */
 function quantile(values, q) {
-  if (!values.length) return null
+  if (!values.length) {
+    return null
+  }
 
   const sorted = values.slice().sort((a, b) => a - b)
   const index = (sorted.length - 1) * q
   const lower = Math.floor(index)
   const upper = Math.ceil(index)
 
-  if (lower === upper) return sorted[lower]
+  if (lower === upper) {
+    return sorted[lower]
+  }
 
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower)
 }
@@ -184,6 +186,7 @@ async function runScenario(scenario, jsonOut) {
       '--json-out',
       jsonOut
     ])
+
     return
   }
 

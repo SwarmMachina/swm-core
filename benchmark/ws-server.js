@@ -11,6 +11,7 @@ if (process.send) {
 
     if (msg.type === 'metrics:start') {
       METRICS.start({ sampleMs: msg.sampleMs })
+
       return
     }
 
@@ -50,7 +51,6 @@ function sendReady(port) {
  */
 async function runCore(port, backend) {
   const { default: Server } = await import('../src/index.js')
-
   const server = new Server({
     port,
     backend,
@@ -121,22 +121,24 @@ async function runRawBinding(port) {
 async function main() {
   if (fw === 'core' || fw === 'core-swm-uws' || fw === 'core-uwebsockets') {
     await runCore(port, 'uws')
+
     return
   }
 
   if (fw === 'core-node') {
     await runCore(port, 'node')
+
     return
   }
 
   if (fw === 'raw-swm-uws' || fw === 'raw-uwebsockets') {
     await runRawBinding(port)
+
     return
   }
 
   if (fw === 'ws') {
     const { WebSocketServer } = await import('ws')
-
     const wss = new WebSocketServer({ port, perMessageDeflate: false })
 
     wss.on('connection', (socket) => {

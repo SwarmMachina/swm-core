@@ -20,6 +20,7 @@ export default class WSContext {
     this.server = server
     this.ws = ws
     this.data = userData
+
     return this
   }
 

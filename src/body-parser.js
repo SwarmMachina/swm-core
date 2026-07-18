@@ -9,9 +9,9 @@ export default class BodyParser {
   #bodyError = null
   /** @type {Promise} */
   #bodyPromise = null
-  /** @type {Function} */
+  /** @type {(value: Buffer) => void} */
   #bodyResolve = null
-  /** @type {Function} */
+  /** @type {(reason: Error) => void} */
   #bodyReject = null
   /** @type {boolean} */
   #done = false
@@ -114,7 +114,6 @@ export default class BodyParser {
     }
 
     const view = this.#grow.subarray(0, this.#len)
-
     const out = this.#cap > this.#len << 1 ? Buffer.from(view) : view
 
     return this.#resolve(out)
@@ -233,6 +232,7 @@ export default class BodyParser {
 
     if (!this.#ctx) {
       this.#bodyError = CACHED_ERRORS.serverError
+
       return Promise.reject(this.#bodyError)
     }
 
@@ -241,11 +241,13 @@ export default class BodyParser {
 
     if (this.#ctx.aborted) {
       this.#bodyError = CACHED_ERRORS.aborted
+
       return Promise.reject(this.#bodyError)
     }
 
     if (contentLength !== null && contentLength > limit) {
       this.#bodyError = CACHED_ERRORS.bodyTooLarge
+
       return Promise.reject(this.#bodyError)
     }
 
@@ -254,6 +256,7 @@ export default class BodyParser {
 
       this.#body = buf
       this.#ctx.res.onData(NOOP)
+
       return Promise.resolve(buf)
     }
 
@@ -271,16 +274,21 @@ export default class BodyParser {
       this.#ctx.res.collectBody(limit, (body) => {
         if (body === null) {
           this.#reject(CACHED_ERRORS.bodyTooLarge)
+
           return
         }
 
         const buffer = Buffer.from(body)
+
         if (contentLength !== null && buffer.length !== contentLength) {
           this.#reject(CACHED_ERRORS.sizeMismatch)
+
           return
         }
+
         this.#resolve(buffer)
       })
+
       return this.#bodyPromise
     }
 
@@ -334,7 +342,7 @@ export default class BodyParser {
 
   /**
    * @param {number} [maxSize]
-   * @returns {Promise<any>}
+   * @returns {Promise<unknown>}
    */
   async json(maxSize) {
     const buf = await this.body(maxSize)

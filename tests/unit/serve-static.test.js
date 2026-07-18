@@ -33,10 +33,12 @@ function fakeCtx(url, method = 'get') {
     url: () => url,
     status(code) {
       captured.status = code
+
       return this
     },
     setHeader(key, value) {
       captured.headers[key] = value
+
       return this
     },
     send(body) {
@@ -133,11 +135,13 @@ test('serveStatic: HEAD is served like GET (uWS strips the body natively)', asyn
 
 test('serveStatic: bounded cache evicts oldest and re-reads from disk', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'swm-static-cache-'))
+
   writeFileSync(join(dir, 'a.txt'), 'A1')
   writeFileSync(join(dir, 'b.txt'), 'B1')
   const handler = serveStatic(dir, { cacheLimit: 1 })
 
   let ctx = fakeCtx('/a.txt')
+
   await handler(ctx)
   assert.strictEqual(ctx.captured.body.toString(), 'A1')
 

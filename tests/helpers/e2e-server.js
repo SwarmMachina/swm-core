@@ -7,8 +7,8 @@ const BACKEND = process.env.SWM_BACKEND || 'uws'
 
 /**
  * @param {object} opt
- * @param {(ctx: import('../../src/http-context.js').default) => any|Promise<any>} [opt.router]
- * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => any|Promise<any>}>} [opt.routes]
+ * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.router]
+ * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>}>} [opt.routes]
  * @param {number} [opt.maxBodySize]
  * @returns {Promise<{server: Server, port: number, baseUrl: string, close: () => Promise<void>}>}
  */
@@ -29,8 +29,8 @@ export async function startHttpServer({ router, routes, maxBodySize }) {
 /**
  * @param {object} [opt]
  * @param {import('../../src/index.js').WSOptions} [opt.ws]
- * @param {(ctx: import('../../src/http-context.js').default) => any|Promise<any>} [opt.router]
- * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => any|Promise<any>}>} [opt.routes]
+ * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.router]
+ * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>}>} [opt.routes]
  * @param {number} [opt.maxBodySize]
  * @returns {Promise<{server: Server, port: number, httpBaseUrl: string, wsBaseUrl: string, close: () => Promise<void>}>}
  */

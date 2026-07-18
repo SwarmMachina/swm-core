@@ -21,6 +21,12 @@ function applyMask(payload, mask) {
 
 /**
  * @param {object} opt
+ * @param {boolean} [opt.fin]
+ * @param {number} opt.opcode
+ * @param {Buffer|string} [opt.payload]
+ * @param {number[]} [opt.mask]
+ * @param {boolean} [opt.masked]
+ * @param {number} [opt.rsv]
  * @returns {Buffer}
  */
 function frame({ fin = true, opcode, payload = Buffer.alloc(0), mask = DEFAULT_MASK, masked = true, rsv = 0 }) {
@@ -56,6 +62,7 @@ function frame({ fin = true, opcode, payload = Buffer.alloc(0), mask = DEFAULT_M
 
 /**
  * @param {object} [opt]
+ * @param {number} [opt.maxPayload]
  * @returns {{parser: FrameParser, events: object[]}}
  */
 function makeParser({ maxPayload = 1 << 20 } = {}) {
@@ -204,12 +211,13 @@ describe('ws FrameParser', () => {
   test('parses 16-bit and 64-bit length frames', () => {
     const big16 = Buffer.alloc(200, 0x41)
     const big64 = Buffer.alloc(70000, 0x42)
-
     const a = makeParser()
+
     a.parser.push(frame({ opcode: 2, payload: big16 }))
     strictEqual(a.events[0].payload.length, 200)
 
     const b = makeParser({ maxPayload: 1 << 20 })
+
     b.parser.push(frame({ opcode: 2, payload: big64 }))
     strictEqual(b.events[0].payload.length, 70000)
   })
@@ -348,6 +356,7 @@ describe('ws FrameParser', () => {
 
   test('rejects invalid UTF-8 in a text message (1007)', () => {
     const { parser, events } = makeParser()
+
     // 0xC0 0x80 is an overlong (invalid) encoding
     parser.push(frame({ opcode: 1, payload: Buffer.from([0xc0, 0x80]) }))
 
@@ -357,6 +366,7 @@ describe('ws FrameParser', () => {
 
   test('accepts valid UTF-8 split across a fragment boundary', () => {
     const { parser, events } = makeParser()
+
     // "é" = 0xC3 0xA9, split across two fragments
     parser.push(frame({ fin: false, opcode: 1, payload: Buffer.from([0xc3]) }))
     parser.push(frame({ fin: true, opcode: 0, payload: Buffer.from([0xa9]) }))

@@ -1,5 +1,5 @@
 /**
- * @param {Function} fn
+ * @param {() => unknown|Promise<unknown>} fn
  * @returns {object}
  */
 export default async function timed(fn) {

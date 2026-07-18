@@ -20,6 +20,7 @@ afterEach(async () => {
 function request(agent, { method, port, path, body }) {
   return new Promise((resolve, reject) => {
     let socket = null
+
     const req = http.request({ host: '127.0.0.1', port, path, method, agent }, (res) => {
       let text = ''
 

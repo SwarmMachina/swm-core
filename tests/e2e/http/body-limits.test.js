@@ -21,6 +21,7 @@ test('body limits: POST /big with body > maxBodySize => 413', async () => {
         path: '/big',
         handler: async (ctx) => {
           await ctx.body()
+
           return 'ok'
         }
       }
@@ -28,7 +29,6 @@ test('body limits: POST /big with body > maxBodySize => 413', async () => {
   })
 
   const largeBody = 'x'.repeat(1024 * 1024 + 1)
-
   const { status, text } = await reqText(`${server.baseUrl}/big`, {
     method: 'POST',
     body: largeBody,

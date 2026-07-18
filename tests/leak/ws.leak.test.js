@@ -13,7 +13,9 @@ for (const scenario of makeWsScenarios()) {
 
     // Close the server if an assertion or scenario fails before measured shutdown.
     t.after(() => {
-      if (!closed) return handle.close()
+      if (!closed) {
+        return handle.close()
+      }
     })
 
     for (let i = 0; i < scenario.iterations; i++) {

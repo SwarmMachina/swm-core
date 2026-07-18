@@ -12,6 +12,7 @@ if (process.send) {
 
     if (msg.type === 'metrics:start') {
       METRICS.start({ sampleMs: msg.sampleMs })
+
       return
     }
 
@@ -35,7 +36,6 @@ const { fw, port } = parseArgs(
     }
   }
 )
-
 const payload = TESTS.get('base').payload
 const noop = () => {}
 
@@ -48,7 +48,6 @@ async function main() {
   }
 
   const { default: Server } = await import('../src/index.js')
-
   // Same native route both ways; the 'pre' variant only adds a no-op preHandler so
   // the measured delta isolates the composed-handler (async wrapper) cost.
   const route = { method: 'get', path: '/', handler: () => payload }

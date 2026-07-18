@@ -60,6 +60,7 @@ export default class Metrics {
     if (!this.#running) {
       return null
     }
+
     this.#running = false
 
     if (this.#timer) {
@@ -76,19 +77,15 @@ export default class Metrics {
     const dtMs = Math.max(1, performance.now() - this.#t0)
     const cpu = process.cpuUsage(this.#cpu0)
     const cpuMs = (cpu.user + cpu.system) / 1000
-
     const cpuCorePct = (cpuMs / dtMs) * 100
     const cpuHostPct = (cpuMs / (dtMs * os.cpus().length)) * 100
-
     const elu = performance.eventLoopUtilization(this.#elu0)
     const eluPct = (elu.utilization || 0) * 100
-
     const eld = this.#eld
     const eldP50 = eld ? eld.percentile(50) / 1e6 : null
     const eldP90 = eld ? eld.percentile(90) / 1e6 : null
     const eldP99 = eld ? eld.percentile(99) / 1e6 : null
     const eldMax = eld ? eld.max / 1e6 : null
-
     const loadAvg = this.#samples ? this.#loadSum.map((x) => x / this.#samples) : os.loadavg()
 
     return {

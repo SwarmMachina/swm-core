@@ -13,7 +13,6 @@ import { startServer, stopServer } from './helpers/server-proc.js'
 import { processV8Profile } from './helpers/v8-prof-run.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
 const KNOWN_FRAMEWORKS = new Set([
   'core',
   'core-swm-uws',
@@ -91,6 +90,17 @@ function parseWsBenchArgs(argv) {
 
 /**
  * @param {object} params
+ * @param {string} params.fw
+ * @param {number} params.warmupSec
+ * @param {number} params.durationSec
+ * @param {number} params.connections
+ * @param {number} params.msgSize
+ * @param {'open'|'closed'} params.mode
+ * @param {number} params.depth
+ * @param {number} params.runIndex
+ * @param {number} params.sampleMs
+ * @param {boolean} params.v8prof
+ * @param {string} params.runStamp
  * @returns {Promise<object>}
  */
 async function runOne({
@@ -109,12 +119,10 @@ async function runOne({
   console.log(`\n[ws-bench] ${fw}: start (run=${runIndex + 1})`)
 
   const tAll0 = performance.now()
-
   const runLoad = (durationSecArg) =>
     mode === 'open'
       ? wsLoadOpen({ url, connections, durationSec: durationSecArg, payloadBytes: msgSize, depth })
       : wsLoad({ url, connections, durationSec: durationSecArg, payloadBytes: msgSize })
-
   const { proc, port, profileDir } = await startServer({
     benchDir: __dirname,
     serverName: 'ws-server.js',
@@ -124,16 +132,12 @@ async function runOne({
     v8prof,
     runStamp
   })
-
   const url = `ws://127.0.0.1:${port}/`
-
-  let warmupMs = 0
 
   if (warmupSec > 0) {
     const w = await timed(() => runLoad(warmupSec))
 
-    warmupMs = w.ms
-    console.log(`[ws-bench] ${fw}: warmup done in ${msToHuman(warmupMs)}`)
+    console.log(`[ws-bench] ${fw}: warmup done in ${msToHuman(w.ms)}`)
   }
 
   proc.send?.({ type: 'metrics:start', sampleMs })
@@ -146,11 +150,9 @@ async function runOne({
   await stopServer(proc)
 
   const prof = v8prof ? await processV8Profile(profileDir).catch(() => null) : null
-
   const res = runTimed.result
   const m = metricsMsg?.data || null
   const totalMs = performance.now() - tAll0
-
   const row = {
     fw,
     msgPerSec: res.msgPerSec,
@@ -199,7 +201,6 @@ async function main() {
   const runStamp = formatYmdHms()
   const perFw = Object.fromEntries(args.frameworks.map((fw) => [fw, []]))
   const runRows = []
-
   const modeLabel = args.mode === 'open' ? `open(depth=${args.depth})` : 'closed'
 
   console.log(

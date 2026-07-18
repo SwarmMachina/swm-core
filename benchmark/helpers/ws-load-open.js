@@ -26,12 +26,11 @@ export default async function wsLoadOpen({ url, connections, durationSec, payloa
   let errors = 0
 
   const latency = createLatencyRecorder()
-
   const runConnection = () =>
     new Promise((resolve) => {
       const sock = new WebSocket(url, { perMessageDeflate: false })
-
       const inflight = []
+
       let idleTimer = null
       let closed = false
 
@@ -55,7 +54,6 @@ export default async function wsLoadOpen({ url, connections, durationSec, payloa
 
         resolve()
       }
-
       const armIdleTimer = () => {
         if (idleTimer) {
           clearTimeout(idleTimer)
@@ -66,7 +64,6 @@ export default async function wsLoadOpen({ url, connections, durationSec, payloa
           done()
         }, idleTimeoutMs)
       }
-
       const sendOne = () => {
         inflight.push(performance.now())
         sock.send(payload, (err) => {
@@ -95,6 +92,7 @@ export default async function wsLoadOpen({ url, connections, durationSec, payloa
 
         if (performance.now() >= deadline) {
           done()
+
           return
         }
 
