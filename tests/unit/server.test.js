@@ -289,6 +289,15 @@ describe('Server', () => {
       strictEqual(server.ws !== null, true)
     })
 
+    test('should enable WebSocket when onDropped is the only handler', () => {
+      const server = makeServer({
+        onRequest: () => {},
+        ws: { onDropped: () => {} }
+      })
+
+      strictEqual(server.ws !== null, true)
+    })
+
     test('should disable WebSocket when ws is not provided', () => {
       const server = makeServer({ onRequest: () => {} })
 
@@ -335,6 +344,7 @@ describe('Server', () => {
       const onError = () => {}
       const onMessage = () => {}
       const onDrain = () => {}
+      const onDropped = () => {}
       const onSubscription = () => {}
       const onUpgrade = () => Promise.resolve({ isAllowed: true })
       const server = makeServer({
@@ -345,6 +355,7 @@ describe('Server', () => {
           onError,
           onMessage,
           onDrain,
+          onDropped,
           onSubscription,
           onUpgrade
         }
@@ -355,6 +366,7 @@ describe('Server', () => {
       strictEqual(server.onWsError, onError)
       strictEqual(server.onWsMessage, onMessage)
       strictEqual(server.onWsDrain, onDrain)
+      strictEqual(server.onWsDropped, onDropped)
       strictEqual(server.onWsSubscription, onSubscription)
       strictEqual(server.onWsUpgrade, onUpgrade)
     })
@@ -645,6 +657,7 @@ describe('Server', () => {
       strictEqual(wsCall.config.maxPayloadLength, 1024 * 1024)
       strictEqual(typeof wsCall.config.open, 'function')
       strictEqual(typeof wsCall.config.message, 'function')
+      strictEqual(typeof wsCall.config.dropped, 'function')
       strictEqual(typeof wsCall.config.close, 'function')
       strictEqual(typeof wsCall.config.drain, 'function')
       strictEqual(typeof wsCall.config.subscription, 'function')
@@ -1924,6 +1937,64 @@ describe('Server', () => {
   })
 
   describe('WS event handlers', () => {
+    test('onDropped: should expose the connection context and rejected payload', () => {
+      let received = null
+
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          onDropped: (ctx, message, isBinary) => {
+            received = { ctx, message, isBinary }
+          }
+        }
+      })
+      const ws = createMockWebSocket({ id: 'slow-1' })
+      const message = new Uint8Array([1, 2, 3]).buffer
+
+      server.onOpen(ws)
+      server.onDropped(ws, message, true)
+
+      strictEqual(received.ctx, server.getWsContext(ws))
+      strictEqual(received.ctx.data.id, 'slow-1')
+      strictEqual(received.message, message)
+      strictEqual(received.isBinary, true)
+    })
+
+    test('onDropped: should route sync and async handler errors to onError', async () => {
+      let calls = 0
+
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          onDropped: () => {
+            calls++
+
+            if (calls === 1) {
+              throw new Error('sync drop error')
+            }
+
+            return Promise.reject(new Error('async drop error'))
+          },
+          onError: () => {
+            calls++
+          }
+        }
+      })
+      const ws = createMockWebSocket()
+      const message = new ArrayBuffer(0)
+
+      server.onOpen(ws)
+      server.onDropped(ws, message, false)
+      await Promise.resolve()
+
+      strictEqual(calls, 2)
+
+      server.onDropped(ws, message, false)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(calls, 4)
+    })
+
     test('onMessage: should call handler and swallow errors into safeWsError when handler throws', async () => {
       let errorCalled = 0
 

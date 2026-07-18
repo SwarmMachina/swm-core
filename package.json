@@ -90,6 +90,6 @@
     "ws": "^8.21.0"
   },
   "dependencies": {
-    "@swarmmachina/swm-uws": "0.4.1"
+    "@swarmmachina/swm-uws": "0.5.0"
   }
 }

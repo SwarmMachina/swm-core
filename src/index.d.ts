@@ -59,6 +59,11 @@ export interface WSOptions {
   wsUpgradeTimeoutMs?: number
   onOpen?: (ctx: WSContext) => any
   onMessage?: (ctx: WSContext, message: ArrayBuffer, isBinary: boolean) => any
+  /**
+   * Called when an outgoing message is dropped because the connection exceeded its backpressure limit.
+   * Copy `message` synchronously if it is needed after the callback returns or across an `await`.
+   */
+  onDropped?: (ctx: WSContext, message: ArrayBuffer, isBinary: boolean) => any
   onClose?: (ctx: WSContext, code: number, message: ArrayBuffer) => any
   onDrain?: (ctx: WSContext) => any
   onError?: (ctx: WSContext | null, err: Error) => any

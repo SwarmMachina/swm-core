@@ -92,6 +92,8 @@ function make({ userData = { id: 1 }, maxBackpressure } = {}) {
   }
   const behavior = {
     message: (conn, payload, isBinary) => events.push({ type: 'message', payload: Buffer.from(payload), isBinary }),
+    dropped: (conn, payload, isBinary) =>
+      events.push({ type: 'dropped', conn, payload: Buffer.from(payload), isBinary }),
     drain: () => events.push({ type: 'drain' }),
     close: (conn, code, reason) => events.push({ type: 'close', code, reason: Buffer.from(reason) })
   }
@@ -131,19 +133,43 @@ describe('ws NodeWebSocket', () => {
     strictEqual(events.filter((e) => e.type === 'drain').length, 1)
   })
 
-  test('send reports DROPPED (2) when backpressure exceeds the limit', () => {
-    const { ws, socket } = make()
+  test('send reports DROPPED (2) and the rejected payload when backpressure exceeds the limit', () => {
+    const { ws, socket, events } = make()
 
     socket.writableLength = 1 << 20 // way above the threshold
     strictEqual(ws.send('x', false), 2)
     strictEqual(socket.written.length, 0)
+
+    const dropped = events.find((event) => event.type === 'dropped')
+
+    strictEqual(dropped.conn, ws)
+    strictEqual(dropped.payload.toString(), 'x')
+    strictEqual(dropped.isBinary, false)
+  })
+
+  test('sendFrame reports the original binary publish payload when dropped', () => {
+    const { ws, socket, events } = make({ maxBackpressure: 16 })
+    const payload = Buffer.from([1, 2, 3])
+
+    socket.writableLength = 16
+    strictEqual(ws.sendFrame(Buffer.from('serialized-frame'), payload, true), 2)
+    strictEqual(socket.written.length, 0)
+
+    const dropped = events.find((event) => event.type === 'dropped')
+
+    deepStrictEqual(dropped.payload, payload)
+    strictEqual(dropped.isBinary, true)
   })
 
   test('send after close reports DROPPED (2)', () => {
-    const { ws, socket } = make()
+    const { ws, socket, events } = make()
 
     socket.emit('close')
     strictEqual(ws.send('x', false), 2)
+    strictEqual(
+      events.some((event) => event.type === 'dropped'),
+      false
+    )
   })
 
   test('delivers an incoming message to behavior.message', () => {

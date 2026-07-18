@@ -136,6 +136,8 @@ export default class NodeWebSocket {
     }
 
     if (this.#socket.writableLength >= this.#maxBackpressure) {
+      this.#reportDropped(data, isBinary)
+
       return DROPPED
     }
 
@@ -154,14 +156,18 @@ export default class NodeWebSocket {
    * Write a pre-serialized frame. Used by pub/sub to broadcast one buffer to
    * many subscribers without re-encoding per connection.
    * @param {Buffer} frame
+   * @param {string|Buffer|ArrayBuffer|ArrayBufferView} data
+   * @param {boolean} isBinary
    * @returns {number}
    */
-  sendFrame(frame) {
+  sendFrame(frame, data, isBinary) {
     if (!this.#open) {
       return DROPPED
     }
 
     if (this.#socket.writableLength >= this.#maxBackpressure) {
+      this.#reportDropped(data, isBinary)
+
       return DROPPED
     }
 
@@ -279,6 +285,16 @@ export default class NodeWebSocket {
     }
 
     return SUCCESS
+  }
+
+  /**
+   * Report an application message rejected by the backpressure ceiling. This
+   * stays off the successful send path, including its payload conversion cost.
+   * @param {string|Buffer|ArrayBuffer|ArrayBufferView} data
+   * @param {boolean} isBinary
+   */
+  #reportDropped(data, isBinary) {
+    this.#behavior.dropped?.(this, toArrayBuffer(toBuffer(data)), isBinary)
   }
 
   /**

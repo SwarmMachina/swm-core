@@ -285,7 +285,7 @@ export default class WsLayer {
   #pingTimer = null
 
   /**
-   * @param {object} behavior - uWS-shaped ws behavior (idleTimeout, maxPayloadLength, open/message/close/drain/subscription/upgrade).
+   * @param {object} behavior - uWS-shaped ws behavior (idleTimeout, maxPayloadLength, open/message/dropped/close/drain/subscription/upgrade).
    */
   constructor(behavior) {
     this.#behavior = behavior
@@ -463,7 +463,7 @@ export default class WsLayer {
     const frame = encode(isBinary ? 0x2 : 0x1, toBuffer(message))
 
     for (const conn of set) {
-      conn.sendFrame(frame)
+      conn.sendFrame(frame, message, isBinary)
     }
 
     return true

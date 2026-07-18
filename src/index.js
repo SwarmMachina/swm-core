@@ -121,6 +121,7 @@ function normalizeWsOptions(ws) {
     [
       'onOpen',
       'onDrain',
+      'onDropped',
       'onUpgrade',
       'onError',
       'onClose',
@@ -205,6 +206,7 @@ async function loadBackend(name) {
  * @property {number} [wsUpgradeTimeoutMs]
  * @property {(ctx: WSContext) => unknown} [onOpen]
  * @property {(ctx: WSContext) => unknown} [onDrain]
+ * @property {(ctx: WSContext, msg: ArrayBuffer, isBinary: boolean) => unknown} [onDropped]
  * @property {(meta: object) => ({isAllowed: boolean, userData?: object, protocol?: string}|Promise<{isAllowed: boolean, userData?: object, protocol?: string}>)} [onUpgrade]
  * @property {(ctx: WSContext|null, err: Error) => unknown} [onError]
  * @property {(ctx: WSContext, code: number, reason: ArrayBuffer) => unknown} [onClose]
@@ -318,6 +320,7 @@ export default class Server {
     this.onWsError = ws?.onError ?? NOOP
     this.onWsMessage = ws?.onMessage ?? NOOP
     this.onWsDrain = ws?.onDrain ?? NOOP
+    this.onWsDropped = ws?.onDropped ?? NOOP
     this.onWsSubscription = ws?.onSubscription ?? NOOP
     this.onWsUpgrade = ws?.onUpgrade ?? ALLOW_WS_UPGRADE
     this.wsConnectionKey = null
@@ -398,6 +401,7 @@ export default class Server {
           maxPayloadLength: this.maxBodyBytes,
           open: this.onOpen.bind(this),
           message: this.onMessage.bind(this),
+          dropped: this.onDropped.bind(this),
           close: this.onClose.bind(this),
           drain: this.onDrain.bind(this),
           subscription: this.onSubscription.bind(this),
@@ -892,6 +896,36 @@ export default class Server {
 
     try {
       result = this.onWsMessage(ctx, message, isBinary)
+      isAsync = isPromise(result)
+    } catch (err) {
+      error = err
+    }
+
+    if (error) {
+      void this.safeWsError(ctx, error)
+
+      return
+    }
+
+    if (isAsync) {
+      void result.catch((err) => this.safeWsError(ctx, err))
+    }
+  }
+
+  /**
+   * @param {import('@swarmmachina/swm-uws').WebSocket} ws
+   * @param {ArrayBuffer} message
+   * @param {boolean} isBinary
+   */
+  onDropped(ws, message, isBinary) {
+    const ctx = this.getWsContext(ws)
+
+    let result
+    let error
+    let isAsync = false
+
+    try {
+      result = this.onWsDropped(ctx, message, isBinary)
       isAsync = isPromise(result)
     } catch (err) {
       error = err
