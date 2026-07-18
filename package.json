@@ -74,8 +74,11 @@
     "profile:compare:http": "node ./benchmark/compare-ci.js --suite http",
     "profile:compare:ws": "node ./benchmark/compare-ci.js --suite ws",
     "deps:update:bindings": "node scripts/update-bindings.js",
-    "prepublishOnly": "npm run check && npm test",
-    "release": "npm run check && npm test && npm publish"
+    "release:verify-tag": "node scripts/verify-release.js",
+    "release:artifact": "node scripts/build-release-artifact.js",
+    "release:gate": "npm run check && npm test && npm run test:e2e && npm run test:e2e:http:node && npm run test:e2e:ws:node && npm run test:e2e:uwebsockets-reference",
+    "prepublishOnly": "npm run release:gate",
+    "release": "npm run release:gate && npm run release:artifact && node release-artifact/publish-release-artifact.js"
   },
   "devDependencies": {
     "@swarmmachina/standards": "^1.0.4",

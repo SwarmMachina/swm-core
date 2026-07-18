@@ -11,10 +11,11 @@ const TESTS = ['base', 'headers', 'headers-prepared', 'post-base']
 /**
  * @param {string} name
  * @param {number} fallback
+ * @param {NodeJS.ProcessEnv} [env]
  * @returns {number}
  */
-function numEnv(name, fallback) {
-  const v = Number(process.env[name])
+function numEnv(name, fallback, env = process.env) {
+  const v = Number(env[name])
 
   return Number.isFinite(v) && v > 0 ? v : fallback
 }
@@ -22,16 +23,39 @@ function numEnv(name, fallback) {
 /**
  * @param {string} name
  * @param {boolean} fallback
+ * @param {NodeJS.ProcessEnv} [env]
  * @returns {boolean}
  */
-function boolEnv(name, fallback) {
-  const v = process.env[name]
+function boolEnv(name, fallback, env = process.env) {
+  const v = env[name]
 
   if (v == null || v === '') {
     return fallback
   }
 
   return ['1', 'true', 'yes', 'on'].includes(String(v).trim().toLowerCase())
+}
+
+/**
+ * Resolve the load parameters from the same baseline as the metric guards.
+ * Environment overrides remain available for explicit local experiments.
+ * @param {object} baseline
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {object}
+ */
+export function resolveHttpParams(baseline, env = process.env) {
+  const p = baseline.parameters || {}
+
+  return {
+    tests: TESTS,
+    runs: numEnv('HTTP_PROFILE_RUNS', p.runs ?? 3, env),
+    warmup: numEnv('HTTP_PROFILE_WARMUP', p.warmupSec ?? 2, env),
+    duration: numEnv('HTTP_PROFILE_DURATION', p.durationSec ?? 6, env),
+    connections: numEnv('HTTP_PROFILE_CONNECTIONS', p.connections ?? 100, env),
+    sampleMs: numEnv('HTTP_PROFILE_SAMPLE_MS', p.sampleMs ?? 250, env),
+    cpuProfile: boolEnv('HTTP_CPU_PROFILE', p.cpuProfile ?? true, env),
+    framework: 'core'
+  }
 }
 
 /**
@@ -84,22 +108,13 @@ function summarizeCore(bench) {
  * @returns {Promise<{ suite: string, failures: string[], metricRows: object[], cpuRows: object[] }>}
  */
 export default async function runHttpSuite({ benchDir, repoRoot, outRoot }) {
-  const params = {
-    tests: TESTS,
-    runs: numEnv('HTTP_PROFILE_RUNS', 3),
-    warmup: numEnv('HTTP_PROFILE_WARMUP', 2),
-    duration: numEnv('HTTP_PROFILE_DURATION', 6),
-    connections: numEnv('HTTP_PROFILE_CONNECTIONS', 100),
-    sampleMs: numEnv('HTTP_PROFILE_SAMPLE_MS', 250),
-    cpuProfile: boolEnv('HTTP_CPU_PROFILE', true),
-    framework: 'core'
-  }
+  const baseline = await readJson(path.join(benchDir, 'baselines', 'http.json'))
+  const params = resolveHttpParams(baseline)
 
   const outDir = path.join(outRoot, 'http')
 
   await fs.mkdir(outDir, { recursive: true })
 
-  const baseline = await readJson(path.join(benchDir, 'baselines', 'http.json'))
   const results = {}
   const cpuProfiles = []
 

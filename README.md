@@ -1350,26 +1350,63 @@ npm run test:coverage
 
 `npm run profile:ci` runs the regression-profiling suites (HTTP, body-parser and
 WebSocket), records CPU profiles and memory peaks, and fails on a guard breach.
-In CI it runs only on push to `master` and `workflow_dispatch` (see
-`.github/workflows/ci.yml`) and uploads the `regression-profiles` artifact.
-Thresholds live in `benchmark/baselines/*.json`.
+In CI it runs for release tags and manual dispatches (see
+`.github/workflows/ci.yml`). Thresholds and the exact calibrated parameters live
+in `benchmark/baselines/*.json`; the runner reads both from the same baseline so
+they cannot drift independently.
 
 GitHub's shared runners are noisy — throughput can swing 30–40% between runs — so
 absolute thresholds there only catch large regressions. Running the profiling job
 on a quiet self-hosted runner removes that noise and lets the thresholds be
 tightened enough to catch small regressions.
 
+The self-hosted `regression-gate` job is intentionally single-pass. After one
+checkout and `npm ci`, it runs the absolute regression profile first, then the
+balanced native-binding comparison, report-only framework comparisons, and
+Autobahn conformance. This keeps the calibrated measurement ahead of workloads
+that can heat or perturb the runner, and avoids changing hosts between related
+performance checks. The step summary and these artifacts preserve the evidence:
+`regression-profiles`, `binding-comparison`, `framework-comparison`, and
+`autobahn-report`.
+
+## Release flow
+
+A release tag must exactly match the version in both package manifests: tag
+`vX.Y.Z`, `package.json` version `X.Y.Z`, and the root `package-lock.json` version
+`X.Y.Z`. The tagged commit must also be reachable from `master`. These cheap
+policy checks run before the test matrix or self-hosted gate.
+
+After all gates pass, CI creates one npm tarball with lifecycle scripts disabled,
+checks that it contains only the declared public package surface, and records its
+SHA-256/SHA-512 hashes in `release-manifest.json`. The publish job downloads that
+artifact, verifies `SHA256SUMS`, and publishes the same tarball without another
+checkout, install, pack, or test pass. Manual dispatches exercise the complete
+flow and retain the tarball but never publish it.
+
+Publishing is retry-safe: if npm already contains the same version, the publish
+step compares its registry integrity with the tarball and succeeds only when the
+contents are identical. An occupied version with different content, an ambiguous
+registry failure, or a checksum mismatch fails closed.
+
+For a local release, use `npm run release`. It runs the functional release gate
+once, builds the inspected tarball, then publishes that tarball with npm lifecycle
+scripts disabled. Direct `npm publish` remains protected by `prepublishOnly`.
+Performance acceptance remains authoritative only on the calibrated CI runner.
+
+Published npm versions are immutable. If a release must be rolled back, move the
+`latest` dist-tag to the previous known-good version and deprecate the faulty
+version; fix forward with a new version rather than reusing or moving a release
+tag.
+
 ### Self-hosted runner
 
-The gated `regression-profile`, `compare-http`, `compare-ws` and `autobahn` jobs
-use self-hosted runners. The regular `test` job stays on `ubuntu-latest`.
+The gated `regression-gate` job uses a self-hosted runner. The regular `test` job
+stays on `ubuntu-latest`.
 
-> **Public-repository note.** The profiling and comparison jobs are gated to
-> `push`/`workflow_dispatch`, while Autobahn is `workflow_dispatch` only, so fork
-> pull requests never reach a self-hosted machine — they only run `test` on
-> `ubuntu-latest`. Anything merged to `master` still executes profiling and
-> comparison jobs on the runner, so treat the host as exposed: dedicated
-> unprivileged user, firewalled, no production secrets, ephemeral runner.
+> **Public-repository note.** The workflow accepts release tags and manual
+> dispatches, so fork pull requests never reach the self-hosted machine. Still
+> treat the host as exposed: dedicated unprivileged user, firewalled, no
+> production secrets, ephemeral runner.
 
 **1. Register the runner** (repo Settings → Actions → Runners → New self-hosted
 runner). The connection is outbound-only — no inbound ports, works behind NAT:
@@ -1395,8 +1432,8 @@ sudo cpupower frequency-set -g performance
 
 Keep the host idle during a run; optionally pin the runner to dedicated cores.
 
-**4. Point the job at the runner.** In `.github/workflows/ci.yml`, set the
-`regression-profile` job to `runs-on: [self-hosted, Linux, bench]`.
+**4. Point the job at the runner.** In `.github/workflows/ci.yml`, configure the
+`regression-gate` job for the `swm-ci` runner group and `bench` label.
 
 **5. Recalibrate.** Throughput and memory numbers differ per machine, so recalibrate
 `benchmark/baselines/*.json` on the self-hosted runner: collect a few green runs,

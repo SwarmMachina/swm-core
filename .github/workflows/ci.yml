@@ -26,6 +26,16 @@ jobs:
       - name: Verify workflow commit belongs to master
         run: git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/master
 
+      - name: Setup release policy runtime
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run release:verify-tag -- "$GITHUB_REF_NAME"
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -49,6 +59,10 @@ jobs:
 
       - name: Install
         run: npm ci
+
+      - name: Formatting and lint
+        if: matrix.node-version == '22'
+        run: npm run check
 
       - name: Unit tests
         run: npm test
@@ -86,108 +100,12 @@ jobs:
       - name: swm-uws runtime on production image
         run: npm run test:e2e
 
-  autobahn:
+  regression-gate:
     runs-on:
       group: swm-ci
       labels: bench
-    timeout-minutes: 30
+    timeout-minutes: 60
     needs: [test, swm-uws-bookworm]
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Autobahn RFC 6455 conformance (node backend)
-        run: npm run test:autobahn
-
-      - name: Upload Autobahn report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: autobahn-report
-          path: tests/autobahn/reports/
-
-  compare-http:
-    runs-on:
-      group: swm-ci
-      labels: bench
-    timeout-minutes: 15
-    needs: autobahn
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Framework comparison (http)
-        run: npm run profile:compare:http
-
-      - name: Upload http comparison
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: compare-http
-          path: benchmark/profiles/compare-ci/
-
-  compare-ws:
-    runs-on:
-      group: swm-ci
-      labels: bench
-    timeout-minutes: 10
-    needs: compare-http
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Framework comparison (ws)
-        run: npm run profile:compare:ws
-
-      - name: Upload ws comparison
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: compare-ws
-          path: benchmark/profiles/compare-ci/
-
-  regression-profile:
-    runs-on:
-      group: swm-ci
-      labels: bench
-    timeout-minutes: 20
-    needs: compare-ws
     permissions:
       contents: read
 
@@ -214,28 +132,6 @@ jobs:
           name: regression-profiles
           path: benchmark/profiles/regression-ci/
 
-  binding-performance-gate:
-    runs-on:
-      group: swm-ci
-      labels: bench
-    timeout-minutes: 15
-    needs: regression-profile
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
       - name: Native binding performance gate
         run: npm run bench:bindings
 
@@ -246,11 +142,30 @@ jobs:
           name: binding-comparison
           path: benchmark/profiles/binding-compare/
 
-  publish:
+      - name: Framework comparison
+        run: npm run profile:compare
+
+      - name: Upload framework comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-comparison
+          path: benchmark/profiles/compare-ci/
+
+      - name: Autobahn RFC 6455 conformance (node backend)
+        run: npm run test:autobahn
+
+      - name: Upload Autobahn report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report
+          path: tests/autobahn/reports/
+
+  package:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: binding-performance-gate
-    if: success() && startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 5
+    needs: regression-gate
     permissions:
       contents: read
 
@@ -262,12 +177,43 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+
+      - name: Build immutable release artifact
+        run: npm run release:artifact
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: release-artifact/
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: package
+    if: success() && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install
-        run: npm ci
+      - name: Download verified release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: release-artifact/
+
+      - name: Verify release artifact checksum
+        working-directory: release-artifact
+        run: sha256sum --check SHA256SUMS
 
       - name: Publish
-        run: npm publish --access public
+        run: node release-artifact/publish-release-artifact.js
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

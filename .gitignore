@@ -25,3 +25,4 @@ coverage/
 *.lcov
 /benchmark/profiles/
 /tests/autobahn/reports/
+/release-artifact/
