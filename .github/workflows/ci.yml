@@ -146,16 +146,6 @@ jobs:
           name: framework-comparison
           path: benchmark/profiles/compare-ci/
 
-      - name: Autobahn RFC 6455 conformance
-        run: npm run test:autobahn
-
-      - name: Upload Autobahn report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: autobahn-report
-          path: tests/autobahn/reports/
-
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 5

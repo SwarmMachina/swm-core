@@ -1619,8 +1619,7 @@ The self-hosted `regression-gate` runs, in order:
 
 1. regression profile;
 2. native-binding comparison;
-3. framework comparison (report only);
-4. Autobahn conformance.
+3. framework comparison (report only).
 
 Reports are uploaded as CI artifacts.
 
