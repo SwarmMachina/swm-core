@@ -54,9 +54,12 @@ export interface UpgradeResult {
 }
 
 export interface WSOptions {
-  wsIdleTimeoutSec?: number
+  /** Max WebSocket message payload size in MB (1-64). @default 1 */
+  maxBodySize?: number
+  /** Idle timeout in seconds (min: 5). @default 15 */
+  idleTimeoutSec?: number
   /** Maximum time allowed for an asynchronous upgrade decision. @default 10000 */
-  wsUpgradeTimeoutMs?: number
+  upgradeTimeoutMs?: number
   onOpen?: (ctx: WSContext) => any
   onMessage?: (ctx: WSContext, message: ArrayBuffer, isBinary: boolean) => any
   /**
@@ -80,6 +83,8 @@ export interface WSOptions {
 }
 
 export interface HttpBaseOptions {
+  /** Max HTTP request body size in MB (1-64). @default 1 */
+  maxBodySize?: number
   onError?: (ctx: HttpContext, err: Error) => any | Promise<any>
 }
 
@@ -98,8 +103,6 @@ export interface CommonServerOptions {
   host?: string
   /** @default 6000 */
   port?: number
-  /** Max request body size in MB (1-64). @default 1 */
-  maxBodySize?: number
 }
 
 /** At least one application protocol must be configured. Nullish `http`/`ws` disables that layer. */

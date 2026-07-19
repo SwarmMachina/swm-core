@@ -43,7 +43,7 @@ describe('Server', () => {
       strictEqual(server.http.routes, null)
       strictEqual(server.host, '127.0.0.1')
       strictEqual(server.port, 6000)
-      strictEqual(server.maxBodyBytes, 1024 * 1024)
+      strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
       strictEqual(server.ws, null)
     })
 
@@ -54,7 +54,7 @@ describe('Server', () => {
       strictEqual(server.http.onRequest, null)
       strictEqual(server.http.routes, routes)
       strictEqual(server.port, 6000)
-      strictEqual(server.maxBodyBytes, 1024 * 1024)
+      strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
       strictEqual(server.ws, null)
     })
 
@@ -77,10 +77,10 @@ describe('Server', () => {
       })
     })
 
-    test('should use custom maxBodySize', () => {
-      const server = makeServer({ onRequest: () => {}, maxBodySize: 5 })
+    test('should use custom http.maxBodySize', () => {
+      const server = makeServer({ http: { onRequest: () => {}, maxBodySize: 5 } })
 
-      strictEqual(server.maxBodyBytes, 5 * 1024 * 1024)
+      strictEqual(server.httpMaxBodyBytes, 5 * 1024 * 1024)
     })
 
     test('should use custom http.onError handler', () => {
@@ -199,6 +199,14 @@ describe('Server', () => {
       })
     })
 
+    test('should reject legacy WebSocket timeout option names', () => {
+      const message =
+        'Legacy WebSocket timeout options are no longer supported; use ws.idleTimeoutSec and ws.upgradeTimeoutMs'
+
+      throws(() => makeServer({ http: {}, ws: { wsIdleTimeoutSec: 15 } }), { name: 'TypeError', message })
+      throws(() => makeServer({ http: {}, ws: { wsUpgradeTimeoutMs: 10_000 } }), { name: 'TypeError', message })
+    })
+
     test('should throw error when port is not a number', () => {
       throws(() => makeServer({ onRequest: () => {}, port: '3000' }), {
         name: 'TypeError',
@@ -237,35 +245,59 @@ describe('Server', () => {
       strictEqual(server2.port, 65535)
     })
 
-    test('should throw error when maxBodySize is not a number', () => {
-      throws(() => makeServer({ onRequest: () => {}, maxBodySize: '1' }), {
+    test('should throw error when http.maxBodySize is not a number', () => {
+      throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: '1' } }), {
         name: 'TypeError',
-        message: 'Max body size must be in range 1 - 64'
+        message: 'http.maxBodySize must be in range 1 - 64'
       })
     })
 
-    test('should throw error when maxBodySize is less than 1', () => {
-      throws(() => makeServer({ onRequest: () => {}, maxBodySize: 0 }), {
+    test('should throw error when http.maxBodySize is less than 1', () => {
+      throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: 0 } }), {
         name: 'TypeError',
-        message: 'Max body size must be in range 1 - 64'
+        message: 'http.maxBodySize must be in range 1 - 64'
       })
     })
 
-    test('should throw error when maxBodySize is greater than 64', () => {
-      throws(() => makeServer({ onRequest: () => {}, maxBodySize: 65 }), {
+    test('should throw error when http.maxBodySize is greater than 64', () => {
+      throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: 65 } }), {
         name: 'TypeError',
-        message: 'Max body size must be in range 1 - 64'
+        message: 'http.maxBodySize must be in range 1 - 64'
       })
     })
 
-    test('should accept valid maxBodySize range', () => {
-      const server1 = makeServer({ onRequest: () => {}, maxBodySize: 1 })
+    test('should accept valid http.maxBodySize range', () => {
+      const server1 = makeServer({ http: { onRequest: () => {}, maxBodySize: 1 } })
 
-      strictEqual(server1.maxBodyBytes, 1024 * 1024)
+      strictEqual(server1.httpMaxBodyBytes, 1024 * 1024)
 
-      const server2 = makeServer({ onRequest: () => {}, maxBodySize: 64 })
+      const server2 = makeServer({ http: { onRequest: () => {}, maxBodySize: 64 } })
 
-      strictEqual(server2.maxBodyBytes, 64 * 1024 * 1024)
+      strictEqual(server2.httpMaxBodyBytes, 64 * 1024 * 1024)
+    })
+
+    test('should reject legacy root maxBodySize', () => {
+      throws(() => makeServer({ onRequest: () => {}, maxBodySize: 1 }), {
+        name: 'TypeError',
+        message: 'maxBodySize is no longer a server option; use http.maxBodySize and ws.maxBodySize'
+      })
+    })
+
+    test('should configure HTTP and WebSocket body limits independently', () => {
+      const server = makeServer({
+        http: { onRequest: () => {}, maxBodySize: 2 },
+        ws: { maxBodySize: 7 }
+      })
+
+      strictEqual(server.httpMaxBodyBytes, 2 * 1024 * 1024)
+      strictEqual(server.wsMaxPayloadBytes, 7 * 1024 * 1024)
+    })
+
+    test('should validate ws.maxBodySize independently', () => {
+      throws(() => makeServer({ http: {}, ws: { maxBodySize: 65 } }), {
+        name: 'TypeError',
+        message: 'ws.maxBodySize must be in range 1 - 64'
+      })
     })
 
     test('should enable WebSocket when ws is an empty object', () => {
@@ -302,37 +334,37 @@ describe('Server', () => {
       strictEqual(server.ws, null)
     })
 
-    test('should use custom wsIdleTimeoutSec', () => {
+    test('should use custom ws.idleTimeoutSec', () => {
       const server = makeServer({
         onRequest: () => {},
-        ws: { wsIdleTimeoutSec: 30 }
+        ws: { idleTimeoutSec: 30 }
       })
 
       strictEqual(server.wsIdleTimeoutSec, 30)
     })
 
-    test('should throw error when wsIdleTimeoutSec is less than 5', () => {
+    test('should throw error when ws.idleTimeoutSec is less than 5', () => {
       throws(
         () =>
           makeServer({
             onRequest: () => {},
-            ws: { wsIdleTimeoutSec: 4 }
+            ws: { idleTimeoutSec: 4 }
           }),
         {
           name: 'TypeError',
-          message: 'wsIdleTimeoutSec must be >= 5'
+          message: 'ws.idleTimeoutSec must be >= 5'
         }
       )
     })
 
-    test('should validate wsUpgradeTimeoutMs', () => {
-      throws(() => makeServer({ onRequest: () => {}, ws: { wsUpgradeTimeoutMs: 99 } }), {
+    test('should validate ws.upgradeTimeoutMs', () => {
+      throws(() => makeServer({ onRequest: () => {}, ws: { upgradeTimeoutMs: 99 } }), {
         name: 'TypeError',
-        message: 'wsUpgradeTimeoutMs must be in range 100 - 300000'
+        message: 'ws.upgradeTimeoutMs must be in range 100 - 300000'
       })
-      throws(() => makeServer({ onRequest: () => {}, ws: { wsUpgradeTimeoutMs: 300_001 } }), {
+      throws(() => makeServer({ onRequest: () => {}, ws: { upgradeTimeoutMs: 300_001 } }), {
         name: 'TypeError',
-        message: 'wsUpgradeTimeoutMs must be in range 100 - 300000'
+        message: 'ws.upgradeTimeoutMs must be in range 100 - 300000'
       })
     })
 
@@ -701,7 +733,7 @@ describe('Server', () => {
     test('should register WebSocket when ws is configured', async () => {
       const server = makeServer({
         onRequest: () => {},
-        ws: { wsIdleTimeoutSec: 20 }
+        ws: { idleTimeoutSec: 20, maxBodySize: 6 }
       })
 
       await server.listen()
@@ -713,7 +745,7 @@ describe('Server', () => {
       strictEqual(wsCall.path, '/*')
       strictEqual(wsCall.config.idleTimeout, 20)
       strictEqual(wsCall.config.upgradeTimeout, 10_000)
-      strictEqual(wsCall.config.maxPayloadLength, 1024 * 1024)
+      strictEqual(wsCall.config.maxPayloadLength, 6 * 1024 * 1024)
       strictEqual(typeof wsCall.config.open, 'function')
       strictEqual(typeof wsCall.config.message, 'function')
       strictEqual(typeof wsCall.config.dropped, 'function')
@@ -723,7 +755,7 @@ describe('Server', () => {
       strictEqual(typeof wsCall.config.upgrade, 'function')
     })
 
-    test('should use default wsIdleTimeoutSec when not provided', async () => {
+    test('should use default ws.idleTimeoutSec when not provided', async () => {
       const server = makeServer({
         onRequest: () => {},
         ws: {}
@@ -738,10 +770,10 @@ describe('Server', () => {
       strictEqual(wsCall.config.upgradeTimeout, 10_000)
     })
 
-    test('should pass custom wsUpgradeTimeoutMs to the transport', async () => {
+    test('should pass custom ws.upgradeTimeoutMs to the transport', async () => {
       const server = makeServer({
         onRequest: () => {},
-        ws: { wsUpgradeTimeoutMs: 2500 }
+        ws: { upgradeTimeoutMs: 2500 }
       })
 
       await server.listen()
@@ -1717,13 +1749,13 @@ describe('Server', () => {
       strictEqual(status403Call, undefined)
     })
 
-    test('should terminate an async upgrade that exceeds wsUpgradeTimeoutMs', async () => {
+    test('should terminate an async upgrade that exceeds ws.upgradeTimeoutMs', async () => {
       let receivedError = null
 
       const server = makeServer({
         onRequest: () => {},
         ws: {
-          wsUpgradeTimeoutMs: 100,
+          upgradeTimeoutMs: 100,
           onUpgrade: () => new Promise(() => {}),
           onError: (_ctx, error) => {
             receivedError = error

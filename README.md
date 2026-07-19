@@ -269,7 +269,7 @@ const server = new Server({
     }
   },
   ws: {
-    wsIdleTimeoutSec: 30,
+    idleTimeoutSec: 30,
     onUpgrade: (meta) => ({
       isAllowed: true,
       userData: { ip: meta.ip() }
@@ -308,14 +308,13 @@ new Server(options)
 
 **Options:**
 
-| Option          | Type            | Default       | Description                                         |
-| --------------- | --------------- | ------------- | --------------------------------------------------- |
-| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)          |
-| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below)     |
-| `onServerError` | `Function`      | `() => {}`    | Post-listen transport error handler                 |
-| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                         |
-| `port`          | `Number`        | `6000`        | Server port (1-65535)                               |
-| `maxBodySize`   | `Number`        | `1`           | Max HTTP body / WebSocket payload size in MB (1-64) |
+| Option          | Type            | Default       | Description                                     |
+| --------------- | --------------- | ------------- | ----------------------------------------------- |
+| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)      |
+| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below) |
+| `onServerError` | `Function`      | `() => {}`    | Post-listen transport error handler             |
+| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                     |
+| `port`          | `Number`        | `6000`        | Server port (1-65535)                           |
 
 At least one of `http` or `ws` must be an object. A nullish value disables that
 application layer. `http: null` with a configured `ws` still creates the minimal
@@ -331,14 +330,18 @@ a fixed `404` without allocating an `HttpContext`.
 
 **HTTP Options (`http` object):**
 
-| Option      | Type       | Default     | Description                                  |
-| ----------- | ---------- | ----------- | -------------------------------------------- |
-| `onRequest` | `Function` | default 404 | Universal request handler `(ctx) => any`     |
-| `routes`    | `Array`    | default 404 | Declarative route definitions                |
-| `onError`   | `Function` | `() => {}`  | Request error handler `(ctx, error) => void` |
+| Option        | Type       | Default     | Description                                  |
+| ------------- | ---------- | ----------- | -------------------------------------------- |
+| `maxBodySize` | `Number`   | `1`         | Max HTTP request body size in MB (1-64).     |
+| `onRequest`   | `Function` | default 404 | Universal request handler `(ctx) => any`     |
+| `routes`      | `Array`    | default 404 | Declarative route definitions                |
+| `onError`     | `Function` | `() => {}`  | Request error handler `(ctx, error) => void` |
 
 `http.onRequest` and `http.routes` are mutually exclusive. `http: {}` enables
 HTTP with a deterministic default `404` response.
+
+`http.maxBodySize` and `ws.maxBodySize` are independent. Changing one does not
+change the limit for the other protocol.
 
 **Route Definition (for `routes` array):**
 
@@ -351,19 +354,20 @@ HTTP with a deterministic default `404` response.
 
 **WebSocket Options (`ws` object):**
 
-| Option               | Type       | Default                                               | Description                                                                                                                                                                                                                                                              |
-| -------------------- | ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `wsIdleTimeoutSec`   | `Number`   | `15`                                                  | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
-| `wsUpgradeTimeoutMs` | `Number`   | `10000`                                               | Deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                                       |
-| `onOpen`             | `Function` | `(ctx) => {}`                                         | Called when client connects.                                                                                                                                                                                                                                             |
-| `onMessage`          | `Function` | `(ctx, message, isBinary) => {}`                      | Called when message received.                                                                                                                                                                                                                                            |
-| `onDropped`          | `Function` | `(ctx, message, isBinary) => {}`                      | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
-| `onClose`            | `Function` | `(ctx, code, message) => {}`                          | Called when client disconnects.                                                                                                                                                                                                                                          |
-| `onDrain`            | `Function` | `(ctx) => {}`                                         | Called when socket is writable again.                                                                                                                                                                                                                                    |
-| `onError`            | `Function` | `(ctx, error) => {}`                                  | Called on WebSocket error.                                                                                                                                                                                                                                               |
-| `onUpgrade`          | `Function` | `(meta) => ({isAllowed: true, userData?, protocol?})` | Validate WebSocket upgrade. `protocol`, when returned, must exactly match one token from `meta.getHeader('sec-websocket-protocol')`. Call metadata getters synchronously before any `await`; the underlying uWS request is only valid for the synchronous callback.      |
-| `onSubscription`     | `Function` | `(ctx, topic, newCount, oldCount) => {}`              | Called on topic subscription change.                                                                                                                                                                                                                                     |
-| `connectionKey`      | `Function` | `undefined`                                           | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
+| Option             | Type       | Default                                               | Description                                                                                                                                                                                                                                                              |
+| ------------------ | ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxBodySize`      | `Number`   | `1`                                                   | Max WebSocket message payload size in MB (1-64).                                                                                                                                                                                                                         |
+| `idleTimeoutSec`   | `Number`   | `15`                                                  | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
+| `upgradeTimeoutMs` | `Number`   | `10000`                                               | Deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                                       |
+| `onOpen`           | `Function` | `(ctx) => {}`                                         | Called when client connects.                                                                                                                                                                                                                                             |
+| `onMessage`        | `Function` | `(ctx, message, isBinary) => {}`                      | Called when message received.                                                                                                                                                                                                                                            |
+| `onDropped`        | `Function` | `(ctx, message, isBinary) => {}`                      | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
+| `onClose`          | `Function` | `(ctx, code, message) => {}`                          | Called when client disconnects.                                                                                                                                                                                                                                          |
+| `onDrain`          | `Function` | `(ctx) => {}`                                         | Called when socket is writable again.                                                                                                                                                                                                                                    |
+| `onError`          | `Function` | `(ctx, error) => {}`                                  | Called on WebSocket error.                                                                                                                                                                                                                                               |
+| `onUpgrade`        | `Function` | `(meta) => ({isAllowed: true, userData?, protocol?})` | Validate WebSocket upgrade. `protocol`, when returned, must exactly match one token from `meta.getHeader('sec-websocket-protocol')`. Call metadata getters synchronously before any `await`; the underlying uWS request is only valid for the synchronous callback.      |
+| `onSubscription`   | `Function` | `(ctx, topic, newCount, oldCount) => {}`              | Called on topic subscription change.                                                                                                                                                                                                                                     |
+| `connectionKey`    | `Function` | `undefined`                                           | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
 
 `ws: {}` enables WebSocket with permissive upgrades and no-op lifecycle
 callbacks. Use `ws: null` (or omit `ws` when `http` is configured) to disable it.
@@ -1048,8 +1052,8 @@ import fs from 'fs/promises'
 
 const server = new Server({
   port: 3000,
-  maxBodySize: 10, // 10 MB
   http: {
+    maxBodySize: 10, // 10 MB
     onRequest: async (ctx) => {
       if (ctx.url() === '/upload' && ctx.method() === 'post') {
         const filename = ctx.query('filename') || 'upload.bin'

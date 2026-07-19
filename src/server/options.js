@@ -6,10 +6,13 @@ export const ALLOW_WS_UPGRADE = () => Promise.resolve({ isAllowed: true })
 /** @typedef {import('../ws-context.js').default} WSCtx */
 /** @typedef {import('../http-context.js').default} HttpCtx */
 
+const DEFAULT_MAX_BODY_SIZE_MB = 1
+
 /**
  * @typedef {object} WSOptions
- * @property {number} [wsIdleTimeoutSec]
- * @property {number} [wsUpgradeTimeoutMs]
+ * @property {number} [maxBodySize]
+ * @property {number} [idleTimeoutSec]
+ * @property {number} [upgradeTimeoutMs]
  * @property {(ctx: WSCtx) => unknown} [onOpen]
  * @property {(ctx: WSCtx) => unknown} [onDrain]
  * @property {(ctx: WSCtx, msg: ArrayBuffer, isBinary: boolean) => unknown} [onDropped]
@@ -51,6 +54,21 @@ function validateCallbacks(options, names, namespace) {
       throw new TypeError(`${namespace}.${name} must be a function`)
     }
   }
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} namespace
+ * @returns {number}
+ */
+function normalizeMaxBodySize(value, namespace) {
+  const maxBodySize = value ?? DEFAULT_MAX_BODY_SIZE_MB
+
+  if (!(Number.isFinite(maxBodySize) && maxBodySize >= 1 && maxBodySize <= 64)) {
+    throw new TypeError(`${namespace}.maxBodySize must be in range 1 - 64`)
+  }
+
+  return maxBodySize
 }
 
 /**
@@ -96,7 +114,8 @@ function validateRoute(route, index) {
  * @returns {
  *  {
  *    onRequest: ((ctx: HttpCtx) => unknown|Promise<unknown>)|null,
- *    routes: Route[]|null, onError: (ctx: HttpCtx, err: Error) => unknown|Promise<unknown>
+ *    routes: Route[]|null, onError: (ctx: HttpCtx, err: Error) => unknown|Promise<unknown>,
+ *    maxBodySize: number
  *  }|null}
  */
 export function normalizeHttpOptions(http) {
@@ -120,7 +139,8 @@ export function normalizeHttpOptions(http) {
   return {
     onRequest: http.onRequest ?? null,
     routes: http.routes ?? null,
-    onError: http.onError ?? NOOP
+    onError: http.onError ?? NOOP,
+    maxBodySize: normalizeMaxBodySize(http.maxBodySize, 'http')
   }
 }
 
@@ -137,6 +157,12 @@ export function normalizeWsOptions(ws) {
 
   if ('enabled' in ws) {
     throw new TypeError('ws.enabled is no longer supported; use ws: null to disable WebSocket')
+  }
+
+  if ('wsIdleTimeoutSec' in ws || 'wsUpgradeTimeoutMs' in ws) {
+    throw new TypeError(
+      'Legacy WebSocket timeout options are no longer supported; use ws.idleTimeoutSec and ws.upgradeTimeoutMs'
+    )
   }
 
   validateCallbacks(
@@ -156,17 +182,20 @@ export function normalizeWsOptions(ws) {
   )
 
   if (
-    ws.wsUpgradeTimeoutMs != null &&
-    !(Number.isFinite(ws.wsUpgradeTimeoutMs) && ws.wsUpgradeTimeoutMs >= 100 && ws.wsUpgradeTimeoutMs <= 300_000)
+    ws.upgradeTimeoutMs != null &&
+    !(Number.isFinite(ws.upgradeTimeoutMs) && ws.upgradeTimeoutMs >= 100 && ws.upgradeTimeoutMs <= 300_000)
   ) {
-    throw new TypeError('wsUpgradeTimeoutMs must be in range 100 - 300000')
+    throw new TypeError('ws.upgradeTimeoutMs must be in range 100 - 300000')
   }
 
-  const idleTimeout = ws.wsIdleTimeoutSec ?? 15
+  const idleTimeout = ws.idleTimeoutSec ?? 15
 
   if (!(Number.isFinite(idleTimeout) && idleTimeout >= 5)) {
-    throw new TypeError('wsIdleTimeoutSec must be >= 5')
+    throw new TypeError('ws.idleTimeoutSec must be >= 5')
   }
 
-  return ws
+  return {
+    ...ws,
+    maxBodySize: normalizeMaxBodySize(ws.maxBodySize, 'ws')
+  }
 }

@@ -10,7 +10,7 @@ import { getFreePort } from '../../helpers/ports.js'
  */
 export async function startHttpServer({ onRequest, routes, maxBodySize }) {
   const port = await getFreePort()
-  const server = new Server({ http: { onRequest, routes }, port, maxBodySize })
+  const server = new Server({ http: { onRequest, routes, maxBodySize }, port })
 
   await server.listen()
 
@@ -35,9 +35,8 @@ export async function startWsServer({ ws, onRequest, routes, maxBodySize } = {})
   const http = onRequest !== undefined || routes !== undefined ? { onRequest, routes } : null
   const server = new Server({
     port,
-    maxBodySize: maxBodySize ?? 16,
     http,
-    ws
+    ws: ws && { maxBodySize: maxBodySize ?? 16, ...ws }
   })
 
   await server.listen()

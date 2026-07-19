@@ -126,7 +126,7 @@ export default class HttpRuntime {
 
     this.#lifecycle.activeHttp++
 
-    const ctx = this.contextPool.acquire().reset(res, req, server, server.maxBodyBytes)
+    const ctx = this.contextPool.acquire().reset(res, req, server, server.httpMaxBodyBytes)
 
     res.onAborted(ctx.onAbort)
     ctx.handlerPending = true

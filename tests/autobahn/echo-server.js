@@ -7,9 +7,9 @@ import Server from '../../src/index.js'
 export async function startEchoServer(port = 9001) {
   const server = new Server({
     port,
-    maxBodySize: 64,
     http: null,
     ws: {
+      maxBodySize: 64,
       onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
     }
   })

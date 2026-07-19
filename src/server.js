@@ -21,11 +21,10 @@ export default class Server {
 
   /**
    * @param {object} [opt]
-   * @param {{onRequest?: (ctx: import('./http-context.js').default) => unknown|Promise<unknown>, routes?: import('./server/options.js').Route[], onError?: (ctx: import('./http-context.js').default, err: Error) => unknown|Promise<unknown>}|null} [opt.http]
+   * @param {{onRequest?: (ctx: import('./http-context.js').default) => unknown|Promise<unknown>, routes?: import('./server/options.js').Route[], onError?: (ctx: import('./http-context.js').default, err: Error) => unknown|Promise<unknown>, maxBodySize?: number}|null} [opt.http]
    * @param {(err: Error) => unknown|Promise<unknown>} [opt.onServerError]
    * @param {string} [opt.host]
    * @param {number} [opt.port]
-   * @param {number} [opt.maxBodySize]
    * @param {import('./server/options.js').WSOptions|null} [opt.ws]
    */
   constructor(opt = {}) {
@@ -43,7 +42,11 @@ export default class Server {
       throw new TypeError('backend is no longer configurable; swm-uws is always used')
     }
 
-    const { http: httpOptions, onServerError, host = '127.0.0.1', port = 6000, maxBodySize = 1, ws: wsOptions } = opt
+    if ('maxBodySize' in opt) {
+      throw new TypeError('maxBodySize is no longer a server option; use http.maxBodySize and ws.maxBodySize')
+    }
+
+    const { http: httpOptions, onServerError, host = '127.0.0.1', port = 6000, ws: wsOptions } = opt
     const http = normalizeHttpOptions(httpOptions)
     const ws = normalizeWsOptions(wsOptions)
 
@@ -59,10 +62,6 @@ export default class Server {
       throw new TypeError('Host must be a non-empty string')
     }
 
-    if (!(Number.isFinite(maxBodySize) && maxBodySize >= 1 && maxBodySize <= 64)) {
-      throw new TypeError('Max body size must be in range 1 - 64')
-    }
-
     if (onServerError !== undefined && typeof onServerError !== 'function') {
       throw new TypeError('onServerError must be a function')
     }
@@ -71,7 +70,8 @@ export default class Server {
     this.port = port
     this.http = http
     this.ws = ws
-    this.maxBodyBytes = Math.floor(maxBodySize * 1024 * 1024)
+    this.httpMaxBodyBytes = Math.floor((http?.maxBodySize ?? 1) * 1024 * 1024)
+    this.wsMaxPayloadBytes = Math.floor((ws?.maxBodySize ?? 1) * 1024 * 1024)
 
     this.httpErrorHandler = http?.onError ?? NOOP
     this.onServerError = typeof onServerError === 'function' ? onServerError : NOOP
@@ -87,8 +87,8 @@ export default class Server {
     this.wsUpgradeTimeoutMs = 10_000
 
     if (ws) {
-      this.wsIdleTimeoutSec = Math.floor(ws.wsIdleTimeoutSec ?? 15)
-      this.wsUpgradeTimeoutMs = Math.floor(ws.wsUpgradeTimeoutMs ?? 10_000)
+      this.wsIdleTimeoutSec = Math.floor(ws.idleTimeoutSec ?? 15)
+      this.wsUpgradeTimeoutMs = Math.floor(ws.upgradeTimeoutMs ?? 10_000)
       this.wsConnectionKey = ws.connectionKey ?? null
     }
 

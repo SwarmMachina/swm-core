@@ -356,7 +356,7 @@ export default class WebSocketRuntime {
       idleTimeout: server.wsIdleTimeoutSec,
       upgradeTimeout: server.wsUpgradeTimeoutMs,
       sendPingsAutomatically: true,
-      maxPayloadLength: server.maxBodyBytes,
+      maxPayloadLength: server.wsMaxPayloadBytes,
       open: this.onOpen,
       message: this.onMessage,
       dropped: this.onDropped,
