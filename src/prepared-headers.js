@@ -11,7 +11,6 @@ export function assertHeaderValue(value) {
 }
 
 /**
- * Validate and compile a reusable response-header block.
  * @param {Record<string, string|string[]|null|undefined>} headers
  * @returns {object}
  */
@@ -69,7 +68,6 @@ export function prepareHeaders(headers) {
 }
 
 /**
- * Internal authenticity check and compiled representation lookup.
  * @param {unknown} value
  * @returns {{groups: ReadonlyArray<object>, lines: ReadonlyArray<string>}|undefined}
  */

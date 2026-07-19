@@ -19,15 +19,28 @@ import crypto from 'node:crypto'
  */
 const TESTS = new Map([
   [
-    'base',
+    'base-sync',
     {
-      name: 'base',
+      name: 'base-sync',
       method: 'GET',
-      path: '/base',
+      path: '/base-sync',
       duration: 10,
       connections: 100,
       pipelining: 10,
-      description: 'Basic JSON response test',
+      description: 'Synchronous JSON response test',
+      payload: { ok: true }
+    }
+  ],
+  [
+    'base-async',
+    {
+      name: 'base-async',
+      method: 'GET',
+      path: '/base-async',
+      duration: 10,
+      connections: 100,
+      pipelining: 10,
+      description: 'Asynchronous JSON response test',
       payload: { ok: true }
     }
   ],

@@ -1,6 +1,6 @@
-export default class ContextPool {
-  #inPool = new WeakSet()
+const POOLED_BY = Symbol('ContextPool.pooledBy')
 
+export default class ContextPool {
   /**
    * @param {(pool: ContextPool) => object} createFn
    * @param {number} maxSize
@@ -18,12 +18,16 @@ export default class ContextPool {
     const ctx = this.pool.pop()
 
     if (ctx) {
-      this.#inPool.delete(ctx)
+      ctx[POOLED_BY] = null
 
       return ctx
     }
 
-    return this.createFn(this)
+    const created = this.createFn(this)
+
+    created[POOLED_BY] = null
+
+    return created
   }
 
   /**
@@ -32,6 +36,10 @@ export default class ContextPool {
   release(ctx) {
     if (!ctx || typeof ctx.clear !== 'function') {
       throw new TypeError('ContextPool.release: ctx.clear() is required')
+    }
+
+    if (ctx[POOLED_BY] === this) {
+      return
     }
 
     ctx.clear()
@@ -44,16 +52,19 @@ export default class ContextPool {
       return
     }
 
-    if (this.#inPool.has(ctx)) {
-      return
-    }
-
-    this.#inPool.add(ctx)
+    ctx[POOLED_BY] = this
     this.pool.push(ctx)
   }
 
   clear() {
+    for (let i = 0; i < this.pool.length; i++) {
+      const ctx = this.pool[i]
+
+      if (ctx[POOLED_BY] === this) {
+        ctx[POOLED_BY] = null
+      }
+    }
+
     this.pool.length = 0
-    this.#inPool = new WeakSet()
   }
 }

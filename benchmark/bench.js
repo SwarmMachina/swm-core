@@ -24,7 +24,7 @@ function parseBenchArgs(argv) {
   return parseArgs(
     argv,
     {
-      testName: 'base',
+      testName: 'base-sync',
       frameworks: [...BASE_ORDER],
       runs: 1,
       warmup: 10,

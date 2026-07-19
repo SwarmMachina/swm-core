@@ -29,11 +29,11 @@ const PARAMS = {
 const CORE = { candidate: 'core-swm-uws', reference: 'core-uwebsockets' }
 const RAW = { candidate: 'raw-swm-uws', reference: 'raw-uwebsockets' }
 const SCENARIOS = [
-  { name: 'http-core-c10-p1', kind: 'http', test: 'base', pair: CORE, connections: 10, pipelining: 1 },
-  { name: 'http-core-c100-p1', kind: 'http', test: 'base', pair: CORE, connections: 100, pipelining: 1 },
-  { name: 'http-core-c100-p10', kind: 'http', test: 'base', pair: CORE, connections: 100, pipelining: 10 },
-  { name: 'http-raw-c100-p1', kind: 'http', test: 'base', pair: RAW, connections: 100, pipelining: 1 },
-  { name: 'http-raw-c100-p10', kind: 'http', test: 'base', pair: RAW, connections: 100, pipelining: 10 },
+  { name: 'http-core-c10-p1', kind: 'http', test: 'base-sync', pair: CORE, connections: 10, pipelining: 1 },
+  { name: 'http-core-c100-p1', kind: 'http', test: 'base-sync', pair: CORE, connections: 100, pipelining: 1 },
+  { name: 'http-core-c100-p10', kind: 'http', test: 'base-sync', pair: CORE, connections: 100, pipelining: 10 },
+  { name: 'http-raw-c100-p1', kind: 'http', test: 'base-sync', pair: RAW, connections: 100, pipelining: 1 },
+  { name: 'http-raw-c100-p10', kind: 'http', test: 'base-sync', pair: RAW, connections: 100, pipelining: 10 },
   { name: 'http-headers-c100-p10', kind: 'http', test: 'headers', pair: CORE, connections: 100, pipelining: 10 },
   { name: 'http-post-c100-p1', kind: 'http', test: 'post-base', pair: CORE, connections: 100, pipelining: 1 },
   { name: 'ws-core-closed-c50', kind: 'ws', pair: CORE, connections: 50, mode: 'closed', depth: 1 },

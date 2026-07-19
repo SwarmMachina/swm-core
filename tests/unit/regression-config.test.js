@@ -13,9 +13,9 @@ const baseline = {
   }
 }
 
-test('HTTP regression parameters default to the calibrated baseline', () => {
+test('HTTP regression parameters default to the baseline configuration', () => {
   deepStrictEqual(resolveHttpParams(baseline, {}), {
-    tests: ['base', 'headers', 'headers-prepared', 'post-base'],
+    tests: ['base-sync', 'base-async', 'headers', 'headers-prepared', 'post-base'],
     runs: 5,
     warmup: 4,
     duration: 12,

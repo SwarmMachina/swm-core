@@ -1,7 +1,6 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import runLoad from './helpers/run-load.js'
-import shuffle from './helpers/shuffle.js'
 import { formatYmdHms } from './helpers/format.js'
 import timed from './helpers/timed-fn.js'
 import median from './helpers/median.js'
@@ -10,17 +9,17 @@ import waitForMessage from './helpers/wait-for-message.js'
 import { startServer, stopServer } from './helpers/server-proc.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-// 'plain' = native route, handler only; 'pre' = same route plus a no-op preHandler.
-const VARIANTS = ['plain', 'pre']
+// 'plain' = native route, handler only; 'before' = same route plus a synchronous no-op hook.
+const VARIANTS = ['plain', 'before']
 
 /**
  * @param {string[]} argv
  * @returns {object}
  */
-function parsePrehandlerArgs(argv) {
+function parseBeforeArgs(argv) {
   return parseArgs(
     argv,
-    { runs: 3, warmup: 3, duration: 6, connections: 100, sampleMs: 250 },
+    { runs: 4, warmup: 3, duration: 6, connections: 100, pipelining: 10, sampleMs: 250 },
     {
       '--runs': (out, v) => {
         out.runs = Number(v)
@@ -33,6 +32,9 @@ function parsePrehandlerArgs(argv) {
       },
       '--connections': (out, v) => {
         out.connections = Number(v)
+      },
+      '--pipelining': (out, v) => {
+        out.pipelining = Number(v)
       },
       '--sample-ms': (out, v) => {
         out.sampleMs = Number(v)
@@ -47,17 +49,18 @@ function parsePrehandlerArgs(argv) {
  * @param {number} params.warmupSec
  * @param {number} params.durationSec
  * @param {number} params.connections
+ * @param {number} params.pipelining
  * @param {number} params.runIndex
  * @param {number} params.sampleMs
  * @param {string} params.runStamp
  * @returns {Promise<object>}
  */
-async function runOne({ variant, warmupSec, durationSec, connections, runIndex, sampleMs, runStamp }) {
+async function runOne({ variant, warmupSec, durationSec, connections, pipelining, runIndex, sampleMs, runStamp }) {
   const { proc, port } = await startServer({
     benchDir: __dirname,
-    serverName: 'prehandler-server.js',
+    serverName: 'before-server.js',
     fw: variant,
-    testName: 'prehandler',
+    testName: 'before',
     runIndex,
     v8prof: false,
     runStamp
@@ -68,7 +71,7 @@ async function runOne({ variant, warmupSec, durationSec, connections, runIndex, 
     url,
     duration: durationSec,
     connections,
-    pipelining: 1,
+    pipelining,
     verbose: false,
     safe: false
   }
@@ -93,6 +96,7 @@ async function runOne({ variant, warmupSec, durationSec, connections, runIndex, 
     variant,
     rps: r.requests?.average || 0,
     latAvgMs: r.latency?.average ?? null,
+    latP97_5Ms: r.latency?.p97_5 ?? null,
     latP99Ms: r.latency?.p99 ?? null,
     errors: r.errors || 0,
     rssMB: m?.memMB?.rssPeak ?? null,
@@ -106,23 +110,27 @@ async function runOne({ variant, warmupSec, durationSec, connections, runIndex, 
  *
  */
 async function main() {
-  const args = parsePrehandlerArgs(process.argv)
+  const args = parseBeforeArgs(process.argv)
   const runStamp = formatYmdHms()
   const per = Object.fromEntries(VARIANTS.map((v) => [v, []]))
 
   console.log(
-    `Run prehandler bench: variants:${VARIANTS.join(',')}, connections:${args.connections}, duration:${args.duration}, runs:${args.runs}`
+    `Run before-hook bench: variants:${VARIANTS.join(',')}, connections:${args.connections}, ` +
+      `pipelining:${args.pipelining}, duration:${args.duration}, runs:${args.runs}`
   )
 
   for (let i = 0; i < args.runs; i++) {
     console.log(`\n== run ${i + 1}/${args.runs} ==`)
 
-    for (const variant of shuffle(VARIANTS.slice())) {
+    const order = i % 2 === 0 ? VARIANTS : VARIANTS.slice().reverse()
+
+    for (const variant of order) {
       const row = await runOne({
         variant,
         warmupSec: args.warmup,
         durationSec: args.duration,
         connections: args.connections,
+        pipelining: args.pipelining,
         runIndex: i,
         sampleMs: args.sampleMs,
         runStamp
@@ -131,7 +139,7 @@ async function main() {
       per[variant].push(row)
 
       console.log(
-        `[prehandler-bench] ${variant}: rps=${Math.round(row.rps)} ` +
+        `[before-bench] ${variant}: rps=${Math.round(row.rps)} ` +
           `p99=${row.latP99Ms != null ? row.latP99Ms.toFixed(2) : 'n/a'}ms ` +
           `heap=${row.heapMB != null ? row.heapMB.toFixed(0) : 'n/a'}MB errors=${row.errors}`
       )
@@ -151,6 +159,7 @@ async function main() {
       variant,
       rps: med('rps') != null ? Math.round(med('rps')) : null,
       latAvgMs: round(med('latAvgMs'), 3),
+      latP97_5Ms: round(med('latP97_5Ms'), 3),
       latP99Ms: round(med('latP99Ms'), 3),
       rssMB: round(med('rssMB'), 1),
       heapMB: round(med('heapMB'), 1),
@@ -163,14 +172,14 @@ async function main() {
   console.table(medians)
 
   const plain = medians.find((m) => m.variant === 'plain')
-  const pre = medians.find((m) => m.variant === 'pre')
+  const before = medians.find((m) => m.variant === 'before')
 
-  if (plain?.rps && pre?.rps) {
-    const rpsDelta = ((pre.rps - plain.rps) / plain.rps) * 100
-    const heapDelta = plain.heapMB != null && pre.heapMB != null ? pre.heapMB - plain.heapMB : null
+  if (plain?.rps && before?.rps) {
+    const rpsDelta = ((before.rps - plain.rps) / plain.rps) * 100
+    const heapDelta = plain.heapMB != null && before.heapMB != null ? before.heapMB - plain.heapMB : null
 
     console.log(
-      `\npreHandler overhead vs plain: rps ${rpsDelta >= 0 ? '+' : ''}${rpsDelta.toFixed(1)}%` +
+      `\nbefore-hook overhead vs plain: rps ${rpsDelta >= 0 ? '+' : ''}${rpsDelta.toFixed(1)}%` +
         (heapDelta != null ? `, heap ${heapDelta >= 0 ? '+' : ''}${heapDelta.toFixed(1)}MB` : '')
     )
   }

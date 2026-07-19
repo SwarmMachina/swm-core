@@ -505,6 +505,84 @@ describe('Server', () => {
       strictEqual(routeCalls[2].path, '/p')
     })
 
+    test('should keep synchronous before hooks on the synchronous response path', async () => {
+      const order = []
+      const server = makeServer({
+        routes: [
+          {
+            method: 'get',
+            path: '/x',
+            before: [() => order.push('before-1'), () => order.push('before-2')],
+            handler: () => {
+              order.push('handler')
+
+              return 'ok'
+            }
+          }
+        ]
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((c) => c.path === '/x')
+      const res = createMockHttpResponse()
+
+      routeCall.handler(res, createMockHttpRequest())
+
+      deepStrictEqual(order, ['before-1', 'before-2', 'handler'])
+      strictEqual(res.isEnded(), true)
+      strictEqual(server.httpContextPool.pool.length, 1)
+    })
+
+    test('should switch to the asynchronous path only when a before hook returns a promise', async () => {
+      const order = []
+
+      let resume
+
+      const pending = new Promise((resolve) => {
+        resume = resolve
+      })
+      const server = makeServer({
+        routes: [
+          {
+            method: 'get',
+            path: '/x',
+            before: [
+              () => order.push('sync-before'),
+              () => {
+                order.push('async-before')
+
+                return pending
+              },
+              () => order.push('after-await')
+            ],
+            handler: () => {
+              order.push('handler')
+
+              return 'ok'
+            }
+          }
+        ]
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((c) => c.path === '/x')
+      const res = createMockHttpResponse()
+
+      routeCall.handler(res, createMockHttpRequest())
+
+      deepStrictEqual(order, ['sync-before', 'async-before'])
+      strictEqual(res.isEnded(), false)
+
+      resume()
+      await new Promise((resolve) => setImmediate(resolve))
+
+      deepStrictEqual(order, ['sync-before', 'async-before', 'after-await', 'handler'])
+      strictEqual(res.isEnded(), true)
+      strictEqual(server.httpContextPool.pool.length, 1)
+    })
+
     test('should pre-cache route params so async handlers see them after await, not a stale req', async () => {
       let paramById
       let paramByIndex
@@ -561,14 +639,14 @@ describe('Server', () => {
       })
     })
 
-    test('should not finalize the context or skip the chain when a preHandler starts streaming', async () => {
+    test('should not finalize the context or skip the chain when a before hook starts streaming', async () => {
       let mainHandlerCalled = false
 
       const routes = [
         {
           method: 'get',
           path: '/x',
-          preHandler: (ctx) => {
+          before: (ctx) => {
             ctx.startStreaming(200)
           },
           handler: (ctx) => {
@@ -593,21 +671,30 @@ describe('Server', () => {
       strictEqual(mainHandlerCalled, true)
     })
 
-    test('should throw on invalid preHandler (not a function)', () => {
-      const routes = [{ method: 'get', path: '/x', handler: () => {}, preHandler: 'nope' }]
+    test('should throw on invalid before hook (not a function)', () => {
+      const routes = [{ method: 'get', path: '/x', handler: () => {}, before: 'nope' }]
 
       throws(() => makeServer({ routes }), {
         name: 'TypeError',
-        message: 'Route preHandler must be a function or an array of functions'
+        message: 'Route before must be a function or an array of functions'
       })
     })
 
-    test('should throw when a preHandler array contains a non-function', () => {
-      const routes = [{ method: 'get', path: '/x', handler: () => {}, preHandler: [() => {}, 42] }]
+    test('should throw when a before array contains a non-function', () => {
+      const routes = [{ method: 'get', path: '/x', handler: () => {}, before: [() => {}, 42] }]
 
       throws(() => makeServer({ routes }), {
         name: 'TypeError',
-        message: 'Route preHandler must be a function or an array of functions'
+        message: 'Route before must be a function or an array of functions'
+      })
+    })
+
+    test('should reject the legacy preHandler route option', () => {
+      const routes = [{ method: 'get', path: '/x', handler: () => {}, preHandler: () => {} }]
+
+      throws(() => makeServer({ routes }), {
+        name: 'TypeError',
+        message: 'http.routes[0].preHandler is no longer supported; use before'
       })
     })
 
@@ -651,7 +738,7 @@ describe('Server', () => {
       strictEqual(wsCall.config.upgradeTimeout, 10_000)
     })
 
-    test('should pass custom wsUpgradeTimeoutMs to the backend', async () => {
+    test('should pass custom wsUpgradeTimeoutMs to the transport', async () => {
       const server = makeServer({
         onRequest: () => {},
         ws: { wsUpgradeTimeoutMs: 2500 }
@@ -747,82 +834,6 @@ describe('Server', () => {
       )
 
       deepStrictEqual(receivedArgs, ['a', 'b', 123])
-    })
-  })
-
-  describe('safeWsError()', () => {
-    test('should call onWsError handler', async () => {
-      let called = false
-      let receivedCtx = null
-      let receivedErr = null
-
-      const server = makeServer({
-        onRequest: () => {},
-        ws: {
-          onError: (ctx, err) => {
-            called = true
-            receivedCtx = ctx
-            receivedErr = err
-          }
-        }
-      })
-      const ctx = { test: 'context' }
-      const err = new Error('test error')
-
-      await server.safeWsError(ctx, err)
-
-      strictEqual(called, true)
-      strictEqual(receivedCtx, ctx)
-      strictEqual(receivedErr, err)
-    })
-
-    test('should swallow errors from onWsError', async () => {
-      const server = makeServer({
-        onRequest: () => {},
-        ws: {
-          onError: () => {
-            throw new Error('handler error')
-          }
-        }
-      })
-
-      await server.safeWsError(null, new Error('test'))
-    })
-  })
-
-  describe('safeHttpError()', () => {
-    test('should call the HTTP error handler', async () => {
-      let called = false
-      let receivedCtx = null
-      let receivedErr = null
-
-      const server = makeServer({
-        onRequest: () => {},
-        httpError: (ctx, err) => {
-          called = true
-          receivedCtx = ctx
-          receivedErr = err
-        }
-      })
-      const ctx = { test: 'context' }
-      const err = new Error('test error')
-
-      await server.safeHttpError(ctx, err)
-
-      strictEqual(called, true)
-      strictEqual(receivedCtx, ctx)
-      strictEqual(receivedErr, err)
-    })
-
-    test('should swallow errors from the HTTP error handler', async () => {
-      const server = makeServer({
-        onRequest: () => {},
-        httpError: () => {
-          throw new Error('handler error')
-        }
-      })
-
-      await server.safeHttpError({}, new Error('test'))
     })
   })
 
@@ -1511,7 +1522,7 @@ describe('Server', () => {
       strictEqual(res.isUpgraded(), false)
     })
 
-    test('should return 403 and call safeWsError when onUpgrade throws', async () => {
+    test('should return 403 and call ws.onError when onUpgrade throws', async () => {
       const error = new Error('x')
 
       let errorCalled = false
@@ -1759,7 +1770,7 @@ describe('Server', () => {
       strictEqual(res2.isEnded(), false)
     })
 
-    test('should sendError and safeHttpError when handler throws (sync), and finalize when not streaming', async () => {
+    test('should sendError and call http.onError when handler throws (sync), and finalize when not streaming', async () => {
       let safeErrCalled = 0
       let finalizeCalled = 0
 
@@ -1850,7 +1861,7 @@ describe('Server', () => {
       strictEqual(finalizeCalled, 1)
     })
 
-    test('should handle promise reject via ctx.onReject, sendError, safeHttpError, and finalize if not streaming', async () => {
+    test('should handle promise reject via ctx.onReject, sendError, http.onError, and finalize', async () => {
       let safeErrCalled = 0
       let finalizeCalled = 0
 
@@ -1881,7 +1892,7 @@ describe('Server', () => {
       strictEqual(finalizeCalled, 1)
     })
 
-    test('when promise resolves but ctx.send throws, it should sendError(500) and safeHttpError called', async () => {
+    test('when promise resolves but ctx.send throws, it should sendError(500) and call http.onError', async () => {
       let safeErrCalled = 0
 
       const server = makeServer({
@@ -1967,7 +1978,7 @@ describe('Server', () => {
       strictEqual(calls, 4)
     })
 
-    test('onMessage: should call handler and swallow errors into safeWsError when handler throws', async () => {
+    test('onMessage: should call handler and route thrown errors to ws.onError', async () => {
       let errorCalled = 0
 
       const server = makeServer({
@@ -1991,7 +2002,7 @@ describe('Server', () => {
       strictEqual(errorCalled, 1)
     })
 
-    test('onMessage: async reject should call safeWsError', async () => {
+    test('onMessage: async reject should call ws.onError', async () => {
       let errorCalled = 0
 
       const server = makeServer({

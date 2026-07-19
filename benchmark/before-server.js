@@ -36,24 +36,24 @@ const { fw, port } = parseArgs(
     }
   }
 )
-const payload = TESTS.get('base').payload
+const payload = TESTS.get('base-sync').payload
 const noop = () => {}
 
 /**
  *
  */
 async function main() {
-  if (fw !== 'plain' && fw !== 'pre') {
-    throw new Error(`Unknown --fw=${fw} (prehandler-server supports: plain, pre)`)
+  if (fw !== 'plain' && fw !== 'before') {
+    throw new Error(`Unknown --fw=${fw} (before-server supports: plain, before)`)
   }
 
   const { default: Server } = await import('../src/index.js')
-  // Same native route both ways; the 'pre' variant only adds a no-op preHandler so
-  // the measured delta isolates the composed-handler (async wrapper) cost.
+  // Same native route both ways; the 'before' variant only adds a synchronous
+  // no-op hook so the measured delta isolates sync composition overhead.
   const route = { method: 'get', path: '/', handler: () => payload }
 
-  if (fw === 'pre') {
-    route.preHandler = noop
+  if (fw === 'before') {
+    route.before = noop
   }
 
   const server = new Server({ port, http: { routes: [route], onError: console.error } })

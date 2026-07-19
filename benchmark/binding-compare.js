@@ -213,12 +213,12 @@ function renderSuite(suite, throughputLabel, candidate, reference, tailKey, tail
  * @returns {Promise<object>}
  */
 async function runHttp(outDir) {
-  const jsonOut = path.join(outDir, 'http-base.json')
+  const jsonOut = path.join(outDir, 'http-base-sync.json')
 
   await runChild([
     path.join(__dirname, 'bench.js'),
     '--test',
-    'base',
+    'base-sync',
     '--fw',
     FRAMEWORKS,
     '--runs',
@@ -305,7 +305,7 @@ async function main() {
   const http = await runHttp(outDir)
   const ws = await runWs(outDir)
   const failures = [
-    ...guard('http/base', http.candidate, http.reference, 'latencyP97_5Ms', 'p97.5'),
+    ...guard('http/base-sync', http.candidate, http.reference, 'latencyP97_5Ms', 'p97.5'),
     ...guard('ws/echo', ws.candidate, ws.reference, 'latencyP95Ms', 'p95')
   ]
   const status = failures.length ? 'fail' : 'pass'
@@ -333,7 +333,7 @@ async function main() {
       `HTTP connections=${PARAMS.httpConnections}, pipelining=${PARAMS.httpPipelining}, ` +
       `WS connections=${PARAMS.wsConnections}, message=${PARAMS.wsMessageBytes}B, sample=${PARAMS.sampleMs}ms.`,
     '',
-    renderSuite('http / base', 'req/s', http.candidate, http.reference, 'latencyP97_5Ms', 'p97.5'),
+    renderSuite('http / base-sync', 'req/s', http.candidate, http.reference, 'latencyP97_5Ms', 'p97.5'),
     renderSuite('ws / echo', 'msg/s', ws.candidate, ws.reference, 'latencyP95Ms', 'p95'),
     failures.length ? `Failures:\n\n${failures.map((failure) => `- ${failure}`).join('\n')}` : 'All guards passed.'
   ].join('\n')

@@ -38,6 +38,15 @@ const { fw, port } = parseArgs(
   }
 )
 const HEADERS_TEST = TESTS.get('headers')
+const BASE_SYNC_TEST = TESTS.get('base-sync')
+const BASE_ASYNC_TEST = TESTS.get('base-async')
+
+/**
+ * @returns {Promise<unknown>}
+ */
+async function getAsyncPayload() {
+  return BASE_ASYNC_TEST.payload
+}
 
 /**
  * @param {import('../src/http-context.js').default} ctx
@@ -68,12 +77,16 @@ function sendReady(port) {
 async function runCore(port, backend) {
   const { default: Server, prepareHeaders } = await import('../src/index.js')
   const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
-  const onRequest = async (ctx) => {
+  const onRequest = (ctx) => {
     const method = ctx.method()
     const url = ctx.url()
 
-    if (method === 'get' && url === '/base') {
-      return TESTS.get('base').payload
+    if (method === 'get' && url === '/base-sync') {
+      return BASE_SYNC_TEST.payload
+    }
+
+    if (method === 'get' && url === '/base-async') {
+      return getAsyncPayload()
     }
 
     if (method === 'get' && url === '/headers') {
@@ -85,7 +98,7 @@ async function runCore(port, backend) {
     }
 
     if (method === 'post' && url === '/base') {
-      return await ctx.json()
+      return ctx.json()
     }
 
     ctx.status(404)
@@ -114,8 +127,24 @@ async function runRawBinding(port) {
   const { App, us_listen_socket_close } = await import('#uws-binding')
   const app = App()
 
-  app.get('/base', (res) => {
+  app.get('/base-sync', (res) => {
     res.writeHeader('content-type', 'application/json').end('{"ok":true}')
+  })
+
+  app.get('/base-async', (res) => {
+    let aborted = false
+
+    res.onAborted(() => {
+      aborted = true
+    })
+
+    void Promise.resolve().then(() => {
+      if (!aborted) {
+        res.cork(() => {
+          res.writeHeader('content-type', 'application/json').end('{"ok":true}')
+        })
+      }
+    })
   })
 
   app.get('/headers', (res) => {
@@ -201,7 +230,11 @@ async function main() {
     app.set('etag', false)
     app.use(express.json())
 
-    app.get('/base', (req, res) => res.status(200).json(TESTS.get('base').payload))
+    app.get('/base-sync', (req, res) => res.status(200).json(BASE_SYNC_TEST.payload))
+    app.get('/base-async', async (req, res) => {
+      await Promise.resolve()
+      res.status(200).json(BASE_ASYNC_TEST.payload)
+    })
     app.get('/headers', (req, res) => {
       res.set('content-type', HEADERS_TEST.responseHeaders['content-type'])
       res.set('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
@@ -231,8 +264,9 @@ async function main() {
     const { default: Fastify } = await import('fastify')
     const fastify = Fastify({ logger: false })
 
-    fastify.get('/base', async () => TESTS.get('base').payload)
-    fastify.get('/headers', async (req, reply) => {
+    fastify.get('/base-sync', () => BASE_SYNC_TEST.payload)
+    fastify.get('/base-async', async () => BASE_ASYNC_TEST.payload)
+    fastify.get('/headers', (req, reply) => {
       reply.header('content-type', HEADERS_TEST.responseHeaders['content-type'])
       reply.header('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
       reply.header('x-trace-id', HEADERS_TEST.responseHeaders['x-trace-id'])
@@ -241,11 +275,11 @@ async function main() {
       reply.header('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
       reply.code(200).send(HEADERS_TEST.responseText)
     })
-    fastify.get('/headers-prepared', async (req, reply) => {
+    fastify.get('/headers-prepared', (req, reply) => {
       reply.headers(HEADERS_TEST.responseHeaders)
       reply.code(200).send(HEADERS_TEST.responseText)
     })
-    fastify.post('/base', async (req) => req.body)
+    fastify.post('/base', (req) => req.body)
 
     fastify.setNotFoundHandler((req, reply) => reply.code(404).send('Not Found'))
 
@@ -262,9 +296,13 @@ async function main() {
 
   if (fw === 'micro') {
     const { serve, json } = await import('micro')
-    const router = async (req, res) => {
-      if (req.method === 'GET' && req.url === '/base') {
-        return TESTS.get('base').payload
+    const router = (req, res) => {
+      if (req.method === 'GET' && req.url === '/base-sync') {
+        return BASE_SYNC_TEST.payload
+      }
+
+      if (req.method === 'GET' && req.url === '/base-async') {
+        return Promise.resolve(BASE_ASYNC_TEST.payload)
       }
 
       if (req.method === 'GET' && (req.url === '/headers' || req.url === '/headers-prepared')) {
@@ -278,7 +316,7 @@ async function main() {
       }
 
       if (req.method === 'POST' && req.url === '/base') {
-        return await json(req)
+        return json(req)
       }
 
       res.statusCode = 404

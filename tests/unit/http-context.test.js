@@ -2054,7 +2054,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeHttpError() {
+        safeCall() {
           /* noop */
         }
       }
@@ -2088,7 +2088,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           /* noop */
         },
-        safeHttpError() {
+        safeCall() {
           /* noop */
         }
       }
@@ -2116,7 +2116,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeHttpError() {
+        safeCall() {
           safeErrCount++
         }
       }
@@ -2139,7 +2139,7 @@ describe('HttpContext', () => {
       strictEqual(safeErrCount, 0)
     })
 
-    test('onResolve should call sendError + safeHttpError if send throws, and still finalize', () => {
+    test('onResolve should call sendError + httpErrorHandler if send throws, and still finalize', () => {
       let finalizeCount = 0
       let safeErrCount = 0
       let lastErr = null
@@ -2148,9 +2148,12 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeHttpError(ctx, err) {
+        httpErrorHandler(ctx, err) {
           safeErrCount++
           lastErr = err
+        },
+        safeCall(fn, ...args) {
+          return fn(...args)
         }
       }
       const ctx = new HttpContext(null)
@@ -2180,7 +2183,7 @@ describe('HttpContext', () => {
       strictEqual(finalizeCount, 1)
     })
 
-    test('onReject should sendError(err), call safeHttpError, and finalize if not streaming', () => {
+    test('onReject should sendError(err), call httpErrorHandler, and finalize if not streaming', () => {
       let finalizeCount = 0
       let safeErrCount = 0
       let lastErr = null
@@ -2189,9 +2192,12 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeHttpError(ctx, err) {
+        httpErrorHandler(ctx, err) {
           safeErrCount++
           lastErr = err
+        },
+        safeCall(fn, ...args) {
+          return fn(...args)
         }
       }
       const ctx = new HttpContext(null)
@@ -2223,7 +2229,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeHttpError() {
+        safeCall() {
           /* noop */
         }
       }
@@ -2254,7 +2260,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeHttpError() {
+        safeCall() {
           /* noop */
         }
       }
@@ -2281,7 +2287,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeHttpError() {
+        safeCall() {
           /* noop */
         }
       }
@@ -2335,7 +2341,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           /* noop */
         },
-        safeHttpError() {
+        safeCall() {
           /* noop */
         }
       }
@@ -2359,7 +2365,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           /* noop */
         },
-        safeHttpError() {
+        safeCall() {
           /* noop */
         }
       }
@@ -2409,7 +2415,7 @@ describe('HttpContext', () => {
           this.finalizeCalls++
           ctx.release()
         },
-        safeHttpError() {
+        safeCall() {
           /* noop */
         }
       }

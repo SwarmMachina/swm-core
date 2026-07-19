@@ -4,17 +4,17 @@
   "benchmark": {
     "name": "http-core-ci",
     "packageName": "@swarmmachina/swm-core",
-    "packageVersion": "1.2.0",
+    "packageVersion": "2.0.3",
     "runner": "benchmark/regression-ci.js",
     "script": "npm run profile:ci -- --suite http",
     "framework": "core"
   },
   "calibration": {
     "status": "self-hosted-calibrated",
-    "updatedAt": "2026-06-14",
-    "node": "24.x",
-    "ciRunner": "self-hosted (dedicated, schedutil)",
-    "note": "Calibrated from 4 self-hosted runs (throughput spread 3-8%, memory <2%). Thresholds sit ~10-15% past the observed floor to catch real regressions. rssMB is report-only."
+    "updatedAt": "2026-07-19",
+    "node": "24.17.x",
+    "ciRunner": "self-hosted (Ubuntu 24.04, Intel Xeon E5-2680 v4, dedicated, schedutil)",
+    "note": "Calibrated from 4 self-hosted series with 3 runs per scenario. Throughput spread was 4-8%; memory was stable. RPS floors sit 11-13% below the slowest series and p99 ceilings tolerate isolated scheduler spikes. rssMB is report-only."
   },
   "parameters": {
     "runs": 3,
@@ -34,24 +34,49 @@
     "rssMB": { "label": "rss peak", "unit": "MB" }
   },
   "tests": {
-    "base": {
-      "description": "GET /base JSON response hot path",
+    "base-sync": {
+      "description": "GET /base-sync synchronous JSON response hot path",
       "observedMedian": {
-        "rps": 115093,
-        "latencyAvgMs": 8.08,
-        "latencyP97_5Ms": 9,
-        "latencyP99Ms": 9.5,
+        "rps": 162571,
+        "latencyAvgMs": 5.87,
+        "latencyP97_5Ms": 6,
+        "latencyP99Ms": 6,
         "errors": 0,
         "eluPct": 97.16,
-        "eventLoopDelayP99Ms": 22.64,
-        "rssMB": 73.08,
-        "heapMB": 10.85,
-        "externalMB": 3.57,
+        "eventLoopDelayP99Ms": 22.1,
+        "rssMB": 73.44,
+        "heapMB": 10.99,
+        "externalMB": 3.63,
         "arrayBuffersMB": 0.04
       },
       "guards": {
-        "rps": { "min": 99000 },
-        "latencyP99Ms": { "max": 20 },
+        "rps": { "min": 140000 },
+        "latencyP99Ms": { "max": 14 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 18 },
+        "externalMB": { "max": 6 },
+        "arrayBuffersMB": { "max": 2 }
+      },
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
+    "base-async": {
+      "description": "GET /base-async asynchronous JSON response hot path",
+      "observedMedian": {
+        "rps": 127269.5,
+        "latencyAvgMs": 7.21,
+        "latencyP97_5Ms": 8,
+        "latencyP99Ms": 9,
+        "errors": 0,
+        "eluPct": 97.19,
+        "eventLoopDelayP99Ms": 23.66,
+        "rssMB": 73.49,
+        "heapMB": 11.07,
+        "externalMB": 3.63,
+        "arrayBuffersMB": 0.04
+      },
+      "guards": {
+        "rps": { "min": 110000 },
+        "latencyP99Ms": { "max": 18 },
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },
         "externalMB": { "max": 6 },
@@ -62,21 +87,21 @@
     "headers": {
       "description": "GET /headers response header staging and repeated Set-Cookie path",
       "observedMedian": {
-        "rps": 103403,
-        "latencyAvgMs": 9.09,
-        "latencyP97_5Ms": 10,
-        "latencyP99Ms": 11,
+        "rps": 117493.5,
+        "latencyAvgMs": 8.06,
+        "latencyP97_5Ms": 9,
+        "latencyP99Ms": 10,
         "errors": 0,
-        "eluPct": 97.25,
-        "eventLoopDelayP99Ms": 24.65,
-        "rssMB": 76.88,
-        "heapMB": 12.04,
-        "externalMB": 3.57,
+        "eluPct": 97.23,
+        "eventLoopDelayP99Ms": 22.82,
+        "rssMB": 77.14,
+        "heapMB": 12.95,
+        "externalMB": 3.63,
         "arrayBuffersMB": 0.04
       },
       "guards": {
-        "rps": { "min": 92000 },
-        "latencyP99Ms": { "max": 22 },
+        "rps": { "min": 102000 },
+        "latencyP99Ms": { "max": 20 },
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },
         "externalMB": { "max": 6 },
@@ -86,32 +111,46 @@
     },
     "headers-prepared": {
       "description": "GET /headers-prepared prevalidated reusable response headers",
-      "calibration": "pending self-hosted calibration",
+      "observedMedian": {
+        "rps": 138048,
+        "latencyAvgMs": 7.01,
+        "latencyP97_5Ms": 7,
+        "latencyP99Ms": 8,
+        "errors": 0,
+        "eluPct": 97.25,
+        "eventLoopDelayP99Ms": 22.41,
+        "rssMB": 72.99,
+        "heapMB": 10.92,
+        "externalMB": 3.63,
+        "arrayBuffersMB": 0.04
+      },
       "guards": {
+        "rps": { "min": 116000 },
+        "latencyP99Ms": { "max": 18 },
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },
         "externalMB": { "max": 6 },
         "arrayBuffersMB": { "max": 2 }
       },
-      "reportOnly": ["rps", "latencyAvgMs", "latencyP97_5Ms", "latencyP99Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
     "post-base": {
       "description": "POST /base JSON body parsing hot path",
       "observedMedian": {
-        "rps": 31508,
-        "latencyAvgMs": 2.6,
-        "latencyP97_5Ms": 5.5,
-        "latencyP99Ms": 5.5,
+        "rps": 33509,
+        "latencyAvgMs": 2.28,
+        "latencyP97_5Ms": 5,
+        "latencyP99Ms": 5,
         "errors": 0,
-        "eluPct": 97.18,
+        "eluPct": 97.14,
         "eventLoopDelayP99Ms": 22.59,
-        "rssMB": 73.72,
-        "heapMB": 10.82,
-        "externalMB": 3.6,
-        "arrayBuffersMB": 0.07
+        "rssMB": 73.98,
+        "heapMB": 10.91,
+        "externalMB": 3.67,
+        "arrayBuffersMB": 0.04
       },
       "guards": {
-        "rps": { "min": 26000 },
+        "rps": { "min": 27500 },
         "latencyP99Ms": { "max": 12 },
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },

@@ -137,7 +137,7 @@ export function makeHttpScenarios() {
       }
     },
     {
-      name: 'prehandler-short-circuit',
+      name: 'before-short-circuit',
       iterations: 300,
       serverOptions(collect) {
         return {
@@ -145,7 +145,7 @@ export function makeHttpScenarios() {
             {
               method: 'get',
               path: '/guard',
-              preHandler: (ctx) => {
+              before: (ctx) => {
                 const marker = makeMarker(nextId++)
 
                 collect(marker)

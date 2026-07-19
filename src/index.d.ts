@@ -28,7 +28,7 @@ export interface Route {
   path: string
   handler: Handler
   /** One handler or a chain, run before `handler`. Replying short-circuits the chain. Declarative `routes` only. */
-  preHandler?: Handler | Handler[]
+  before?: Handler | Handler[]
 }
 
 /**

@@ -6,7 +6,7 @@ import median from '../helpers/median.js'
 import metricGuard from '../helpers/metric-guard.js'
 import runChild from '../helpers/run-child.js'
 
-const TESTS = ['base', 'headers', 'headers-prepared', 'post-base']
+const TESTS = ['base-sync', 'base-async', 'headers', 'headers-prepared', 'post-base']
 
 /**
  * @param {string} name

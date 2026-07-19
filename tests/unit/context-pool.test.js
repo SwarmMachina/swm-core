@@ -79,7 +79,7 @@ describe('ContextPool', () => {
       strictEqual(receivedPool, pool)
     })
 
-    test('should allow re-release after acquire (acquire must remove ctx from inPool tracking)', () => {
+    test('should allow re-release after acquire (acquire must reset pool tracking)', () => {
       let idCounter = 0
 
       const createFn = () => ({ id: ++idCounter, clear: () => {} })
@@ -191,7 +191,7 @@ describe('ContextPool', () => {
       strictEqual(pool.pool.includes(ctx3), false)
     })
 
-    test('should call clear on context when releasing and be idempotent for pool', () => {
+    test('should clear once and make duplicate release a no-op', () => {
       let clearCallCount = 0
       let idCounter = 0
 
@@ -212,7 +212,7 @@ describe('ContextPool', () => {
       strictEqual(pool.pool.length, 1)
 
       pool.release(ctx)
-      strictEqual(clearCallCount, 2)
+      strictEqual(clearCallCount, 1)
       strictEqual(pool.pool.length, 1)
     })
 

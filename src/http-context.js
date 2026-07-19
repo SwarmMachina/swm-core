@@ -17,6 +17,8 @@ export default class HttpContext {
   #statusOverride = null
   #contentLength = undefined
   #pendingHeaders = new Map()
+  #cleared = false
+  #responseBatch = false
   #bodyParser = new BodyParser()
   #resStreamer = new ResStreamer()
 
@@ -61,7 +63,7 @@ export default class HttpContext {
         }
       }
 
-      void this.server.safeHttpError(this, err)
+      void this.server.safeCall(this.server.httpErrorHandler, this, err)
     }
 
     if (!this.streaming) {
@@ -89,7 +91,7 @@ export default class HttpContext {
       }
     }
 
-    void this.server.safeHttpError(this, err)
+    void this.server.safeCall(this.server.httpErrorHandler, this, err)
 
     if (!this.streaming) {
       this.finalize()
@@ -124,6 +126,25 @@ export default class HttpContext {
    * @returns {HttpContext}
    */
   reset(res, req, server, maxSize = 1024 * 1024 * 16) {
+    if (!this.#cleared) {
+      this.#statusOverride = null
+      this.#contentLength = undefined
+      this.#pendingHeaders.clear()
+      this.#ip = ''
+      this.#url = ''
+      this.#method = ''
+      this.#headersCached = false
+      this.#headers = {}
+      this.#fullQuery = ''
+      this.#fullQueryCached = false
+      this.#fullQueryParsed = false
+      this.#query = {}
+      this.#params = {}
+    }
+
+    this.#cleared = false
+    this.#responseBatch = server?.bindingCapabilities?.responseBatch === true
+
     this.res = res
     this.req = req
     this.server = server
@@ -136,21 +157,6 @@ export default class HttpContext {
     this.asyncPending = false
     this.releasePending = false
     this.onWritableCallback = null
-
-    this.#statusOverride = null
-    this.#contentLength = undefined
-    this.#pendingHeaders.clear()
-
-    this.#ip = ''
-    this.#url = ''
-    this.#method = ''
-    this.#headersCached = false
-    this.#headers = {}
-    this.#fullQuery = ''
-    this.#fullQueryCached = false
-    this.#fullQueryParsed = false
-    this.#query = {}
-    this.#params = {}
 
     this.#bodyParser.reset(this, maxSize)
     this.#resStreamer.reset(this, res)
@@ -174,22 +180,27 @@ export default class HttpContext {
     this.releasePending = false
     this.onWritableCallback = null
 
-    this.#statusOverride = null
-    this.#contentLength = undefined
-    this.#pendingHeaders.clear()
-    this.#ip = ''
-    this.#url = ''
-    this.#method = ''
-    this.#headersCached = false
-    this.#headers = {}
-    this.#fullQuery = ''
-    this.#fullQueryCached = false
-    this.#fullQueryParsed = false
-    this.#query = {}
-    this.#params = {}
+    this.#responseBatch = false
 
-    this.#bodyParser.clear()
-    this.#resStreamer.clear()
+    if (!this.#cleared) {
+      this.#statusOverride = null
+      this.#contentLength = undefined
+      this.#pendingHeaders.clear()
+      this.#ip = ''
+      this.#url = ''
+      this.#method = ''
+      this.#headersCached = false
+      this.#headers = {}
+      this.#fullQuery = ''
+      this.#fullQueryCached = false
+      this.#fullQueryParsed = false
+      this.#query = {}
+      this.#params = {}
+
+      this.#bodyParser.clear()
+      this.#resStreamer.clear()
+      this.#cleared = true
+    }
   }
 
   abort() {
@@ -697,13 +708,12 @@ export default class HttpContext {
 
   /**
    * @param {Record<string, string | string[]> | null | undefined} headers
+   * @param {{groups: ReadonlyArray<object>, lines: ReadonlyArray<string>}|undefined} prepared
    */
-  #stageHeaders(headers) {
+  #stageHeaders(headers, prepared = getPreparedHeaders(headers)) {
     if (!headers) {
       return
     }
-
-    const prepared = getPreparedHeaders(headers)
 
     if (prepared) {
       const groups = prepared.groups
@@ -724,15 +734,14 @@ export default class HttpContext {
 
   /**
    * @param {Record<string, string | string[]> | null | undefined} headers
+   * @param {{groups: ReadonlyArray<object>, lines: ReadonlyArray<string>}|undefined} prepared
    */
-  #flushPendingHeaders(headers = null) {
+  #flushPendingHeaders(headers = null, prepared = getPreparedHeaders(headers)) {
     if (!this.res) {
       this.#pendingHeaders.clear()
 
       return
     }
-
-    const prepared = getPreparedHeaders(headers)
 
     if (prepared && this.#pendingHeaders.size === 0) {
       const lines = prepared.lines
@@ -745,7 +754,7 @@ export default class HttpContext {
     }
 
     if (headers) {
-      this.#stageHeaders(headers)
+      this.#stageHeaders(headers, prepared)
     }
 
     for (const [, pendingHeader] of this.#pendingHeaders) {
@@ -846,7 +855,7 @@ export default class HttpContext {
     const prepared = getPreparedHeaders(headers)
 
     if (
-      this.server?.bindingCapabilities?.responseBatch === true &&
+      this.#responseBatch &&
       prepared &&
       this.#pendingHeaders.size === 0 &&
       typeof this.res?.endBatch === 'function'
@@ -862,7 +871,7 @@ export default class HttpContext {
       }
 
       this.res.writeStatus(this.getStatus(status))
-      this.#flushPendingHeaders(headers)
+      this.#flushPendingHeaders(headers, prepared)
 
       if (body != null) {
         this.res.end(body)

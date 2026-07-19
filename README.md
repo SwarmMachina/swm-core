@@ -86,6 +86,19 @@ await server.listen()
 console.log('Server listening on port 3000')
 ```
 
+Keep a request handler synchronous when it has no real asynchronous work. An
+`async` handler always enters the Promise path, which preserves request state
+for use after the native callback and adds work even when the returned value is
+already available:
+
+```javascript
+// Prefer this when the result is available immediately.
+onRequest: (ctx) => ({ ok: true })
+
+// Use async only when the handler actually awaits asynchronous work.
+onRequest: async (ctx) => ({ user: await loadUser(ctx.param('id')) })
+```
+
 ### Async Work Before Using the Request Body
 
 With the native uWS transport, start the body reader before the first
@@ -128,10 +141,10 @@ http: {
 
 > **Warning:** awaiting any other asynchronous operation before the first call
 > to `ctx.body()`, `ctx.buffer()`, `ctx.text()`, or `ctx.json()` can leave that
-> body promise waiting indefinitely on the `uws` backend because body events may
-> already have arrived. The same rule applies to routes with `preHandler`: if
+> body promise waiting indefinitely on the uWS transport because body events may
+> already have arrived. The same rule applies to routes with `before`: if
 > the handler will read the body, its reader must be started synchronously
-> before an asynchronous `preHandler` yields. Calling `ctx.text()` returns a
+> before an asynchronous `before` hook yields. Calling `ctx.text()` returns a
 > Promise`.
 
 ### HTTP Server with Routing (Traditional API)
@@ -329,12 +342,12 @@ HTTP with a deterministic default `404` response.
 
 **Route Definition (for `routes` array):**
 
-| Property     | Type               | Description                                                                                            |
-| ------------ | ------------------ | ------------------------------------------------------------------------------------------------------ |
-| `method`     | `String`           | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'` |
-| `path`       | `String`           | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                             |
-| `handler`    | `Function`         | Handler function `(ctx) => any \| Promise<any>`                                                        |
-| `preHandler` | `Function`/`Array` | Optional. One function or an array, run before `handler` (see [Route preHandlers](#route-prehandlers)) |
+| Property  | Type               | Description                                                                                              |
+| --------- | ------------------ | -------------------------------------------------------------------------------------------------------- |
+| `method`  | `String`           | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'`   |
+| `path`    | `String`           | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                               |
+| `handler` | `Function`         | Handler function `(ctx) => any \| Promise<any>`                                                          |
+| `before`  | `Function`/`Array` | Optional. One function or an array, run before `handler` (see [Route before hooks](#route-before-hooks)) |
 
 **WebSocket Options (`ws` object):**
 
@@ -1199,9 +1212,9 @@ process.on('SIGINT', () => {
 })
 ```
 
-### Route preHandlers
+### Route before hooks
 
-A route may declare a `preHandler` — one function or an array — run before its
+A route may declare `before` — one function or an array — run before its
 `handler` (auth, logging, validation).
 
 ```javascript
@@ -1217,7 +1230,7 @@ const server = new Server({
       {
         method: 'get',
         path: '/admin',
-        preHandler: requireAuth,
+        before: requireAuth,
         handler: () => ({ ok: true })
       }
     ]
@@ -1225,7 +1238,8 @@ const server = new Server({
 })
 ```
 
-- Run in order, sync or async (awaited); replying (`ctx.replied`) stops the chain.
+- Run in order and stay synchronous until a hook actually returns a Promise;
+  replying (`ctx.replied`) stops the chain.
 - Composed once at registration — zero per-request cost for routes without one.
 - Declarative `http.routes` API only (not `http.onRequest`).
 

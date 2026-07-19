@@ -6,11 +6,11 @@ import runChild from './helpers/run-child.js'
 import { appendStepSummary, fmt, mdTable } from './helpers/step-summary.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const HTTP_TESTS = ['base', 'headers', 'post-base']
-const HTTP_FRAMEWORKS = 'core,core-uwebsockets,core-node,micro,fastify,express'
-const HTTP_ORDER = ['core', 'core-uwebsockets', 'core-node', 'micro', 'fastify', 'express']
-const WS_FRAMEWORKS = 'core,core-uwebsockets,core-node,ws'
-const WS_ORDER = ['core', 'core-uwebsockets', 'core-node', 'ws']
+const HTTP_TESTS = ['base-sync', 'base-async', 'headers', 'headers-prepared', 'post-base']
+const HTTP_FRAMEWORKS = 'core,core-uwebsockets,micro,fastify,express'
+const HTTP_ORDER = ['core', 'core-uwebsockets', 'micro', 'fastify', 'express']
+const WS_FRAMEWORKS = 'core,core-uwebsockets,ws'
+const WS_ORDER = ['core', 'core-uwebsockets', 'ws']
 
 /**
  * @param {string} name

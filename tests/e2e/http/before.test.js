@@ -27,12 +27,12 @@ afterEach(async () => {
   }
 })
 
-test('preHandler runs before the handler and shares the context', async () => {
+test('before runs before the handler and shares the context', async () => {
   const baseUrl = await start([
     {
       method: 'get',
       path: '/*',
-      preHandler: (ctx) => {
+      before: (ctx) => {
         ctx.setHeader('x-pre', 'seen')
       },
       handler: () => 'ok'
@@ -45,13 +45,13 @@ test('preHandler runs before the handler and shares the context', async () => {
   assert.strictEqual(headers.get('x-pre'), 'seen')
 })
 
-test('preHandler array runs in order', async () => {
+test('before array runs in order', async () => {
   const order = []
   const baseUrl = await start([
     {
       method: 'get',
       path: '/*',
-      preHandler: [
+      before: [
         (ctx) => {
           order.push('a')
         },
@@ -72,14 +72,14 @@ test('preHandler array runs in order', async () => {
   assert.deepStrictEqual(order, ['a', 'b', 'h'])
 })
 
-test('preHandler can short-circuit; handler is skipped and context does not leak', async () => {
+test('before can short-circuit; handler is skipped and context does not leak', async () => {
   let handlerCalled = false
 
   const baseUrl = await start([
     {
       method: 'get',
       path: '/*',
-      preHandler: (ctx) => {
+      before: (ctx) => {
         ctx.status(401).send('unauthorized')
       },
       handler: () => {
