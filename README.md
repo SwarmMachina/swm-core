@@ -1621,7 +1621,7 @@ The self-hosted `regression-gate` runs, in order:
 2. native-binding comparison;
 3. framework comparison (report only).
 
-Reports are uploaded as CI artifacts.
+Reports are uploaded as CI artifacts when available.
 
 ## Release
 
