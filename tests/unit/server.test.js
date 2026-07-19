@@ -45,6 +45,7 @@ describe('Server', () => {
       strictEqual(server.port, 6000)
       strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
       strictEqual(server.ws, null)
+      strictEqual(server.wsIdleTimeoutSec, 15)
     })
 
     test('should create server with http.routes', () => {

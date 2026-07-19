@@ -453,6 +453,22 @@ describe('HttpContext', () => {
       strictEqual(req.calls.filter((c) => c[0] === 'getParameter' && c[1] === 1).length, 1)
     })
 
+    test('metadata caches do not inherit Object.prototype properties', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ fullQuery: 'constructor=query-value' })
+
+      req.getHeader = (name) => (name === 'constructor' ? 'header-value' : '')
+      req.getParameter = (name) => (name === 'constructor' ? 'param-value' : undefined)
+
+      ctx.reset(res, req)
+      ctx.cacheQuery()
+
+      strictEqual(ctx.header('constructor'), 'header-value')
+      strictEqual(ctx.query('constructor'), 'query-value')
+      strictEqual(ctx.param('constructor'), 'param-value')
+    })
+
     test('reset() clears header/query/param caches', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()

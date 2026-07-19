@@ -72,7 +72,8 @@ test('onRequest mode: req access after async boundary', async () => {
           method: ctx.method(),
           url: ctx.url(),
           query: ctx.query('q'),
-          header: ctx.header('x-test')
+          header: ctx.header('x-test'),
+          inheritedHeader: ctx.header('constructor')
         }
       }
     }
@@ -90,7 +91,8 @@ test('onRequest mode: req access after async boundary', async () => {
     method: 'post',
     url: '/req-after-await',
     query: '42',
-    header: 'ok'
+    header: 'ok',
+    inheritedHeader: ''
   })
 })
 

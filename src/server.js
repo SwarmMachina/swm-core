@@ -84,6 +84,7 @@ export default class Server {
     this.onWsSubscription = ws?.onSubscription ?? NOOP
     this.onWsUpgrade = ws?.onUpgrade ?? ALLOW_WS_UPGRADE
     this.wsConnectionKey = null
+    this.wsIdleTimeoutSec = 15
     this.wsUpgradeTimeoutMs = 10_000
 
     if (ws) {

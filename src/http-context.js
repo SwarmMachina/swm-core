@@ -8,12 +8,12 @@ export default class HttpContext {
   #method = ''
   #url = ''
   #headersCached = false
-  #headers = {}
+  #headers = Object.create(null)
   #fullQuery = ''
   #fullQueryCached = false
   #fullQueryParsed = false
-  #query = {}
-  #params = {}
+  #query = Object.create(null)
+  #params = Object.create(null)
   #statusOverride = null
   #contentLength = undefined
   #pendingHeaders = new Map()
@@ -137,12 +137,12 @@ export default class HttpContext {
       this.#url = ''
       this.#method = ''
       this.#headersCached = false
-      this.#headers = {}
+      this.#headers = Object.create(null)
       this.#fullQuery = ''
       this.#fullQueryCached = false
       this.#fullQueryParsed = false
-      this.#query = {}
-      this.#params = {}
+      this.#query = Object.create(null)
+      this.#params = Object.create(null)
     }
 
     this.#cleared = false
@@ -199,12 +199,12 @@ export default class HttpContext {
       this.#url = ''
       this.#method = ''
       this.#headersCached = false
-      this.#headers = {}
+      this.#headers = Object.create(null)
       this.#fullQuery = ''
       this.#fullQueryCached = false
       this.#fullQueryParsed = false
-      this.#query = {}
-      this.#params = {}
+      this.#query = Object.create(null)
+      this.#params = Object.create(null)
 
       this.#bodyParser.clear()
       this.#resStreamer.clear()
