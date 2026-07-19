@@ -13,15 +13,7 @@ import { startServer, stopServer } from './helpers/server-proc.js'
 import { processV8Profile } from './helpers/v8-prof-run.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const KNOWN_FRAMEWORKS = new Set([
-  'core',
-  'core-swm-uws',
-  'core-uwebsockets',
-  'raw-swm-uws',
-  'raw-uwebsockets',
-  'core-node',
-  'ws'
-])
+const KNOWN_FRAMEWORKS = new Set(['core', 'core-swm-uws', 'core-uwebsockets', 'raw-swm-uws', 'raw-uwebsockets', 'ws'])
 
 /**
  * @param {string[]} argv

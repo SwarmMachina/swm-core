@@ -47,13 +47,11 @@ function sendReady(port) {
 
 /**
  * @param {number} port
- * @param {'uws'|'node'} backend
  */
-async function runCore(port, backend) {
+async function runCore(port) {
   const { default: Server } = await import('../src/index.js')
   const server = new Server({
     port,
-    backend,
     http: null,
     ws: {
       onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
@@ -118,13 +116,7 @@ async function runRawBinding(port) {
  */
 async function main() {
   if (fw === 'core' || fw === 'core-swm-uws' || fw === 'core-uwebsockets') {
-    await runCore(port, 'uws')
-
-    return
-  }
-
-  if (fw === 'core-node') {
-    await runCore(port, 'node')
+    await runCore(port)
 
     return
   }
@@ -154,7 +146,7 @@ async function main() {
     return
   }
 
-  throw new Error(`Unknown --fw=${fw} (ws-server supports: core, core-node, ws)`)
+  throw new Error(`Unknown --fw=${fw}`)
 }
 
 main().catch((e) => {
