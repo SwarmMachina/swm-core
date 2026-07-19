@@ -77,12 +77,17 @@ export function createMockRes(options = {}) {
 
       calls.push(['writeHeader', k, v])
     },
-    end(body) {
-      if (body !== undefined) {
+    end(body, closeConnection) {
+      if (closeConnection !== undefined) {
+        calls.push(['end', body, closeConnection])
+      } else if (body !== undefined) {
         calls.push(['end', body])
       } else {
         calls.push(['end'])
       }
+    },
+    close() {
+      calls.push(['close'])
     },
     endBatch(status, headerLines, body) {
       calls.push(['endBatch', status, headerLines, body])

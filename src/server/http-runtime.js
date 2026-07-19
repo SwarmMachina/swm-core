@@ -53,8 +53,6 @@ function runBeforeChain(ctx, chain, handler, start) {
     if (isPromise(result)) {
       return Promise.resolve(result).then(() => {
         if (shouldStopBefore(ctx)) {
-          ctx.finalize()
-
           return
         }
 
@@ -63,8 +61,6 @@ function runBeforeChain(ctx, chain, handler, start) {
     }
 
     if (shouldStopBefore(ctx)) {
-      ctx.finalize()
-
       return
     }
   }
@@ -77,7 +73,7 @@ function runBeforeChain(ctx, chain, handler, start) {
  * @returns {boolean}
  */
 function shouldStopBefore(ctx) {
-  return (ctx.replied && !ctx.streaming) || ctx.aborted
+  return ctx.done || ctx.aborted || ctx.terminating || (ctx.replied && !ctx.streaming)
 }
 
 export default class HttpRuntime {
@@ -133,6 +129,7 @@ export default class HttpRuntime {
     const ctx = this.contextPool.acquire().reset(res, req, server, server.maxBodyBytes)
 
     res.onAborted(ctx.onAbort)
+    ctx.handlerPending = true
 
     let result
 
@@ -144,21 +141,42 @@ export default class HttpRuntime {
       }
 
       void server.safeCall(server.httpErrorHandler, ctx, err)
+      ctx.handlerPending = false
 
-      if (!ctx.streaming) {
+      if (ctx.abortPending) {
+        ctx.abortPending = false
+        ctx.finalize()
+      }
+
+      if (!ctx.done && !ctx.aborted && !ctx.terminating && !ctx.streaming) {
         ctx.finalize()
       }
 
       return
     }
 
-    if (isPromise(result)) {
-      ctx.cacheRequest(paramNames)
-      ctx.asyncPending = true
+    const asyncPending = isPromise(result)
 
+    if (asyncPending && !ctx.aborted) {
+      ctx.cacheRequest(paramNames)
+    }
+
+    ctx.asyncPending = asyncPending
+    ctx.handlerPending = false
+
+    if (ctx.abortPending) {
+      ctx.abortPending = false
+      ctx.finalize()
+    }
+
+    if (asyncPending) {
       // eslint-disable-next-line promise/catch-or-return
       result.then(ctx.onResolve, ctx.onReject)
 
+      return
+    }
+
+    if (ctx.done || ctx.aborted || ctx.terminating) {
       return
     }
 

@@ -119,6 +119,8 @@ export default class Server {
     this.getSubscribersCount = this.#wsRuntime.getSubscribersCount
     this.publish = this.#wsRuntime.publish
     this.sendTo = this.#wsRuntime.sendTo
+    this.closeConnection = this.#wsRuntime.closeConnection
+    this.terminateConnection = this.#wsRuntime.terminateConnection
     this.hasConnection = this.#wsRuntime.hasConnection
     this.getConnection = this.#wsRuntime.getConnection
     this.clearConnections = this.#wsRuntime.clearConnections

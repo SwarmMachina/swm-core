@@ -1113,6 +1113,63 @@ describe('Server', () => {
       strictEqual(server.getConnection('missing'), undefined)
     })
 
+    test('should gracefully close a connection by key and remove it from the registry immediately', () => {
+      const server = makeServer({
+        onRequest: () => {},
+        ws: { connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      strictEqual(server.closeConnection('u1', 1008, 'policy violation'), true)
+      strictEqual(server.hasConnection('u1'), false)
+      strictEqual(server.connectionCount, 0)
+      strictEqual(server.getWsContext(ws).key, 'u1')
+      deepStrictEqual(
+        ws.calls.find(({ method }) => method === 'end'),
+        {
+          method: 'end',
+          code: 1008,
+          reason: 'policy violation'
+        }
+      )
+      strictEqual(server.closeConnection('u1'), false)
+    })
+
+    test('should force-close a connection by key and remove it from the registry immediately', () => {
+      const server = makeServer({
+        onRequest: () => {},
+        ws: { connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      strictEqual(server.terminateConnection('u1'), true)
+      strictEqual(server.hasConnection('u1'), false)
+      strictEqual(server.connectionCount, 0)
+      strictEqual(ws.getCloseCallCount(), 1)
+      strictEqual(server.terminateConnection('u1'), false)
+    })
+
+    test('should validate addressed graceful close arguments before touching the registry', () => {
+      const server = makeServer({
+        onRequest: () => {},
+        ws: { connectionKey: (ctx) => ctx.data.userId }
+      })
+      const ws = createMockWebSocket({ userId: 'u1' })
+
+      server.onOpen(ws)
+
+      throws(() => server.closeConnection('u1', 1006, ''), {
+        name: 'RangeError',
+        message: 'WebSocket close code must be a valid wire code'
+      })
+      strictEqual(server.hasConnection('u1'), true)
+      strictEqual(ws.getEndCallCount(), 0)
+    })
+
     test('should not register when connectionKey returns nullish', () => {
       const server = makeServer({
         onRequest: () => {},
@@ -1735,6 +1792,44 @@ describe('Server', () => {
 
       strictEqual(onAbortedCall !== undefined, true)
       strictEqual(typeof onAbortedCall.callback, 'function')
+    })
+
+    test('should stop processing when terminate synchronously triggers onAborted', () => {
+      let errors = 0
+
+      const server = makeServer({ onRequest: () => {}, httpError: () => errors++ })
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, (ctx) => ctx.terminate())
+
+      strictEqual(res.calls.filter(({ method }) => method === 'close').length, 1)
+      strictEqual(res.calls.filter(({ method }) => method === 'end').length, 0)
+      strictEqual(server.activeHttp, 0)
+      strictEqual(errors, 0)
+    })
+
+    test('should retain an aborted async handler context until its promise settles', async () => {
+      let resolveHandler = null
+
+      const server = makeServer({ onRequest: () => {} })
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      server.handleWithContext(res, req, (ctx) => {
+        ctx.terminate()
+
+        return new Promise((resolve) => {
+          resolveHandler = resolve
+        })
+      })
+
+      strictEqual(server.activeHttp, 0)
+
+      resolveHandler('late response')
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(res.calls.filter(({ method }) => method === 'end').length, 0)
     })
 
     test('aborted async request must not deliver its late result to a reused context', async () => {

@@ -139,6 +139,10 @@ export class HttpContext {
   sendBuffer(buffer: Buffer | Uint8Array | ArrayBuffer, status?: number): void
   sendError(error: { status?: number; message?: string } | Error): void
   reply(status?: number, headers?: ResponseHeaders | null, body?: HttpBody | null): void
+  /** Send a response and close the HTTP connection after it has been flushed. */
+  replyAndClose(status?: number, headers?: ResponseHeaders | null, body?: HttpBody | null): void
+  /** Immediately force-close the HTTP connection without guaranteeing a response. */
+  terminate(): void
 
   stream(readable: Readable, status?: number, headers?: ResponseHeaders | null): Promise<void>
   startStreaming(status?: number, headers?: ResponseHeaders | null): this
@@ -167,6 +171,7 @@ export interface RawWebSocket {
   getUserData(): any
   send(data: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): WSSendStatus
   end(code?: number, reason?: string): void
+  close(): void
   subscribe(topic: string): boolean
   unsubscribe(topic: string): boolean
 }
@@ -198,6 +203,8 @@ export class WSContext {
 
   send(data: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): WSSendStatus
   end(code?: number, reason?: string): void
+  /** Force-close this WebSocket without sending a close frame. */
+  terminate(): void
   subscribe(topic: string): boolean
   unsubscribe(topic: string): boolean
   publish(topic: string, message: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): boolean
@@ -227,6 +234,10 @@ export default class Server {
    * DROPPED (backpressure limit exceeded).
    */
   sendTo(key: string | number, message: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): boolean
+  /** Gracefully close an addressable connection. */
+  closeConnection(key: string | number, code?: number, reason?: string): boolean
+  /** Force-close an addressable connection without sending a close frame. */
+  terminateConnection(key: string | number): boolean
   /** Whether a live connection is registered under `key`. */
   hasConnection(key: string | number): boolean
   /** Raw uWS socket, or `undefined`. `RawWebSocket` documents the supported surface. */

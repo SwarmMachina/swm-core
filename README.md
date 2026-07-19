@@ -435,6 +435,38 @@ backpressure limit was exceeded.
 Keys are matched with strict `Map` identity: `42` and `'42'` are different keys.
 Pick one type for `connectionKey` return values and `sendTo()` arguments.
 
+#### `server.closeConnection(key, [code], [reason])`
+
+Gracefully close the WebSocket registered under `key`. A close frame is sent,
+so the client receives the status code and reason. The connection is removed
+from the addressable registry before its `onClose` callback runs.
+
+```javascript
+server.closeConnection('user-42', 1008, 'policy violation')
+```
+
+**Returns:** `boolean` - `true` when a live registered connection was found and
+closing was initiated; `false` for an unknown key.
+
+The close reason is limited to 123 UTF-8 bytes. Reserved wire codes such as
+`1005`, `1006`, and `1015` are rejected. Use `1008` for policy violations,
+`1013` for temporary overload, or an application code in the `3000`-`4999`
+range.
+
+#### `server.terminateConnection(key)`
+
+Immediately force-close the WebSocket registered under `key` without sending a
+close frame. Use this for abusive or unresponsive peers when graceful shutdown
+is not appropriate.
+
+```javascript
+server.terminateConnection('user-42')
+```
+
+**Returns:** `boolean` - `true` when a live registered connection was found and
+terminated; `false` for an unknown key. The client observes an abnormal close
+(typically code `1006`) and receives no reason.
+
 #### `server.hasConnection(key)` / `server.getConnection(key)` / `server.connectionCount`
 
 Inspect the connection registry. `hasConnection` returns a `boolean`;
@@ -715,6 +747,31 @@ ctx.reply(
 )
 ```
 
+##### `ctx.replyAndClose([status], [headers], [body])`
+
+Send a complete HTTP response, then close the underlying connection instead of
+allowing keep-alive reuse. The response is flushed before the transport closes.
+
+```javascript
+ctx.replyAndClose(403, { 'content-type': 'text/plain' }, 'Forbidden')
+```
+
+Use this for rejected requests where the client should still receive a valid
+HTTP response. Closing the connection does not prevent the client from opening
+a new one; authentication, bans, and rate limits remain separate policies.
+
+##### `ctx.terminate()`
+
+Immediately force-close the underlying HTTP connection. No response delivery is
+guaranteed.
+
+```javascript
+ctx.terminate()
+```
+
+Use this for protocol abuse or peers that should not consume more transport
+resources. The context follows the normal aborted-request cleanup path.
+
 ##### `ctx.stream(readable, [status], [headers])`
 
 Stream a readable stream to the response.
@@ -833,6 +890,17 @@ Close this WebSocket connection.
 
 ```javascript
 ctx.end(1000, 'Goodbye')
+```
+
+The reason must fit in 123 UTF-8 bytes. Reserved wire codes cannot be sent.
+
+##### `ctx.terminate()`
+
+Immediately force-close this WebSocket without sending a close frame. The peer
+observes an abnormal close and receives no close reason.
+
+```javascript
+ctx.terminate()
 ```
 
 ##### `ctx.subscribe(topic)`
@@ -1183,6 +1251,9 @@ Notes:
 - Need low-level control? Use `server.getConnection(key)` and narrow the handle
   to the native uWS socket type. Methods beyond `RawWebSocket` (such as
   `getBufferedAmount()`) are binding-specific.
+- Use `server.closeConnection(key, code, reason)` for a graceful addressed
+  disconnect, or `server.terminateConnection(key)` for an immediate transport
+  abort.
 - Prefer managing your own `Map` instead? Store `ctx.ws` (identity-stable for the
   connection) rather than `ctx`, and delete it in `onClose`.
 

@@ -113,6 +113,9 @@ export default class HttpContext {
     this.aborted = false
     this.streaming = false
     this.streamingStarted = false
+    this.terminating = false
+    this.handlerPending = false
+    this.abortPending = false
     this.asyncPending = false
     this.releasePending = false
     this.onWritableCallback = null
@@ -154,6 +157,9 @@ export default class HttpContext {
     this.aborted = false
     this.streaming = false
     this.streamingStarted = false
+    this.terminating = false
+    this.handlerPending = false
+    this.abortPending = false
     this.asyncPending = false
     this.releasePending = false
     this.onWritableCallback = null
@@ -176,6 +182,9 @@ export default class HttpContext {
     this.aborted = false
     this.streaming = false
     this.streamingStarted = false
+    this.terminating = false
+    this.handlerPending = false
+    this.abortPending = false
     this.asyncPending = false
     this.releasePending = false
     this.onWritableCallback = null
@@ -215,6 +224,13 @@ export default class HttpContext {
 
     this.#resStreamer.abort()
     this.#bodyParser.abort()
+
+    if (this.handlerPending) {
+      this.abortPending = true
+
+      return
+    }
+
     this.finalize()
   }
 
@@ -846,6 +862,36 @@ export default class HttpContext {
    * @param {string|ArrayBuffer|Uint8Array|Buffer|null|undefined} body
    */
   reply(status = 200, headers = null, body = null) {
+    this.#reply(status, headers, body, false)
+  }
+
+  /**
+   * @param {number} status
+   * @param {Record<string, string | string[]>} headers
+   * @param {string|ArrayBuffer|Uint8Array|Buffer|null|undefined} body
+   */
+  replyAndClose(status = 200, headers = null, body = null) {
+    this.#reply(status, headers, body, true)
+  }
+
+  terminate() {
+    if (this.done || this.aborted || this.terminating) {
+      return
+    }
+
+    // Prevent a fallback response if onAborted runs after close() returns.
+    this.terminating = true
+    this.replied = true
+    this.res.close()
+  }
+
+  /**
+   * @param {number} status
+   * @param {Record<string, string | string[]>} headers
+   * @param {string|ArrayBuffer|Uint8Array|Buffer|null|undefined} body
+   * @param {boolean} closeConnection
+   */
+  #reply(status, headers, body, closeConnection) {
     if (this.replied || this.aborted) {
       return
     }
@@ -855,6 +901,7 @@ export default class HttpContext {
     const prepared = getPreparedHeaders(headers)
 
     if (
+      !closeConnection &&
       this.#responseBatch &&
       prepared &&
       this.#pendingHeaders.size === 0 &&
@@ -874,7 +921,13 @@ export default class HttpContext {
       this.#flushPendingHeaders(headers, prepared)
 
       if (body != null) {
-        this.res.end(body)
+        if (closeConnection) {
+          this.res.end(body, true)
+        } else {
+          this.res.end(body)
+        }
+      } else if (closeConnection) {
+        this.res.end(undefined, true)
       } else {
         this.res.end()
       }

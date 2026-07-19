@@ -644,6 +644,63 @@ describe('WSContext', () => {
       strictEqual(endCalls[1].code, 1001)
       strictEqual(endCalls[1].reason, 'second')
     })
+
+    test('should reject reserved or out-of-range close codes', () => {
+      const ctx = new WSContext(null)
+      const ws = { end: () => {} }
+
+      ctx.reset({}, ws, null)
+
+      throws(() => ctx.end(1006), {
+        name: 'RangeError',
+        message: 'WebSocket close code must be a valid wire code'
+      })
+      throws(() => ctx.end(2999), {
+        name: 'RangeError',
+        message: 'WebSocket close code must be a valid wire code'
+      })
+    })
+
+    test('should reject non-string or oversized close reasons', () => {
+      const ctx = new WSContext(null)
+      const ws = { end: () => {} }
+
+      ctx.reset({}, ws, null)
+
+      throws(() => ctx.end(1008, Buffer.from('nope')), {
+        name: 'TypeError',
+        message: 'WebSocket close reason must be a string'
+      })
+      throws(() => ctx.end(1008, 'я'.repeat(62)), {
+        name: 'RangeError',
+        message: 'WebSocket close reason must not exceed 123 UTF-8 bytes'
+      })
+    })
+  })
+
+  describe('terminate', () => {
+    test('should throw Error when ws is null', () => {
+      const ctx = new WSContext(null)
+
+      throws(() => ctx.terminate(), {
+        name: 'Error',
+        message: 'WSContext: ws is null (did you forget reset?)'
+      })
+    })
+
+    test('should force-close the underlying WebSocket', () => {
+      let closeCalls = 0
+
+      const ws = {
+        close: () => closeCalls++
+      }
+      const ctx = new WSContext(null)
+
+      ctx.reset({}, ws, null)
+      ctx.terminate()
+
+      strictEqual(closeCalls, 1)
+    })
   })
 
   describe('subscribe', () => {

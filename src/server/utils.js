@@ -4,6 +4,30 @@ export const isPromise = (value) =>
   value != null && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function'
 
 /**
+ * Validate a WebSocket close frame payload before crossing into the native
+ * binding. RFC-defined codes and application/private codes are accepted;
+ * reserved wire codes are rejected.
+ * @param {number} code
+ * @param {string} reason
+ */
+export function validateWsClose(code, reason) {
+  const standardCode = code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006
+  const applicationCode = code >= 3000 && code <= 4999
+
+  if (!Number.isInteger(code) || (!standardCode && !applicationCode)) {
+    throw new RangeError('WebSocket close code must be a valid wire code')
+  }
+
+  if (typeof reason !== 'string') {
+    throw new TypeError('WebSocket close reason must be a string')
+  }
+
+  if (Buffer.byteLength(reason) > 123) {
+    throw new RangeError('WebSocket close reason must not exceed 123 UTF-8 bytes')
+  }
+}
+
+/**
  * Select and validate the application-requested WebSocket subprotocol.
  * @param {string} requestedHeader
  * @param {unknown} selected

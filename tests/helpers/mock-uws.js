@@ -127,6 +127,7 @@ export function createMockWebSocket(userData = {}) {
   const calls = []
 
   let endCallCount = 0
+  let closeCallCount = 0
 
   return {
     calls,
@@ -139,6 +140,13 @@ export function createMockWebSocket(userData = {}) {
     },
     getEndCallCount() {
       return endCallCount
+    },
+    close() {
+      closeCallCount++
+      calls.push({ method: 'close' })
+    },
+    getCloseCallCount() {
+      return closeCallCount
     },
     send(data, isBinary) {
       calls.push({ method: 'send', data, isBinary })
@@ -198,9 +206,16 @@ export function createMockHttpResponse() {
       headers[key] = value
       calls.push({ method: 'writeHeader', key, value })
     },
-    end() {
+    end(body, closeConnection) {
       ended = true
-      calls.push({ method: 'end' })
+      calls.push({ method: 'end', body, closeConnection })
+    },
+    close() {
+      calls.push({ method: 'close' })
+
+      if (abortedCallback) {
+        abortedCallback()
+      }
     },
     upgrade(userData, secKey, protocol, extensions, context) {
       upgraded = true

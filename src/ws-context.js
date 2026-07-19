@@ -1,3 +1,5 @@
+import { validateWsClose } from './server/utils.js'
+
 export default class WSContext {
   /**
    * @param {ContextPool} pool
@@ -81,7 +83,19 @@ export default class WSContext {
       throw new Error('WSContext: ws is null (did you forget reset?)')
     }
 
+    validateWsClose(code, reason)
     this.ws.end(code, reason)
+  }
+
+  /**
+   * @returns {void}
+   */
+  terminate() {
+    if (this.ws === null) {
+      throw new Error('WSContext: ws is null (did you forget reset?)')
+    }
+
+    this.ws.close()
   }
 
   /**

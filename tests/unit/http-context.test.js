@@ -1097,6 +1097,99 @@ describe('HttpContext', () => {
     })
   })
 
+  describe('replyAndClose()', () => {
+    test('should send the response with closeConnection=true', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.replyAndClose(403, TEXT_PLAIN_HEADER, 'Forbidden')
+
+      strictEqual(ctx.replied, true)
+      deepStrictEqual(
+        res.calls.find(([name]) => name === 'end'),
+        ['end', 'Forbidden', true]
+      )
+    })
+
+    test('should close after a response without a body', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.replyAndClose(204, null, null)
+
+      deepStrictEqual(
+        res.calls.find(([name]) => name === 'end'),
+        ['end', undefined, true]
+      )
+    })
+
+    test('should bypass responseBatch because it cannot request connection close', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: { responseBatch: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      ctx.replyAndClose(429, JSON_HEADER, '{"error":"rate limit"}')
+
+      strictEqual(
+        res.calls.some(([name]) => name === 'endBatch'),
+        false
+      )
+      deepStrictEqual(
+        res.calls.find(([name]) => name === 'end'),
+        ['end', '{"error":"rate limit"}', true]
+      )
+    })
+
+    test('should no-op after a response has already been sent', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.reply(200, null, 'ok')
+      const callCount = res.calls.length
+
+      ctx.replyAndClose(403, null, 'late')
+
+      strictEqual(res.calls.length, callCount)
+    })
+  })
+
+  describe('terminate()', () => {
+    test('should force-close the transport and suppress fallback responses', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.terminate()
+
+      strictEqual(ctx.replied, true)
+      deepStrictEqual(res.calls, [['close']])
+    })
+
+    test('should be idempotent', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.terminate()
+      ctx.terminate()
+
+      strictEqual(res.calls.filter(([name]) => name === 'close').length, 1)
+    })
+  })
+
   describe('send()/sendJson()/sendText()/sendBuffer()', () => {
     test('send(null/undefined) should call reply(204, TEXT_PLAIN_HEADER, null)', () => {
       const ctx = new HttpContext(null)

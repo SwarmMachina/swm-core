@@ -69,3 +69,45 @@ test('reuses a keep-alive connection after a request whose body is never read', 
     agent.destroy()
   }
 })
+
+test('replyAndClose sends the response and prevents keep-alive reuse', async () => {
+  server = await startHttpServer({
+    routes: [
+      { method: 'get', path: '/reject', handler: (ctx) => ctx.replyAndClose(403, null, 'Forbidden') },
+      { method: 'get', path: '/next', handler: (ctx) => ctx.sendText('next') }
+    ]
+  })
+
+  const port = server.port
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 })
+
+  try {
+    const first = await request(agent, { method: 'GET', port, path: '/reject' })
+    const second = await request(agent, { method: 'GET', port, path: '/next' })
+
+    assert.strictEqual(first.status, 403)
+    assert.strictEqual(first.text, 'Forbidden')
+    assert.strictEqual(second.status, 200)
+    assert.strictEqual(second.text, 'next')
+    assert.notStrictEqual(first.socket, second.socket, 'the closed connection must not be reused')
+  } finally {
+    agent.destroy()
+  }
+})
+
+test('terminate aborts the HTTP connection without sending a response', async () => {
+  server = await startHttpServer({
+    routes: [{ method: 'get', path: '/terminate', handler: (ctx) => ctx.terminate() }]
+  })
+
+  await assert.rejects(
+    new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: server.port, path: '/terminate', method: 'GET' }, () =>
+        resolve()
+      )
+
+      req.on('error', reject)
+      req.end()
+    })
+  )
+})

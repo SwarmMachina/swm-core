@@ -1,6 +1,6 @@
 import WSContext from '../ws-context.js'
 import ContextPool from '../context-pool.js'
-import { isPromise } from './utils.js'
+import { isPromise, validateWsClose } from './utils.js'
 import WebSocketUpgradeRuntime from './ws-upgrade.js'
 
 export default class WebSocketRuntime {
@@ -24,6 +24,8 @@ export default class WebSocketRuntime {
     this.getSubscribersCount = this.getSubscribersCount.bind(this)
     this.publish = this.publish.bind(this)
     this.sendTo = this.sendTo.bind(this)
+    this.closeConnection = this.closeConnection.bind(this)
+    this.terminateConnection = this.terminateConnection.bind(this)
     this.hasConnection = this.hasConnection.bind(this)
     this.getConnection = this.getConnection.bind(this)
     this.clearConnections = this.clearConnections.bind(this)
@@ -411,6 +413,48 @@ export default class WebSocketRuntime {
     }
 
     return ws.send(message, isBinary ?? typeof message !== 'string') !== 2
+  }
+
+  /**
+   * Gracefully close the connection registered under key.
+   * @param {string | number} key
+   * @param {number} [code]
+   * @param {string} [reason]
+   * @returns {boolean}
+   */
+  closeConnection(key, code = 1000, reason = '') {
+    validateWsClose(code, reason)
+
+    const ws = this.#connections.get(key)
+
+    if (!ws) {
+      return false
+    }
+
+    // Make the closing socket unreachable before end() synchronously invokes
+    // onClose. Keep ctx.key intact so the application can inspect it there.
+    this.#connections.delete(key)
+    ws.end(code, reason)
+
+    return true
+  }
+
+  /**
+   * Force-close the connection registered under key without a close frame.
+   * @param {string | number} key
+   * @returns {boolean}
+   */
+  terminateConnection(key) {
+    const ws = this.#connections.get(key)
+
+    if (!ws) {
+      return false
+    }
+
+    this.#connections.delete(key)
+    ws.close()
+
+    return true
   }
 
   /**
