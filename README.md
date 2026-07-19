@@ -101,10 +101,75 @@ onRequest: async (ctx) => ({ user: await loadUser(ctx.param('id')) })
 
 ### Async Work Before Using the Request Body
 
-With the native uWS transport, start the body reader before the first
-asynchronous operation if the handler will need the body later. The body is
-collected while the user is checked, but it is not parsed or used until the
-check succeeds:
+The default request body mode is `lazy`. With the native uWS transport, a lazy
+body reader must be started before the first asynchronous operation. Enable the
+opt-in `prefetch` mode when a handler should be able to authenticate a user in a
+database before it asks for the body:
+
+```javascript
+const server = new Server({
+  prefetch: true,
+  http: {
+    onRequest: async (ctx) => {
+      if (ctx.method() !== 'post') {
+        return null
+      }
+
+      const token = ctx.header('authorization')
+      const user = await findUserByToken(token)
+
+      if (!user) {
+        ctx.status(401)
+        return { error: 'Unauthorized' }
+      }
+
+      // Safe after await: raw bytes have been collected by the framework.
+      // JSON parsing itself remains lazy and happens here.
+      const data = await ctx.json()
+
+      return { userId: user.id, data }
+    }
+  }
+})
+```
+
+Declarative routes can enable or disable prefetch individually. An omitted
+`prefetch` inherits the server-level flag:
+
+```javascript
+const server = new Server({
+  http: {
+    routes: [
+      {
+        method: 'post',
+        path: '/users',
+        prefetch: true,
+        before: async (ctx) => {
+          const user = await findUserByToken(ctx.header('authorization'))
+
+          if (!user) {
+            ctx.status(401).send({ error: 'Unauthorized' })
+            return
+          }
+
+          ctx.user = user
+        },
+        handler: async (ctx) => ({ user: ctx.user, data: await ctx.json() })
+      }
+    ]
+  }
+})
+```
+
+Prefetch starts collecting raw bytes before `before` and `handler` run. It does
+not eagerly decode text or parse JSON. The trade-off is additional work for
+requests that never use their body and memory proportional to concurrent
+request bodies. `http.maxBodySize` bounds one request; the optional
+`http.maxBodyBudget` bounds all bodies being collected concurrently.
+
+When keeping the default lazy mode, start the reader manually before the first
+`await`. The body is then collected while the user is checked, but it is not
+parsed or used until the check succeeds:
 
 ```javascript
 http: {
@@ -139,13 +204,12 @@ http: {
 }
 ```
 
-> **Warning:** awaiting any other asynchronous operation before the first call
-> to `ctx.body()`, `ctx.buffer()`, `ctx.text()`, or `ctx.json()` can leave that
-> body promise waiting indefinitely on the uWS transport because body events may
-> already have arrived. The same rule applies to routes with `before`: if
-> the handler will read the body, its reader must be started synchronously
-> before an asynchronous `before` hook yields. Calling `ctx.text()` returns a
-> Promise`.
+> **Warning (lazy mode):** call `ctx.body()`, `ctx.buffer()`, `ctx.text()`, or
+> `ctx.json()` before awaiting any other asynchronous work. Otherwise uWS body
+> events may arrive before the reader is registered, leaving its Promise pending.
+> A route handler runs too late to guarantee this after an asynchronous `before`.
+> Either enable `prefetch`, or start the reader synchronously inside `before`,
+> before its first `await`, and retain the returned Promise for the handler.
 
 ### HTTP Server with Routing (Traditional API)
 
@@ -308,13 +372,14 @@ new Server(options)
 
 **Options:**
 
-| Option          | Type            | Default       | Description                                     |
-| --------------- | --------------- | ------------- | ----------------------------------------------- |
-| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)      |
-| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below) |
-| `onServerError` | `Function`      | `() => {}`    | Post-listen transport error handler             |
-| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                     |
-| `port`          | `Number`        | `6000`        | Server port (1-65535)                           |
+| Option          | Type            | Default       | Description                                      |
+| --------------- | --------------- | ------------- | ------------------------------------------------ |
+| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)       |
+| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below)  |
+| `onServerError` | `Function`      | `() => {}`    | Post-listen transport error handler              |
+| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                      |
+| `port`          | `Number`        | `6000`        | Server port (1-65535)                            |
+| `prefetch`      | `Boolean`       | `false`       | Collect HTTP request bodies before user handlers |
 
 At least one of `http` or `ws` must be an object. A nullish value disables that
 application layer. `http: null` with a configured `ws` still creates the minimal
@@ -330,12 +395,14 @@ a fixed `404` without allocating an `HttpContext`.
 
 **HTTP Options (`http` object):**
 
-| Option        | Type       | Default     | Description                                  |
-| ------------- | ---------- | ----------- | -------------------------------------------- |
-| `maxBodySize` | `Number`   | `1`         | Max HTTP request body size in MB (1-64).     |
-| `onRequest`   | `Function` | default 404 | Universal request handler `(ctx) => any`     |
-| `routes`      | `Array`    | default 404 | Declarative route definitions                |
-| `onError`     | `Function` | `() => {}`  | Request error handler `(ctx, error) => void` |
+| Option             | Type       | Default     | Description                                                |
+| ------------------ | ---------- | ----------- | ---------------------------------------------------------- |
+| `maxBodySize`      | `Number`   | `1`         | Max HTTP request body size in MB (1-64).                   |
+| `maxBodyBudget`    | `Number`   | `0`         | Aggregate body collection budget in MB; `0` disables it.   |
+| `requestTimeoutMs` | `Number`   | `0`         | Async handler timeout in ms (100-300000); `0` disables it. |
+| `onRequest`        | `Function` | default 404 | Universal request handler `(ctx) => any`                   |
+| `routes`           | `Array`    | default 404 | Declarative route definitions                              |
+| `onError`          | `Function` | `() => {}`  | Request error handler `(ctx, error) => void`               |
 
 `http.onRequest` and `http.routes` are mutually exclusive. `http: {}` enables
 HTTP with a deterministic default `404` response.
@@ -343,14 +410,45 @@ HTTP with a deterministic default `404` response.
 `http.maxBodySize` and `ws.maxBodySize` are independent. Changing one does not
 change the limit for the other protocol.
 
+`maxBodyBudget` and `requestTimeoutMs` are HTTP-level, opt-in settings. Only
+`prefetch` can be overridden per route. A production configuration can enable
+all three explicitly:
+
+```javascript
+const server = new Server({
+  prefetch: true,
+  http: {
+    maxBodySize: 8,
+    maxBodyBudget: 256,
+    requestTimeoutMs: 30_000,
+    onRequest
+  }
+})
+```
+
+The body budget covers lazy and prefetched bodies. It reserves the declared
+`Content-Length`, or the reader limit when the length is unknown
+(`http.maxBodySize` for prefetch). A non-zero budget must be at least
+`maxBodySize`. Budget exhaustion returns `503`; a body over its request limit
+returns `413`. Reservations are released when requests end, abort, fail, or time
+out.
+
+`requestTimeoutMs` applies only to asynchronous `before`/handler chains; sync
+handlers have no timer. A timeout releases the body reservation, returns `408`,
+and closes the connection. Starting a reply or stream cancels the timer. It does
+not cancel user Promises; late results are ignored. Use `AbortController` where
+the underlying client supports cancellation. Budget and timeout errors are also
+passed to `http.onError`.
+
 **Route Definition (for `routes` array):**
 
-| Property  | Type               | Description                                                                                              |
-| --------- | ------------------ | -------------------------------------------------------------------------------------------------------- |
-| `method`  | `String`           | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'`   |
-| `path`    | `String`           | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                               |
-| `handler` | `Function`         | Handler function `(ctx) => any \| Promise<any>`                                                          |
-| `before`  | `Function`/`Array` | Optional. One function or an array, run before `handler` (see [Route before hooks](#route-before-hooks)) |
+| Property   | Type               | Description                                                                                              |
+| ---------- | ------------------ | -------------------------------------------------------------------------------------------------------- |
+| `method`   | `String`           | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'`   |
+| `path`     | `String`           | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                               |
+| `handler`  | `Function`         | Handler function `(ctx) => any \| Promise<any>`                                                          |
+| `before`   | `Function`/`Array` | Optional. One function or an array, run before `handler` (see [Route before hooks](#route-before-hooks)) |
+| `prefetch` | `Boolean`          | Optional route override. `true` enables prefetch, `false` forces lazy, omitted inherits the server mode  |
 
 **WebSocket Options (`ws` object):**
 
@@ -599,6 +697,11 @@ const buffer = await ctx.body(5 * 1024 * 1024) // 5MB limit
 ```
 
 **Returns:** `Promise<Buffer>`
+
+In `prefetch` mode, `http.maxBodySize` is the hard collection limit. A smaller
+per-call `maxSize` is still enforced when the accessor resolves; a larger value
+cannot raise the server limit. If `http.maxBodyBudget` is enabled, the same
+aggregate budget also applies to manually started lazy readers.
 
 ##### `ctx.buffer([maxSize])`
 
@@ -1315,6 +1418,9 @@ const server = new Server({
 
 - Run in order and stay synchronous until a hook actually returns a Promise;
   replying (`ctx.replied`) stops the chain.
+- Before reading a body after an async hook, enable `prefetch` or start the body
+  reader inside that hook before its first `await`; see
+  [Async Work Before Using the Request Body](#async-work-before-using-the-request-body).
 - Composed once at registration — zero per-request cost for routes without one.
 - Declarative `http.routes` API only (not `http.onRequest`).
 
@@ -1470,6 +1576,39 @@ npm test
 # Run tests with coverage
 npm run test:coverage
 ```
+
+Body-prefetch performance comparison (balanced lazy/prefetch order, including
+p95/p99, ELU and memory):
+
+```bash
+BODY_PREFETCH_RUNS=3 \
+BODY_PREFETCH_WARMUP=2 \
+BODY_PREFETCH_DURATION=6 \
+BODY_PREFETCH_CONNECTIONS=100 \
+BODY_PREFETCH_GET_PIPELINING=10 \
+BODY_PREFETCH_BODY_PIPELINING=1 \
+BODY_PREFETCH_SAMPLE_MS=250 \
+npm run bench:body-prefetch
+```
+
+The generated JSON and Markdown reports are written to
+`benchmark/profiles/body-prefetch/`.
+
+Aggregate body-budget and async request-timeout overhead (balanced enabled/off
+order, p95/p99, ELU and memory):
+
+```bash
+BODY_SAFETY_RUNS=3 \
+BODY_SAFETY_WARMUP=2 \
+BODY_SAFETY_DURATION=6 \
+BODY_SAFETY_CONNECTIONS=100 \
+BODY_SAFETY_SAMPLE_MS=250 \
+npm run bench:body-safety
+```
+
+This compares `maxBodyBudget: 0` with `256` on a prefetched body workload, and
+`requestTimeoutMs: 0` with `30000` on an async-handler workload. Reports are
+written to `benchmark/profiles/body-safety/`.
 
 ## Regression profiling (CI)
 

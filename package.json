@@ -1,6 +1,6 @@
 {
   "name": "@swarmmachina/swm-core",
-  "version": "2.0.3",
+  "version": "3.0.0",
   "description": "High-performance HTTP/WebSocket server built on swm-uws",
   "keywords": [
     "http",
@@ -68,6 +68,8 @@
     "bench:bindings": "node ./benchmark/binding-compare.js",
     "bench:bindings:deep": "node ./benchmark/binding-deep-compare.js",
     "bench:before": "node ./benchmark/before-bench.js",
+    "bench:body-prefetch": "node ./benchmark/body-prefetch-bench.js",
+    "bench:body-safety": "node ./benchmark/body-safety-bench.js",
     "profile:ci": "node ./benchmark/regression-ci.js",
     "profile:compare": "node ./benchmark/compare-ci.js",
     "profile:compare:http": "node ./benchmark/compare-ci.js --suite http",

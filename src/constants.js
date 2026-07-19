@@ -50,6 +50,8 @@ export const STATUS_TEXT = Object.freeze({
 
 export const CACHED_ERRORS = Object.freeze({
   bodyTooLarge: Object.assign(new Error('Request body too large'), { status: 413 }),
+  bodyBudgetExceeded: Object.assign(new Error('Request body capacity exceeded'), { status: 503 }),
+  requestTimeout: Object.assign(new Error('Request Timeout'), { status: 408 }),
   aborted: Object.assign(new Error('Request aborted'), { status: 418 }),
   sizeMismatch: Object.assign(new Error('Request body size mismatch'), { status: 400 }),
   invalidJSON: Object.assign(new Error('Invalid JSON'), { status: 400 }),

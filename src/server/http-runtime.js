@@ -39,6 +39,22 @@ function composeRouteHandler(handler, before) {
 }
 
 /**
+ * @param {(ctx: HttpContext) => unknown|Promise<unknown>} handler
+ * @returns {(ctx: HttpContext) => unknown|Promise<unknown>}
+ */
+function withBodyPrefetch(handler) {
+  return (ctx) => {
+    const error = ctx.prefetchBody()
+
+    if (error) {
+      throw error
+    }
+
+    return handler(ctx)
+  }
+}
+
+/**
  * Stay synchronous until a hook actually returns a Promise/thenable.
  * @param {HttpContext} ctx
  * @param {((ctx: HttpContext) => unknown|Promise<unknown>)[]} chain
@@ -170,6 +186,8 @@ export default class HttpRuntime {
     }
 
     if (asyncPending) {
+      ctx.startRequestTimeout(server.httpRequestTimeoutMs)
+
       // eslint-disable-next-line promise/catch-or-return
       result.then(ctx.onResolve, ctx.onReject)
 
@@ -206,9 +224,11 @@ export default class HttpRuntime {
 
     if (server.http?.routes) {
       for (const route of server.http.routes) {
-        const { method, path, handler, before } = route
+        const { method, path, handler, before, prefetch } = route
         const methodName = method === 'delete' ? 'del' : method
-        const routeHandler = composeRouteHandler(handler, before)
+        const composedHandler = composeRouteHandler(handler, before)
+        const shouldPrefetch = prefetch ?? server.prefetch
+        const routeHandler = shouldPrefetch ? withBodyPrefetch(composedHandler) : composedHandler
         const paramNames = path.match(/:[^/]+/g)?.map((name) => name.slice(1)) ?? []
 
         app[methodName](path, (res, req) => handleWithContext(res, req, routeHandler, paramNames))
@@ -222,7 +242,7 @@ export default class HttpRuntime {
     }
 
     if (server.http?.onRequest) {
-      const onRequest = server.http.onRequest
+      const onRequest = server.prefetch ? withBodyPrefetch(server.http.onRequest) : server.http.onRequest
 
       app.any('/*', (res, req) => handleWithContext(res, req, onRequest))
 

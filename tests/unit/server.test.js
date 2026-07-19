@@ -44,6 +44,9 @@ describe('Server', () => {
       strictEqual(server.host, '127.0.0.1')
       strictEqual(server.port, 6000)
       strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
+      strictEqual(server.httpBodyBudget, null)
+      strictEqual(server.httpRequestTimeoutMs, 0)
+      strictEqual(server.prefetch, false)
       strictEqual(server.ws, null)
       strictEqual(server.wsIdleTimeoutSec, 15)
     })
@@ -71,6 +74,19 @@ describe('Server', () => {
       strictEqual(server.host, '0.0.0.0')
     })
 
+    test('should configure server-level prefetch', () => {
+      const server = makeServer({ onRequest: () => {}, prefetch: true })
+
+      strictEqual(server.prefetch, true)
+    })
+
+    test('should reject an invalid server-level prefetch', () => {
+      throws(() => makeServer({ onRequest: () => {}, prefetch: 'yes' }), {
+        name: 'TypeError',
+        message: 'prefetch must be a boolean'
+      })
+    })
+
     test('should reject an invalid host', () => {
       throws(() => makeServer({ onRequest: () => {}, host: '' }), {
         name: 'TypeError',
@@ -82,6 +98,15 @@ describe('Server', () => {
       const server = makeServer({ http: { onRequest: () => {}, maxBodySize: 5 } })
 
       strictEqual(server.httpMaxBodyBytes, 5 * 1024 * 1024)
+    })
+
+    test('should configure aggregate body budget and request timeout', () => {
+      const server = makeServer({
+        http: { onRequest: () => {}, maxBodySize: 2, maxBodyBudget: 8, requestTimeoutMs: 15_000 }
+      })
+
+      strictEqual(server.httpBodyBudget.limitBytes, 8 * 1024 * 1024)
+      strictEqual(server.httpRequestTimeoutMs, 15_000)
     })
 
     test('should use custom http.onError handler', () => {
@@ -275,6 +300,28 @@ describe('Server', () => {
       const server2 = makeServer({ http: { onRequest: () => {}, maxBodySize: 64 } })
 
       strictEqual(server2.httpMaxBodyBytes, 64 * 1024 * 1024)
+    })
+
+    test('should require http.maxBodyBudget to cover one maximum body', () => {
+      throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: 8, maxBodyBudget: 4 } }), {
+        name: 'TypeError',
+        message: 'http.maxBodyBudget must be 0 or a safe finite number >= 8'
+      })
+
+      strictEqual(makeServer({ http: { onRequest: () => {}, maxBodyBudget: 0 } }).httpBodyBudget, null)
+      strictEqual(
+        makeServer({ http: { onRequest: () => {}, maxBodyBudget: 8192 } }).httpBodyBudget.limitBytes,
+        8192 * 1024 * 1024
+      )
+    })
+
+    test('should validate http.requestTimeoutMs and allow zero', () => {
+      strictEqual(makeServer({ http: { onRequest: () => {}, requestTimeoutMs: 0 } }).httpRequestTimeoutMs, 0)
+
+      throws(() => makeServer({ http: { onRequest: () => {}, requestTimeoutMs: 99 } }), {
+        name: 'TypeError',
+        message: 'http.requestTimeoutMs must be 0 or in range 100 - 300000'
+      })
     })
 
     test('should reject legacy root maxBodySize', () => {
@@ -538,6 +585,84 @@ describe('Server', () => {
       strictEqual(routeCalls[2].path, '/p')
     })
 
+    test('should prefetch a route body before an asynchronous before hook yields', async () => {
+      let resume
+
+      const pending = new Promise((resolve) => {
+        resume = resolve
+      })
+      const server = makeServer({
+        routes: [
+          {
+            method: 'post',
+            path: '/x',
+            prefetch: true,
+            before: () => pending,
+            handler: (ctx) => ctx.json()
+          }
+        ]
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/x')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setHeader('content-length', '11')
+      routeCall.handler(res, req)
+
+      strictEqual(res.calls.filter((call) => call.method === 'onData').length, 1)
+      res.pushData('{"ok":true}', true)
+      resume()
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(res.isEnded(), true)
+      strictEqual(res.calls.find((call) => call.method === 'end').body, '{"ok":true}')
+    })
+
+    test('should apply server prefetch to onRequest', async () => {
+      const server = makeServer({
+        prefetch: true,
+        onRequest: (ctx) => ctx.text()
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/*')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setHeader('content-length', '2')
+      routeCall.handler(res, req)
+
+      strictEqual(res.calls.filter((call) => call.method === 'onData').length, 1)
+      res.pushData('ok', true)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(res.calls.find((call) => call.method === 'end').body, 'ok')
+    })
+
+    test('should let a route disable inherited server prefetch', async () => {
+      const server = makeServer({
+        prefetch: true,
+        routes: [{ method: 'post', path: '/x', prefetch: false, handler: () => 'ok' }]
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/x')
+      const res = createMockHttpResponse()
+
+      routeCall.handler(res, createMockHttpRequest())
+
+      strictEqual(
+        res.calls.some((call) => call.method === 'onData'),
+        false
+      )
+      strictEqual(res.isEnded(), true)
+    })
+
     test('should keep synchronous before hooks on the synchronous response path', async () => {
       const order = []
       const server = makeServer({
@@ -719,6 +844,15 @@ describe('Server', () => {
       throws(() => makeServer({ routes }), {
         name: 'TypeError',
         message: 'Route before must be a function or an array of functions'
+      })
+    })
+
+    test('should reject a non-boolean route prefetch option', () => {
+      const routes = [{ method: 'post', path: '/x', handler: () => {}, prefetch: 'yes' }]
+
+      throws(() => makeServer({ routes }), {
+        name: 'TypeError',
+        message: 'http.routes[0].prefetch must be a boolean'
       })
     })
 

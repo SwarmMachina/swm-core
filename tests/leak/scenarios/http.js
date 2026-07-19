@@ -51,6 +51,7 @@ export function makeHttpScenarios() {
       iterations: 300,
       serverOptions(collect) {
         return {
+          maxBodyBudget: 1,
           routes: [
             {
               method: 'post',
@@ -77,6 +78,75 @@ export function makeHttpScenarios() {
         })
 
         await res.arrayBuffer()
+      }
+    },
+    {
+      name: 'post-json-prefetch-after-await',
+      iterations: 300,
+      serverOptions(collect) {
+        return {
+          maxBodyBudget: 1,
+          routes: [
+            {
+              method: 'post',
+              path: '/echo',
+              prefetch: true,
+              handler: async (ctx) => {
+                const marker = makeMarker(nextId++)
+
+                collect(marker)
+                await new Promise((resolve) => setImmediate(resolve))
+
+                const body = await ctx.json()
+
+                collect(body)
+                collect(await ctx.buffer())
+
+                return { ok: true, id: body.id }
+              }
+            }
+          ]
+        }
+      },
+      async run({ baseUrl }, collect, i) {
+        const res = await fetch(`${baseUrl}/echo`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: i, blob: 'x'.repeat(1024) })
+        })
+
+        await res.arrayBuffer()
+      }
+    },
+    {
+      name: 'request-timeout',
+      iterations: 30,
+      serverOptions(collect) {
+        return {
+          requestTimeoutMs: 100,
+          routes: [
+            {
+              method: 'get',
+              path: '/slow',
+              handler: async () => {
+                const marker = makeMarker(nextId++)
+
+                collect(marker)
+                await new Promise((resolve) => setTimeout(resolve, 120))
+
+                return marker
+              }
+            }
+          ]
+        }
+      },
+      async run({ baseUrl }) {
+        const res = await fetch(`${baseUrl}/slow`)
+
+        await res.arrayBuffer()
+      },
+      async teardown() {
+        await new Promise((resolve) => setTimeout(resolve, 30))
       }
     },
     {
@@ -211,12 +281,14 @@ export function makeHttpScenarios() {
             {
               method: 'post',
               path: '/upload',
+              prefetch: true,
               handler: async (ctx) => {
                 const marker = makeMarker(nextId++)
 
                 collect(marker)
 
                 try {
+                  await new Promise((resolve) => setImmediate(resolve))
                   await ctx.buffer()
                 } catch {
                   // Aborted upload: the body promise is expected to reject.

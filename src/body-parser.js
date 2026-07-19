@@ -15,6 +15,16 @@ export default class BodyParser {
   #bodyReject = null
   /** @type {boolean} */
   #done = false
+  /** @type {boolean} */
+  #started = false
+  /** @type {number} */
+  #collectionLimit = 0
+  /** @type {number} */
+  #generation = 0
+  /** @type {number} */
+  #reservedBytes = 0
+  /** @type {import('./body-budget.js').default|null} */
+  #budget = null
 
   /** @type {HttpContext} */
   #ctx = null
@@ -35,7 +45,7 @@ export default class BodyParser {
   #cap = 0
   #limit = 0
 
-  #onDataKnown = (ab, isLast) => {
+  #onDataKnown(ab, isLast) {
     if (this.#done) {
       return
     }
@@ -63,7 +73,7 @@ export default class BodyParser {
     }
   }
 
-  #onDataUnknown = (ab, isLast) => {
+  #onDataUnknown(ab, isLast) {
     if (this.#done) {
       return
     }
@@ -151,6 +161,8 @@ export default class BodyParser {
 
     this.#done = true
     this.#bodyError = error
+    this.#discardStorage()
+    this.#releaseReservation()
 
     if (this.#bodyPromise) {
       const reject = this.#bodyReject
@@ -163,17 +175,81 @@ export default class BodyParser {
     }
   }
 
+  #discardStorage() {
+    this.#body = null
+    this.#dst = null
+    this.#offset = 0
+    this.#expected = 0
+    this.#grow = null
+    this.#len = 0
+    this.#cap = 0
+    this.#limit = 0
+  }
+
+  #reserve(bytes) {
+    const budget = this.#ctx?.server?.httpBodyBudget
+
+    if (!budget || bytes <= 0) {
+      return true
+    }
+
+    if (!budget.reserve(bytes)) {
+      return false
+    }
+
+    this.#budget = budget
+    this.#reservedBytes = bytes
+
+    return true
+  }
+
+  #releaseReservation() {
+    if (this.#reservedBytes === 0) {
+      return
+    }
+
+    this.#budget?.release(this.#reservedBytes)
+    this.#budget = null
+    this.#reservedBytes = 0
+  }
+
+  #cancel(error) {
+    if (this.#bodyError === error && this.#done) {
+      return
+    }
+
+    const reject = this.#bodyPromise && !this.#done ? this.#bodyReject : null
+
+    this.#generation++
+    this.#done = true
+    this.#started = true
+    this.#bodyError = error
+    this.#bodyPromise = null
+    this.#bodyReject = null
+    this.#bodyResolve = null
+    this.#discardStorage()
+    this.#releaseReservation()
+
+    reject?.(error)
+  }
+
   /**
    * @param {HttpContext} ctx
    * @param {number} [maxSize]
    */
   reset(ctx, maxSize) {
+    this.#releaseReservation()
+    this.#generation++
     this.#body = null
     this.#bodyError = null
     this.#bodyPromise = null
     this.#bodyResolve = null
     this.#bodyReject = null
     this.#done = false
+    this.#started = false
+    this.#collectionLimit = 0
+    this.#reservedBytes = 0
+    this.#budget = null
 
     this.#maxSize = maxSize || this.#maxSize
 
@@ -194,12 +270,18 @@ export default class BodyParser {
       this.#reject(CACHED_ERRORS.aborted)
     }
 
+    this.#generation++
+    this.#releaseReservation()
     this.#body = null
     this.#bodyError = null
     this.#bodyPromise = null
     this.#bodyResolve = null
     this.#bodyReject = null
     this.#done = false
+    this.#started = false
+    this.#collectionLimit = 0
+    this.#reservedBytes = 0
+    this.#budget = null
 
     this.#dst = null
     this.#offset = 0
@@ -213,65 +295,68 @@ export default class BodyParser {
     this.#ctx = null
   }
 
-  /**
-   * @param {number} [maxSize]
-   * @returns {Promise<Buffer>}
-   */
-  body(maxSize) {
-    if (this.#body !== null) {
-      return Promise.resolve(this.#body)
-    }
-
-    if (this.#bodyError !== null) {
-      return Promise.reject(this.#bodyError)
-    }
-
-    if (this.#bodyPromise !== null) {
-      return this.#bodyPromise
+  prefetch() {
+    if (this.#started || this.#done || this.#body !== null || this.#bodyError !== null) {
+      return this.#bodyError
     }
 
     if (!this.#ctx) {
       this.#bodyError = CACHED_ERRORS.serverError
 
-      return Promise.reject(this.#bodyError)
+      return this.#bodyError
     }
 
-    const limit = maxSize ?? this.#maxSize
-    const contentLength = this.#ctx.contentLength()
+    this.#start(this.#maxSize)
 
-    if (this.#ctx.aborted) {
-      this.#bodyError = CACHED_ERRORS.aborted
+    return this.#bodyError
+  }
 
-      return Promise.reject(this.#bodyError)
+  /**
+   * @param {number} limit
+   */
+  #start(limit) {
+    const ctx = this.#ctx
+
+    this.#started = true
+    this.#collectionLimit = limit
+
+    const contentLength = ctx.contentLength()
+
+    if (ctx.aborted) {
+      this.#reject(CACHED_ERRORS.aborted)
+
+      return
     }
 
     if (contentLength !== null && contentLength > limit) {
-      this.#bodyError = CACHED_ERRORS.bodyTooLarge
+      this.#reject(CACHED_ERRORS.bodyTooLarge)
 
-      return Promise.reject(this.#bodyError)
+      return
     }
 
     if (contentLength === 0) {
-      const buf = Buffer.alloc(0)
+      ctx.res.onData(NOOP)
+      this.#resolve(Buffer.alloc(0))
 
-      this.#body = buf
-      this.#ctx.res.onData(NOOP)
-
-      return Promise.resolve(buf)
+      return
     }
 
-    const { promise, resolve, reject } = Promise.withResolvers()
+    const reservation = contentLength ?? limit
 
-    this.#bodyPromise = promise
-    this.#bodyResolve = resolve
-    this.#bodyReject = reject
-    this.#done = false
+    if (!this.#reserve(reservation)) {
+      this.#reject(CACHED_ERRORS.bodyBudgetExceeded)
 
-    if (
-      this.#ctx.server?.bindingCapabilities?.collectBody === true &&
-      typeof this.#ctx.res?.collectBody === 'function'
-    ) {
-      this.#ctx.res.collectBody(limit, (body) => {
+      return
+    }
+
+    const generation = this.#generation
+
+    if (ctx.server?.bindingCapabilities?.collectBody === true && typeof ctx.res?.collectBody === 'function') {
+      ctx.res.collectBody(limit, (body) => {
+        if (this.#generation !== generation || this.#ctx !== ctx) {
+          return
+        }
+
         if (body === null) {
           this.#reject(CACHED_ERRORS.bodyTooLarge)
 
@@ -289,7 +374,7 @@ export default class BodyParser {
         this.#resolve(buffer)
       })
 
-      return this.#bodyPromise
+      return
     }
 
     if (contentLength !== null) {
@@ -297,17 +382,93 @@ export default class BodyParser {
       this.#offset = 0
       this.#dst = Buffer.allocUnsafe(contentLength)
 
-      this.#ctx.res.onData(this.#onDataKnown)
+      ctx.res.onData((ab, isLast) => {
+        if (this.#generation === generation && this.#ctx === ctx) {
+          this.#onDataKnown(ab, isLast)
+        }
+      })
     } else {
       this.#limit = limit
       this.#len = 0
       this.#cap = 0
       this.#grow = null
 
-      this.#ctx.res.onData(this.#onDataUnknown)
+      ctx.res.onData((ab, isLast) => {
+        if (this.#generation === generation && this.#ctx === ctx) {
+          this.#onDataUnknown(ab, isLast)
+        }
+      })
+    }
+  }
+
+  /**
+   * @param {Buffer} body
+   * @param {number} limit
+   * @returns {Buffer}
+   */
+  #checkLimit(body, limit) {
+    if (body.length > limit) {
+      throw CACHED_ERRORS.bodyTooLarge
     }
 
-    return this.#bodyPromise
+    return body
+  }
+
+  /**
+   * @param {number} [maxSize]
+   * @returns {Promise<Buffer>}
+   */
+  body(maxSize) {
+    const limit = maxSize ?? this.#maxSize
+
+    if (this.#body !== null) {
+      try {
+        return Promise.resolve(this.#checkLimit(this.#body, limit))
+      } catch (err) {
+        return Promise.reject(err)
+      }
+    }
+
+    if (this.#bodyError !== null) {
+      return Promise.reject(this.#bodyError)
+    }
+
+    if (!this.#ctx) {
+      this.#bodyError = CACHED_ERRORS.serverError
+
+      return Promise.reject(this.#bodyError)
+    }
+
+    if (!this.#started) {
+      this.#start(limit)
+
+      if (this.#body !== null) {
+        try {
+          return Promise.resolve(this.#checkLimit(this.#body, limit))
+        } catch (err) {
+          return Promise.reject(err)
+        }
+      }
+
+      if (this.#bodyError !== null) {
+        return Promise.reject(this.#bodyError)
+      }
+    }
+
+    if (this.#bodyPromise === null) {
+      const { promise, resolve, reject } = Promise.withResolvers()
+
+      this.#bodyPromise = promise
+      this.#bodyResolve = resolve
+      this.#bodyReject = reject
+      this.#done = false
+    }
+
+    if (limit >= this.#collectionLimit) {
+      return this.#bodyPromise
+    }
+
+    return this.#bodyPromise.then((body) => this.#checkLimit(body, limit))
   }
 
   abort() {
@@ -315,7 +476,11 @@ export default class BodyParser {
       return
     }
 
-    this.#reject(CACHED_ERRORS.aborted)
+    this.#cancel(CACHED_ERRORS.aborted)
+  }
+
+  timeout() {
+    this.#cancel(CACHED_ERRORS.requestTimeout)
   }
 
   /**

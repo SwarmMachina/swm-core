@@ -2216,6 +2216,78 @@ describe('HttpContext', () => {
     })
   })
 
+  describe('request timeout', () => {
+    test('should reject body work, send 408 with close, report the error, and finalize', async () => {
+      const finalized = Promise.withResolvers()
+      const reported = []
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: {},
+        httpErrorHandler: () => {},
+        finalizeHttpContext() {
+          finalized.resolve()
+        },
+        safeCall(fn, ...args) {
+          reported.push([fn, ...args])
+
+          return Promise.resolve()
+        }
+      }
+
+      ctx.reset(res, req, server, 16)
+
+      const body = ctx.body()
+
+      void body.catch(() => {})
+      ctx.startRequestTimeout(10)
+
+      await finalized.promise
+
+      await rejects(body, (err) => err.status === 408 && err.message === 'Request Timeout')
+      strictEqual(ctx.done, true)
+      strictEqual(ctx.replied, true)
+      strictEqual(reported.length, 1)
+      strictEqual(reported[0][2].status, 408)
+      strictEqual(
+        res.calls.some(([name, value]) => name === 'writeStatus' && value === STATUS_TEXT[408]),
+        true
+      )
+      deepStrictEqual(
+        res.calls.find(([name]) => name === 'end'),
+        ['end', 'Request Timeout', true]
+      )
+    })
+
+    test('should cancel the timer when a response starts', async () => {
+      let finalized = 0
+
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: {},
+        httpErrorHandler: () => {},
+        finalizeHttpContext() {
+          finalized++
+        },
+        safeCall() {
+          return Promise.resolve()
+        }
+      }
+
+      ctx.reset(res, req, server)
+      ctx.startRequestTimeout(10)
+      ctx.sendText('ok')
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      strictEqual(finalized, 0)
+      strictEqual(res.calls.filter(([name]) => name === 'end').length, 1)
+    })
+  })
+
   describe('onResolve/onReject', () => {
     test('onResolve should send(result) and finalize if not streaming', () => {
       let finalizeCount = 0

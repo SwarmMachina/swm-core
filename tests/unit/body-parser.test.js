@@ -3,6 +3,7 @@
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual } from 'node:assert/strict'
 import BodyParser from '../../src/body-parser.js'
+import { CACHED_ERRORS } from '../../src/constants.js'
 import { createMockReq, createMockRes } from '../helpers/mock-http.js'
 import HttpContext from '../../src/http-context.js'
 
@@ -124,6 +125,182 @@ describe('BodyParser', () => {
 
         return true
       })
+    })
+  })
+
+  describe('prefetch()', () => {
+    test('should attach the collector before a body accessor is called', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req)
+      parser.reset(ctx, 16)
+      parser.prefetch()
+
+      strictEqual(res.calls.filter((call) => call[0] === 'onData').length, 1)
+
+      res.pushData('test', true)
+      strictEqual((await parser.text()).toString(), 'test')
+    })
+
+    test('should let an accessor wait for an in-flight prefetched body', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req)
+      parser.reset(ctx, 16)
+      parser.prefetch()
+
+      const body = parser.body()
+
+      res.pushData('test', true)
+      deepStrictEqual(await body, Buffer.from('test'))
+    })
+
+    test('should enforce a smaller accessor limit after prefetch', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req)
+      parser.reset(ctx, 16)
+      parser.prefetch()
+      res.pushData('test', true)
+
+      await rejects(parser.body(3), (err) => err === CACHED_ERRORS.bodyTooLarge)
+      deepStrictEqual(await parser.body(4), Buffer.from('test'))
+    })
+
+    test('should ignore a late native callback from a previous generation', async () => {
+      const parser = new BodyParser()
+      const server = {
+        bindingCapabilities: { collectBody: true },
+        finalizeHttpContext() {}
+      }
+      const oldCtx = new HttpContext(null)
+      const oldRes = createMockRes()
+      const oldReq = createMockReq({ headers: { 'content-length': '3' } })
+
+      oldCtx.reset(oldRes, oldReq, server)
+      parser.reset(oldCtx, 16)
+      parser.prefetch()
+
+      const nextCtx = new HttpContext(null)
+      const nextRes = createMockRes()
+      const nextReq = createMockReq({ headers: { 'content-length': '3' } })
+
+      nextCtx.reset(nextRes, nextReq, server)
+      parser.reset(nextCtx, 16)
+      parser.prefetch()
+
+      oldRes.pushCollectedBody(Buffer.from('old'))
+      nextRes.pushCollectedBody(Buffer.from('new'))
+
+      strictEqual(await parser.text(), 'new')
+    })
+
+    test('should remember an abort without creating an unhandled rejection', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req)
+      parser.reset(ctx, 16)
+      parser.prefetch()
+      parser.abort()
+
+      await rejects(parser.body(), (err) => err === CACHED_ERRORS.aborted)
+    })
+
+    test('should reserve known body bytes and release them on clear', async () => {
+      const parser = new BodyParser()
+      const budget = {
+        usedBytes: 0,
+        reserve(bytes) {
+          this.usedBytes += bytes
+
+          return true
+        },
+        release(bytes) {
+          this.usedBytes -= bytes
+        }
+      }
+      const server = { bindingCapabilities: {}, httpBodyBudget: budget }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req, server)
+      parser.reset(ctx, 16)
+      parser.prefetch()
+
+      strictEqual(budget.usedBytes, 4)
+
+      res.pushData('test', true)
+      strictEqual(await parser.text(), 'test')
+      strictEqual(budget.usedBytes, 4)
+
+      parser.clear()
+      strictEqual(budget.usedBytes, 0)
+    })
+
+    test('should reject when aggregate capacity cannot be reserved', async () => {
+      const parser = new BodyParser()
+      const server = {
+        bindingCapabilities: {},
+        httpBodyBudget: { reserve: () => false, release() {} }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req, server)
+      parser.reset(ctx, 16)
+
+      strictEqual(parser.prefetch(), CACHED_ERRORS.bodyBudgetExceeded)
+      await rejects(parser.body(), (err) => err === CACHED_ERRORS.bodyBudgetExceeded)
+      strictEqual(
+        res.calls.some((call) => call[0] === 'onData'),
+        false
+      )
+    })
+
+    test('should release the body reservation on request timeout', async () => {
+      const parser = new BodyParser()
+      const budget = {
+        usedBytes: 0,
+        reserve(bytes) {
+          this.usedBytes += bytes
+
+          return true
+        },
+        release(bytes) {
+          this.usedBytes -= bytes
+        }
+      }
+      const server = { bindingCapabilities: {}, httpBodyBudget: budget }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      parser.reset(ctx, 16)
+      parser.prefetch()
+
+      strictEqual(budget.usedBytes, 16)
+
+      const body = parser.body()
+
+      parser.timeout()
+
+      await rejects(body, (err) => err === CACHED_ERRORS.requestTimeout)
+      strictEqual(budget.usedBytes, 0)
     })
   })
 

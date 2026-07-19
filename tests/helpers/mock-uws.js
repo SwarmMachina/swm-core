@@ -173,6 +173,7 @@ export function createMockHttpResponse() {
   const calls = []
 
   let abortedCallback = null
+  let dataCallback = null
   let status = null
 
   const headers = {}
@@ -229,6 +230,17 @@ export function createMockHttpResponse() {
       if (abortedCallback) {
         abortedCallback()
       }
+    },
+    onData(cb) {
+      dataCallback = cb
+      calls.push({ method: 'onData', callback: cb })
+    },
+    pushData(data, isLast) {
+      if (!dataCallback) {
+        throw new Error('onData not called yet')
+      }
+
+      dataCallback(Buffer.from(data), isLast)
     },
     onWritable(cb) {
       calls.push({ method: 'onWritable', callback: cb })

@@ -7,6 +7,8 @@ export const ALLOW_WS_UPGRADE = () => Promise.resolve({ isAllowed: true })
 /** @typedef {import('../http-context.js').default} HttpCtx */
 
 const DEFAULT_MAX_BODY_SIZE_MB = 1
+const DEFAULT_MAX_BODY_BUDGET_MB = 0
+const DEFAULT_REQUEST_TIMEOUT_MS = 0
 
 /**
  * @typedef {object} WSOptions
@@ -30,6 +32,7 @@ const DEFAULT_MAX_BODY_SIZE_MB = 1
  * @property {string} path
  * @property {(ctx: HttpCtx) => unknown|Promise<unknown>} handler
  * @property {((ctx: HttpCtx) => unknown|Promise<unknown>)|((ctx: HttpCtx) => unknown|Promise<unknown>)[]} [before]
+ * @property {boolean} [prefetch]
  */
 
 /**
@@ -72,6 +75,45 @@ function normalizeMaxBodySize(value, namespace) {
 }
 
 /**
+ * @param {unknown} value
+ * @param {number} maxBodySize
+ * @returns {number}
+ */
+function normalizeMaxBodyBudget(value, maxBodySize) {
+  const maxBodyBudget = value ?? DEFAULT_MAX_BODY_BUDGET_MB
+
+  if (
+    maxBodyBudget !== 0 &&
+    !(
+      Number.isFinite(maxBodyBudget) &&
+      maxBodyBudget >= maxBodySize &&
+      Number.isSafeInteger(Math.floor(maxBodyBudget * 1024 * 1024))
+    )
+  ) {
+    throw new TypeError(`http.maxBodyBudget must be 0 or a safe finite number >= ${maxBodySize}`)
+  }
+
+  return maxBodyBudget
+}
+
+/**
+ * @param {unknown} value
+ * @returns {number}
+ */
+function normalizeRequestTimeout(value) {
+  const requestTimeoutMs = value ?? DEFAULT_REQUEST_TIMEOUT_MS
+
+  if (
+    requestTimeoutMs !== 0 &&
+    !(Number.isFinite(requestTimeoutMs) && requestTimeoutMs >= 100 && requestTimeoutMs <= 300_000)
+  ) {
+    throw new TypeError('http.requestTimeoutMs must be 0 or in range 100 - 300000')
+  }
+
+  return requestTimeoutMs
+}
+
+/**
  * @param {Route} route
  * @param {number} index
  */
@@ -84,7 +126,7 @@ function validateRoute(route, index) {
     throw new TypeError(`http.routes[${index}].preHandler is no longer supported; use before`)
   }
 
-  const { method, path, handler, before } = route
+  const { method, path, handler, before, prefetch } = route
 
   if (!HTTP_METHODS.has(method)) {
     throw new TypeError(`Invalid HTTP method: ${method}`)
@@ -96,6 +138,10 @@ function validateRoute(route, index) {
 
   if (typeof handler !== 'function') {
     throw new TypeError(`http.routes[${index}].handler must be a function`)
+  }
+
+  if (prefetch !== undefined && typeof prefetch !== 'boolean') {
+    throw new TypeError(`http.routes[${index}].prefetch must be a boolean`)
   }
 
   if (before === undefined) {
@@ -110,12 +156,26 @@ function validateRoute(route, index) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function normalizePrefetch(value) {
+  const prefetch = value ?? false
+
+  if (typeof prefetch !== 'boolean') {
+    throw new TypeError('prefetch must be a boolean')
+  }
+
+  return prefetch
+}
+
+/**
  * @param {unknown} http
  * @returns {
  *  {
  *    onRequest: ((ctx: HttpCtx) => unknown|Promise<unknown>)|null,
  *    routes: Route[]|null, onError: (ctx: HttpCtx, err: Error) => unknown|Promise<unknown>,
- *    maxBodySize: number
+ *    maxBodySize: number, maxBodyBudget: number, requestTimeoutMs: number
  *  }|null}
  */
 export function normalizeHttpOptions(http) {
@@ -136,11 +196,15 @@ export function normalizeHttpOptions(http) {
 
   http.routes?.forEach(validateRoute)
 
+  const maxBodySize = normalizeMaxBodySize(http.maxBodySize, 'http')
+
   return {
     onRequest: http.onRequest ?? null,
     routes: http.routes ?? null,
     onError: http.onError ?? NOOP,
-    maxBodySize: normalizeMaxBodySize(http.maxBodySize, 'http')
+    maxBodySize,
+    maxBodyBudget: normalizeMaxBodyBudget(http.maxBodyBudget, maxBodySize),
+    requestTimeoutMs: normalizeRequestTimeout(http.requestTimeoutMs)
   }
 }
 

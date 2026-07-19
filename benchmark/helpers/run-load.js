@@ -1,5 +1,15 @@
 import autocannon from 'autocannon'
+import histogramPercentiles from 'hdr-histogram-percentiles-obj'
 import os from 'node:os'
+
+// Autocannon omits p95 from its default histogram projection. Add it once so
+// benchmark JSON contains the percentile without approximating between p90 and
+// p97.5. The underlying HDR histogram remains the source of truth.
+if (!histogramPercentiles.percentiles.includes(95)) {
+  const index = histogramPercentiles.percentiles.findIndex((value) => value > 95)
+
+  histogramPercentiles.percentiles.splice(index, 0, 95)
+}
 
 /**
  * @param {string} name

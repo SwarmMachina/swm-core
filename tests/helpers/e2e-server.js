@@ -6,11 +6,18 @@ import { getFreePort } from '../../helpers/ports.js'
  * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.onRequest]
  * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>}>} [opt.routes]
  * @param {number} [opt.maxBodySize]
+ * @param {number} [opt.maxBodyBudget]
+ * @param {number} [opt.requestTimeoutMs]
+ * @param {boolean} [opt.prefetch]
  * @returns {Promise<{server: Server, port: number, baseUrl: string, close: () => Promise<void>}>}
  */
-export async function startHttpServer({ onRequest, routes, maxBodySize }) {
+export async function startHttpServer({ onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs, prefetch }) {
   const port = await getFreePort()
-  const server = new Server({ http: { onRequest, routes, maxBodySize }, port })
+  const server = new Server({
+    http: { onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs },
+    port,
+    prefetch
+  })
 
   await server.listen()
 

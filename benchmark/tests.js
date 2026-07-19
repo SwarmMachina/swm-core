@@ -95,6 +95,60 @@ const TESTS = new Map([
         'Content-Type': 'application/json'
       }
     }
+  ],
+  [
+    'prefetch-get',
+    {
+      name: 'prefetch-get',
+      method: 'GET',
+      path: '/prefetch-get',
+      duration: 6,
+      connections: 100,
+      pipelining: 10,
+      description: 'Lazy versus prefetch overhead on a request without a body'
+    }
+  ],
+  [
+    'prefetch-body-used',
+    {
+      name: 'prefetch-body-used',
+      method: 'POST',
+      path: '/prefetch-body-used',
+      duration: 6,
+      connections: 100,
+      pipelining: 1,
+      description: 'Manual lazy reader versus transparent prefetch after an async boundary',
+      body: JSON.stringify({ data: 'x'.repeat(16 * 1024) }),
+      headers: { 'Content-Type': 'application/json' }
+    }
+  ],
+  [
+    'prefetch-body-unused',
+    {
+      name: 'prefetch-body-unused',
+      method: 'POST',
+      path: '/prefetch-body-unused',
+      duration: 6,
+      connections: 100,
+      pipelining: 1,
+      description: 'Cost of collecting a 16 KiB body that application code does not use',
+      body: 'x'.repeat(16 * 1024),
+      headers: { 'Content-Type': 'text/plain' }
+    }
+  ],
+  [
+    'prefetch-body-large',
+    {
+      name: 'prefetch-body-large',
+      method: 'POST',
+      path: '/prefetch-body-used',
+      duration: 6,
+      connections: 25,
+      pipelining: 1,
+      description: 'Throughput and memory while collecting a 1 MiB request body',
+      body: JSON.stringify({ data: 'x'.repeat(1024 * 1024) }),
+      headers: { 'Content-Type': 'application/json' }
+    }
   ]
 ])
 

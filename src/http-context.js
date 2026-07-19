@@ -1,6 +1,6 @@
 import BodyParser from './body-parser.js'
 import ResStreamer from './res-streamer.js'
-import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './constants.js'
+import { CACHED_ERRORS, JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './constants.js'
 import { assertHeaderValue, getPreparedHeaders } from './prepared-headers.js'
 
 export default class HttpContext {
@@ -21,11 +21,64 @@ export default class HttpContext {
   #responseBatch = false
   #bodyParser = new BodyParser()
   #resStreamer = new ResStreamer()
+  #requestTimeout = null
 
   body = (maxSize) => this.#bodyParser.body(maxSize)
   buffer = (maxSize) => this.#bodyParser.buffer(maxSize)
   text = (maxSize) => this.#bodyParser.text(maxSize)
   json = (maxSize) => this.#bodyParser.json(maxSize)
+
+  prefetchBody() {
+    return this.#bodyParser.prefetch()
+  }
+
+  startRequestTimeout(timeoutMs) {
+    if (
+      timeoutMs <= 0 ||
+      this.#requestTimeout !== null ||
+      this.done ||
+      this.aborted ||
+      this.replied ||
+      this.terminating ||
+      this.streaming
+    ) {
+      return
+    }
+
+    this.#requestTimeout = setTimeout(this.onRequestTimeout, timeoutMs)
+    this.#requestTimeout.unref?.()
+  }
+
+  stopRequestTimeout() {
+    if (this.#requestTimeout === null) {
+      return
+    }
+
+    clearTimeout(this.#requestTimeout)
+    this.#requestTimeout = null
+  }
+
+  onRequestTimeout = () => {
+    this.#requestTimeout = null
+
+    if (this.done || this.aborted || this.replied || this.terminating || this.streaming) {
+      return
+    }
+
+    this.#bodyParser.timeout()
+
+    try {
+      this.replyAndClose(408, TEXT_PLAIN_HEADER, CACHED_ERRORS.requestTimeout.message)
+    } catch {
+      // The transport may have closed without delivering onAborted yet.
+    }
+
+    void this.server.safeCall(this.server.httpErrorHandler, this, CACHED_ERRORS.requestTimeout)
+
+    if (!this.done && !this.aborted && !this.terminating && !this.streaming) {
+      this.finalize()
+    }
+  }
 
   onAbort = () => this.abort()
 
@@ -34,6 +87,7 @@ export default class HttpContext {
       return
     }
 
+    this.stopRequestTimeout()
     this.done = true
     this.server.finalizeHttpContext(this)
   }
@@ -129,6 +183,8 @@ export default class HttpContext {
    * @returns {HttpContext}
    */
   reset(res, req, server, maxSize = 1024 * 1024 * 16) {
+    this.stopRequestTimeout()
+
     if (!this.#cleared) {
       this.#statusOverride = null
       this.#contentLength = undefined
@@ -173,6 +229,8 @@ export default class HttpContext {
   /**
    */
   clear() {
+    this.stopRequestTimeout()
+
     this.res = null
     this.req = null
     this.server = null
@@ -218,6 +276,7 @@ export default class HttpContext {
     }
 
     this.aborted = true
+    this.stopRequestTimeout()
     this.streaming = false
     this.streamingStarted = false
     this.onWritableCallback = null
@@ -880,6 +939,7 @@ export default class HttpContext {
     }
 
     // Prevent a fallback response if onAborted runs after close() returns.
+    this.stopRequestTimeout()
     this.terminating = true
     this.replied = true
     this.res.close()
@@ -896,6 +956,7 @@ export default class HttpContext {
       return
     }
 
+    this.stopRequestTimeout()
     this.replied = true
 
     const prepared = getPreparedHeaders(headers)
@@ -944,6 +1005,7 @@ export default class HttpContext {
       return this
     }
 
+    this.stopRequestTimeout()
     this.replied = true
     this.streaming = true
 

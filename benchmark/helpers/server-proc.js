@@ -35,7 +35,7 @@ export async function startServer({ benchDir, serverName, fw, testName, runIndex
     nodeArgs.push('--prof')
   }
 
-  nodeArgs.push(serverPath, '--fw', fw, '--port', port)
+  nodeArgs.push(serverPath, '--fw', fw, '--port', port, '--test', testName)
 
   const p = spawn(process.execPath, nodeArgs, {
     cwd: profileDir,

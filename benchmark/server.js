@@ -25,15 +25,18 @@ if (process.send) {
   })
 }
 
-const { fw, port } = parseArgs(
+const { fw, port, testName } = parseArgs(
   process.argv,
-  { fw: 'core', port: 3000 },
+  { fw: 'core', port: 3000, testName: 'base-sync' },
   {
     '--fw': (out, v) => {
       out.fw = String(v)
     },
     '--port': (out, v) => {
       out.port = Number(v)
+    },
+    '--test': (out, v) => {
+      out.testName = String(v)
     }
   }
 )
@@ -72,9 +75,10 @@ function sendReady(port) {
 
 /**
  * @param {number} port
- * @param {'uws'|'node'} backend
+ * @param {{prefetch?: boolean, maxBodyBudget?: number, requestTimeoutMs?: number}} [options]
  */
-async function runCore(port, backend) {
+async function runCore(port, options = {}) {
+  const { prefetch = false, maxBodyBudget = 0, requestTimeoutMs = 0 } = options
   const { default: Server, prepareHeaders } = await import('../src/index.js')
   const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
   const onRequest = (ctx) => {
@@ -101,11 +105,39 @@ async function runCore(port, backend) {
       return ctx.json()
     }
 
+    if (method === 'get' && url === '/prefetch-get') {
+      return BASE_SYNC_TEST.payload
+    }
+
+    if (method === 'post' && url === '/prefetch-body-used') {
+      if (prefetch) {
+        return Promise.resolve().then(() => ctx.json())
+      }
+
+      const body = ctx.json()
+
+      return Promise.resolve().then(() => body)
+    }
+
+    if (method === 'post' && url === '/prefetch-body-unused') {
+      return Promise.resolve('ok')
+    }
+
     ctx.status(404)
 
     return 'Not Found'
   }
-  const server = new Server({ port, http: { onRequest, onError: console.error }, backend })
+  const server = new Server({
+    port,
+    prefetch,
+    http: {
+      onRequest,
+      onError: console.error,
+      maxBodySize: testName === 'prefetch-body-large' ? 2 : 1,
+      maxBodyBudget,
+      requestTimeoutMs
+    }
+  })
 
   await server.listen()
   sendReady(server.port)
@@ -204,14 +236,26 @@ async function runRawBinding(port) {
  *
  */
 async function main() {
-  if (fw === 'core' || fw === 'core-swm-uws' || fw === 'core-uwebsockets') {
-    await runCore(port, 'uws')
+  if (fw === 'core' || fw === 'core-swm-uws' || fw === 'core-uwebsockets' || fw === 'core-lazy') {
+    await runCore(port)
 
     return
   }
 
-  if (fw === 'core-node') {
-    await runCore(port, 'node')
+  if (fw === 'core-prefetch') {
+    await runCore(port, { prefetch: true })
+
+    return
+  }
+
+  if (fw === 'core-prefetch-budget') {
+    await runCore(port, { prefetch: true, maxBodyBudget: 256 })
+
+    return
+  }
+
+  if (fw === 'core-timeout') {
+    await runCore(port, { requestTimeoutMs: 30_000 })
 
     return
   }

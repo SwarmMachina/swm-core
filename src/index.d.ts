@@ -29,6 +29,8 @@ export interface Route {
   handler: Handler
   /** One handler or a chain, run before `handler`. Replying short-circuits the chain. Declarative `routes` only. */
   before?: Handler | Handler[]
+  /** Override server-level body prefetch for this route. */
+  prefetch?: boolean
 }
 
 /**
@@ -85,6 +87,10 @@ export interface WSOptions {
 export interface HttpBaseOptions {
   /** Max HTTP request body size in MB (1-64). @default 1 */
   maxBodySize?: number
+  /** Aggregate memory budget for concurrently collected HTTP bodies in MB. Use 0 to disable; non-zero values must be >= maxBodySize. @default 0 */
+  maxBodyBudget?: number
+  /** Timeout for asynchronous HTTP handlers in milliseconds. Use 0 to disable. @default 0 */
+  requestTimeoutMs?: number
   onError?: (ctx: HttpContext, err: Error) => any | Promise<any>
 }
 
@@ -103,6 +109,8 @@ export interface CommonServerOptions {
   host?: string
   /** @default 6000 */
   port?: number
+  /** Start collecting HTTP request bodies before user handlers run. @default false */
+  prefetch?: boolean
 }
 
 /** At least one application protocol must be configured. Nullish `http`/`ws` disables that layer. */

@@ -141,6 +141,7 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
   const out = {
     rps: r.requests?.average || 0,
     latencyP97_5: r.latency?.p97_5 ?? null,
+    latencyP95: r.latency?.p95 ?? null,
     latencyP99: r.latency?.p99 ?? null,
     latencyAvg: r.latency?.average ?? null,
     errors: r.errors || 0,
@@ -233,6 +234,7 @@ async function main() {
         rps: res.rps || 0,
         latAvgMs: res.latencyAvg ?? null,
         latP97_5Ms: res.latencyP97_5 ?? null,
+        latP95Ms: res.latencyP95 ?? null,
         latP99Ms: res.latencyP99 ?? null,
         errors: res.errors || 0,
         v8prof: res.v8prof
@@ -261,6 +263,7 @@ async function main() {
         rps: Math.round(r.rps),
         latAvg: r.latAvgMs != null ? `${r.latAvgMs.toFixed(2)}ms` : 'n/a',
         latP97_5: r.latP97_5Ms != null ? `${r.latP97_5Ms.toFixed(2)}ms` : 'n/a',
+        latP95: r.latP95Ms != null ? `${r.latP95Ms.toFixed(2)}ms` : 'n/a',
         latP99: r.latP99Ms != null ? `${r.latP99Ms.toFixed(2)}ms` : 'n/a',
         errors: r.errors
       }))
@@ -277,6 +280,7 @@ async function main() {
     const arr = perFw[fw] || []
     const rps = arr.map((x) => x.rps)
     const p97_5 = arr.map((x) => x.latencyP97_5).filter((v) => v != null)
+    const p95 = arr.map((x) => x.latencyP95).filter((v) => v != null)
     const p99 = arr.map((x) => x.latencyP99).filter((v) => v != null)
     const avg = arr.map((x) => x.latencyAvg).filter((v) => v != null)
 
@@ -285,6 +289,7 @@ async function main() {
       rps: rps.length ? Math.round(median(rps)) : null,
       latAvgMs: avg.length ? Number(median(avg).toFixed(2)) : null,
       latP97_5Ms: p97_5.length ? Number(median(p97_5).toFixed(2)) : null,
+      latP95Ms: p95.length ? Number(median(p95).toFixed(2)) : null,
       latP99Ms: p99.length ? Number(median(p99).toFixed(2)) : null,
       n: arr.length
     }
