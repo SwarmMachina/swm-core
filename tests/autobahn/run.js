@@ -8,7 +8,7 @@ import { startEchoServer } from './echo-server.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const reportsDir = path.join(__dirname, 'reports')
 const PORT = 9001
-const AGENT = 'swm-core-node'
+const AGENT = 'swm-core'
 const ACCEPT = new Set(['OK', 'NON-STRICT', 'INFORMATIONAL'])
 
 /**

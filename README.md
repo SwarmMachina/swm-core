@@ -7,12 +7,11 @@
 
 A high-performance HTTP/WebSocket server built on the
 [`@swarmmachina/swm-uws`](https://www.npmjs.com/package/@swarmmachina/swm-uws)
-native binding, with a bundled `node:http` backend available as an explicit fallback.
+native binding.
 
 ## Features
 
-- **uWS by default** - Native HTTP/WebSocket transport on the primary path
-- **Opt-in Node backend** - Pure `node:http` + RFC 6455 fallback via `backend: 'node'`
+- **Native uWS transport** - HTTP/WebSocket transport through `swm-uws`
 - **HTTP + WebSocket** - Both protocols in a single server instance
 - **Context pooling** - Minimizes garbage collection overhead
 - **Graceful shutdown** - Cleanly closes active connections
@@ -29,42 +28,19 @@ npm install @swarmmachina/swm-core
 
 ### Runtime requirements
 
-The default backend depends on the native `@swarmmachina/swm-uws` addon, which
+The server depends on the native `@swarmmachina/swm-uws` addon, which
 ships platform-specific prebuilds:
 
 - **Node.js 22 or 24** — other majors are rejected by the package engine constraint.
 - **Linux x64 with glibc** — use a `bookworm`/`slim` image rather than Alpine/musl.
 - **Windows x64** and **macOS arm64/x64** are supported.
-- **Linux ARM64, Windows ARM64 and musl are not supported.** Use `backend: 'node'`
-  on unsupported hosts.
+- **Linux ARM64, Windows ARM64 and musl are not supported.**
 - **TLS and `permessage-deflate` are disabled** in the native binding; terminate
   TLS before the application.
 
-## Backends
-
-The server runs on a selectable transport backend, chosen with the `backend`
-option:
-
-| `backend`         | Transport   | Status                                                       |
-| ----------------- | ----------- | ------------------------------------------------------------ |
-| `'uws'` (default) | `swm-uws`   | Primary native engine. HTTP + WebSocket. Highest throughput. |
-| `'node'`          | `node:http` | Experimental opt-in fallback. No `permessage-deflate`.       |
-
-```js
-// Default: @swarmmachina/swm-uws
-const server = new Server({ port: 6000, http: { onRequest } })
-
-// Explicit fallback: bundled node:http backend
-const fallback = new Server({ backend: 'node', port: 6000, http: { onRequest } })
-```
-
-The bundled `'node'` backend implements the same API without
-`permessage-deflate`; `npm run test:autobahn` checks WebSocket conformance. A
-missing native addon fails startup unless `backend: 'node'` is selected.
-
 ## Native binding regression gate
 
-The default runtime is `@swarmmachina/swm-uws@0.5.0`. The regression gate runs
+The runtime is `@swarmmachina/swm-uws@0.5.0`. The regression gate runs
 the same `swm-core` HTTP and WebSocket paths against the dev-only
 `uWebSockets.js@20.69.0` reference, changing only the native binding.
 
@@ -112,7 +88,7 @@ console.log('Server listening on port 3000')
 
 ### Async Work Before Using the Request Body
 
-With the default `uws` backend, start the body reader before the first
+With the native uWS transport, start the body reader before the first
 asynchronous operation if the handler will need the body later. The body is
 collected while the user is checked, but it is not parsed or used until the
 check succeeds:
@@ -197,9 +173,7 @@ await server.listen()
 ### HTTP Server with Declarative Routing (`routes` API)
 
 The `routes` API provides method-specific routing, URL parameters and wildcard
-matching on both backends. With the default uWS backend, routes are registered
-directly with uWebSockets.js; the Node backend uses the bundled JavaScript
-router.
+matching. Routes are registered directly with uWebSockets.js.
 
 ```javascript
 import Server from '@swarmmachina/swm-core'
@@ -263,8 +237,7 @@ await server.listen()
 
 **Benefits of Declarative Routing:**
 
-- **Direct uWS registration** - On the default uWS backend, routes are registered with the native engine
-- **Node backend support** - The same route definitions are matched by the bundled JavaScript router
+- **Direct uWS registration** - Routes are registered with the native engine
 - **URL Parameters** - Built-in support for `:param` syntax
 - **Cleaner Code** - Declarative route definitions
 - **Method-specific** - Automatic HTTP method routing
@@ -322,15 +295,14 @@ new Server(options)
 
 **Options:**
 
-| Option          | Type            | Default       | Description                                          |
-| --------------- | --------------- | ------------- | ---------------------------------------------------- |
-| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)           |
-| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below)      |
-| `onServerError` | `Function`      | `() => {}`    | Node backend post-listen transport error handler     |
-| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                          |
-| `port`          | `Number`        | `6000`        | Server port (1-65535)                                |
-| `maxBodySize`   | `Number`        | `1`           | Max HTTP body / WebSocket payload size in MB (1-64)  |
-| `backend`       | `String`        | `'uws'`       | `'uws'` or the experimental opt-in `'node'` fallback |
+| Option          | Type            | Default       | Description                                         |
+| --------------- | --------------- | ------------- | --------------------------------------------------- |
+| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)          |
+| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below)     |
+| `onServerError` | `Function`      | `() => {}`    | Post-listen transport error handler                 |
+| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                         |
+| `port`          | `Number`        | `6000`        | Server port (1-65535)                               |
+| `maxBodySize`   | `Number`        | `1`           | Max HTTP body / WebSocket payload size in MB (1-64) |
 
 At least one of `http` or `ws` must be an object. A nullish value disables that
 application layer. `http: null` with a configured `ws` still creates the minimal
@@ -368,8 +340,8 @@ HTTP with a deterministic default `404` response.
 
 | Option               | Type       | Default                                               | Description                                                                                                                                                                                                                                                              |
 | -------------------- | ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `wsIdleTimeoutSec`   | `Number`   | `15`                                                  | Idle timeout in seconds (min: 5). On the Node backend this also bounds partial/fragmented message assembly.                                                                                                                                                              |
-| `wsUpgradeTimeoutMs` | `Number`   | `10000`                                               | Node backend deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                          |
+| `wsIdleTimeoutSec`   | `Number`   | `15`                                                  | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
+| `wsUpgradeTimeoutMs` | `Number`   | `10000`                                               | Deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                                       |
 | `onOpen`             | `Function` | `(ctx) => {}`                                         | Called when client connects.                                                                                                                                                                                                                                             |
 | `onMessage`          | `Function` | `(ctx, message, isBinary) => {}`                      | Called when message received.                                                                                                                                                                                                                                            |
 | `onDropped`          | `Function` | `(ctx, message, isBinary) => {}`                      | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
@@ -443,7 +415,7 @@ would be overkill. Requires `ws.connectionKey` to be configured.
 server.sendTo('user-42', 'private message')
 ```
 
-**Returns:** `boolean` - `true` if a live connection was found and the backend
+**Returns:** `boolean` - `true` if a live connection was found and the transport
 did not report the message as dropped; `false` when the key is unknown or the
 backpressure limit was exceeded.
 
@@ -453,17 +425,16 @@ Pick one type for `connectionKey` return values and `sendTo()` arguments.
 #### `server.hasConnection(key)` / `server.getConnection(key)` / `server.connectionCount`
 
 Inspect the connection registry. `hasConnection` returns a `boolean`;
-`getConnection` returns the backend-specific raw WebSocket handle (or
-`undefined`); `connectionCount` is the number of registered connections. Only
-the methods declared by the package's `RawWebSocket` type are portable across
-backends. Additional uWS methods are available only when `backend: 'uws'` is
-selected.
+`getConnection` returns the raw WebSocket handle (or `undefined`);
+`connectionCount` is the number of registered connections. The package types
+only guarantee the methods declared by `RawWebSocket`; the native handle may
+provide additional uWS methods.
 
 ```javascript
 if (server.hasConnection('user-42')) {
   /* ... */
 }
-const raw = server.getConnection('user-42') // backend-specific handle or undefined
+const raw = server.getConnection('user-42') // raw uWS handle or undefined
 console.log(server.connectionCount)
 ```
 
@@ -793,7 +764,7 @@ ctx.onWritable((offset) => {
 ##### `ctx.tryEnd(chunk, totalSize)`
 
 Try to finish a streaming response whose total byte size is known. `totalSize`
-is required and is passed to the backend's `tryEnd` implementation.
+is required and is passed to the transport's `tryEnd` implementation.
 
 ```javascript
 const finalChunk = Buffer.from('final chunk')
@@ -822,11 +793,11 @@ The `ctx` object passed to WebSocket handlers:
 
 #### Properties
 
-| Property   | Type              | Description                                                                                                                                                                                                               |
-| ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.data` | `Object`          | User data from `onUpgrade` return value (`userData` field)                                                                                                                                                                |
-| `ctx.ws`   | `RawWebSocket`    | Backend-specific raw WebSocket handle. Identity-stable for the connection; only methods in the exported `RawWebSocket` type are portable across backends (see [Context lifetime & pooling](#wscontext-lifetime--pooling)) |
-| `ctx.key`  | `string`/`number` | Key this connection is registered under (from `connectionKey`), or `null`. Read-only.                                                                                                                                     |
+| Property   | Type              | Description                                                                                                                                                                                     |
+| ---------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.data` | `Object`          | User data from `onUpgrade` return value (`userData` field)                                                                                                                                      |
+| `ctx.ws`   | `RawWebSocket`    | Raw uWS WebSocket handle. Identity-stable for the connection; the exported `RawWebSocket` type documents the supported surface (see [Context lifetime & pooling](#wscontext-lifetime--pooling)) |
+| `ctx.key`  | `string`/`number` | Key this connection is registered under (from `connectionKey`), or `null`. Read-only.                                                                                                           |
 
 #### Methods
 
@@ -839,7 +810,7 @@ ctx.send('Hello client!')
 ctx.send(Buffer.from([1, 2, 3]), true) // binary
 ```
 
-**Returns:** `number` — backend-neutral send status mirroring uWS: `1` success,
+**Returns:** `number` — send status mirroring uWS: `1` success,
 `0` backpressure (queued behind backpressure), `2` dropped (not sent —
 backpressure limit exceeded). Check it to react to backpressure.
 
@@ -1196,9 +1167,9 @@ Notes:
   `ctx.key` is reset to `null`.
 - Keys are compared with strict `Map` identity — `42` and `'42'` are different
   addresses; stick to one type.
-- Need backend-specific low-level control? Use `server.getConnection(key)` and
-  narrow the handle for the selected backend. Methods beyond `RawWebSocket`
-  (such as uWS `getBufferedAmount()`) are not portable to the Node backend.
+- Need low-level control? Use `server.getConnection(key)` and narrow the handle
+  to the native uWS socket type. Methods beyond `RawWebSocket` (such as
+  `getBufferedAmount()`) are binding-specific.
 - Prefer managing your own `Map` instead? Store `ctx.ws` (identity-stable for the
   connection) rather than `ctx`, and delete it in `onClose`.
 

@@ -102,7 +102,7 @@ test('send types: ctx.status(201).sendText("ok") => 201', async () => {
   assert.strictEqual(text, 'ok')
 })
 
-test('send types: prepared headers work across backends', async () => {
+test('send types: prepared headers work', async () => {
   const headers = prepareHeaders({
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',

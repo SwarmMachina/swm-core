@@ -70,14 +70,8 @@ jobs:
       - name: HTTP e2e tests
         run: npm run test:e2e:http
 
-      - name: HTTP e2e tests (node backend)
-        run: npm run test:e2e:http:node
-
       - name: WS e2e tests
         run: npm run test:e2e:ws
-
-      - name: WS e2e tests (node backend)
-        run: npm run test:e2e:ws:node
 
       - name: uWebSockets.js reference binding compatibility
         run: npm run test:e2e:uwebsockets-reference
@@ -152,7 +146,7 @@ jobs:
           name: framework-comparison
           path: benchmark/profiles/compare-ci/
 
-      - name: Autobahn RFC 6455 conformance (node backend)
+      - name: Autobahn RFC 6455 conformance
         run: npm run test:autobahn
 
       - name: Upload Autobahn report

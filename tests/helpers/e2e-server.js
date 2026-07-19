@@ -1,10 +1,6 @@
 import Server from '../../src/index.js'
 import { getFreePort } from '../../helpers/ports.js'
 
-// Backend under test for e2e. Defaults to uws; set SWM_BACKEND=node to run the
-// HTTP suite against the zero-dependency node:http backend.
-const BACKEND = process.env.SWM_BACKEND || 'uws'
-
 /**
  * @param {object} opt
  * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.onRequest]
@@ -14,7 +10,7 @@ const BACKEND = process.env.SWM_BACKEND || 'uws'
  */
 export async function startHttpServer({ onRequest, routes, maxBodySize }) {
   const port = await getFreePort()
-  const server = new Server({ http: { onRequest, routes }, port, maxBodySize, backend: BACKEND })
+  const server = new Server({ http: { onRequest, routes }, port, maxBodySize })
 
   await server.listen()
 
@@ -41,8 +37,7 @@ export async function startWsServer({ ws, onRequest, routes, maxBodySize } = {})
     port,
     maxBodySize: maxBodySize ?? 16,
     http,
-    ws,
-    backend: BACKEND
+    ws
   })
 
   await server.listen()

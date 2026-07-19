@@ -55,7 +55,7 @@ export interface UpgradeResult {
 
 export interface WSOptions {
   wsIdleTimeoutSec?: number
-  /** Node backend: maximum time allowed for an asynchronous upgrade decision. @default 10000 */
+  /** Maximum time allowed for an asynchronous upgrade decision. @default 10000 */
   wsUpgradeTimeoutMs?: number
   onOpen?: (ctx: WSContext) => any
   onMessage?: (ctx: WSContext, message: ArrayBuffer, isBinary: boolean) => any
@@ -92,7 +92,7 @@ export type HttpOptions = HttpBaseOptions &
   )
 
 export interface CommonServerOptions {
-  /** Node backend transport errors emitted after the server has started listening. */
+  /** Transport errors emitted after the server has started listening. */
   onServerError?: (err: Error) => any | Promise<any>
   /** Address or hostname to bind. @default '127.0.0.1' */
   host?: string
@@ -100,13 +100,6 @@ export interface CommonServerOptions {
   port?: number
   /** Max request body size in MB (1-64). @default 1 */
   maxBodySize?: number
-  /**
-   * Transport backend. `'uws'` (default) is the native uWebSockets.js turbo
-   * engine. `'node'` is the bundled, opt-in node:http backend (HTTP +
-   * WebSocket).
-   * @default 'uws'
-   */
-  backend?: 'uws' | 'node'
 }
 
 /** At least one application protocol must be configured. Nullish `http`/`ws` disables that layer. */
@@ -165,11 +158,10 @@ export class HttpContext {
 export type WSSendStatus = 0 | 1 | 2
 
 /**
- * Raw per-connection WebSocket handle exposed as {@link WSContext.ws}. Backed
- * by the native uWebSockets.js socket (`'uws'` backend) or the node:http
- * WebSocket (`'node'` backend). Its identity is stable for the connection's
- * lifetime; invalid after close. Typed as an opaque interface so the package
- * does not expose backend-specific uWebSockets.js types in the public API.
+ * Raw per-connection WebSocket handle exposed as {@link WSContext.ws}. Its
+ * identity is stable for the connection's lifetime and invalid after close.
+ * Typed as an opaque interface so the package does not expose binding-specific
+ * uWebSockets.js types in the public API.
  */
 export interface RawWebSocket {
   getUserData(): any
@@ -196,7 +188,7 @@ export class WSContext {
   data: any
 
   /**
-   * Raw per-connection WebSocket handle (backend-specific).
+   * Raw per-connection WebSocket handle.
    * Stable for the connection lifetime; invalid after close.
    */
   ws: RawWebSocket
@@ -217,9 +209,6 @@ export default class Server {
 
   readonly host: string
   readonly port: number
-  /** The selected transport backend. */
-  readonly backend: 'uws' | 'node'
-
   /** Start the server and begin accepting connections. */
   listen(): Promise<this>
   /** Gracefully shut down, waiting up to `timeout` ms for active connections to finish. @default 10000 */
@@ -234,13 +223,13 @@ export default class Server {
    * Send a message directly to the single connection registered under `key`
    * (from `ws.connectionKey`). For 1:1 messaging where topic pub/sub is overkill.
    * @returns `true` if a live connection was found and the message was not
-   * dropped; `false` when the key is unknown or the selected backend reported
+   * dropped; `false` when the key is unknown or the transport reported
    * DROPPED (backpressure limit exceeded).
    */
   sendTo(key: string | number, message: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): boolean
   /** Whether a live connection is registered under `key`. */
   hasConnection(key: string | number): boolean
-  /** Backend-specific raw socket, or `undefined`. Only `RawWebSocket` methods are portable across backends. */
+  /** Raw uWS socket, or `undefined`. `RawWebSocket` documents the supported surface. */
   getConnection(key: string | number): RawWebSocket | undefined
   /** Number of registered addressable connections. */
   readonly connectionCount: number

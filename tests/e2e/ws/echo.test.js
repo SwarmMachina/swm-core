@@ -90,7 +90,7 @@ test('ws upgrade selects only the subprotocol returned by onUpgrade', async () =
   sock.close()
 })
 
-test('backend aborts an asynchronous upgrade after wsUpgradeTimeoutMs', async () => {
+test('transport aborts an asynchronous upgrade after wsUpgradeTimeoutMs', async () => {
   handle = await startWsServer({
     ws: {
       wsUpgradeTimeoutMs: 100,

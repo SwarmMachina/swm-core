@@ -14,14 +14,12 @@ import {
 } from '../helpers/mock-uws-module.js'
 import { STATUS_TEXT } from '../../src/constants.js'
 
-// These unit tests exercise the Server against the uWS mock (installed via the
-// loader hook), so they pin the uws backend. The backend-selection describe
-// block below uses `new Server` directly to test the default and validation.
+// These unit tests exercise the Server against the uWS mock installed by the
+// loader hook.
 const makeServer = ({ onRequest, routes, httpError, http, ...opt } = {}) => {
   const hasHttpOptions = onRequest !== undefined || routes !== undefined || httpError !== undefined
 
   return new Server({
-    backend: 'uws',
     ...opt,
     http: http ?? (hasHttpOptions ? { onRequest, routes, onError: httpError } : undefined)
   })
@@ -386,43 +384,17 @@ describe('Server', () => {
     })
   })
 
-  describe('backend selection', () => {
-    // This block tests the backend option itself, so it uses `new Server`
-    // directly (not the uws-pinning makeServer helper).
-    test('should default to the uws backend', () => {
-      const server = new Server({ http: { onRequest: () => {} } })
-
-      strictEqual(server.backend, 'uws')
-    })
-
-    test('should accept the opt-in node backend', () => {
-      const server = new Server({ http: { onRequest: () => {} }, backend: 'node' })
-
-      strictEqual(server.backend, 'node')
-    })
-
-    test('should throw on an unknown backend', () => {
-      throws(() => new Server({ http: { onRequest: () => {} }, backend: 'bogus' }), {
+  describe('transport loading', () => {
+    test('should reject the removed backend option', () => {
+      throws(() => new Server({ http: { onRequest: () => {} }, backend: 'node' }), {
         name: 'TypeError',
-        message: "backend must be 'uws' or 'node'"
+        message: 'backend is no longer configurable; swm-uws is always used'
       })
     })
 
-    test('keeps the node backend when combined with WebSocket options', () => {
-      const server = new Server({
-        http: { onRequest: () => {} },
-        backend: 'node',
-        ws: { onMessage: () => {} }
-      })
-
-      // The node backend serves WebSocket natively when explicitly selected.
-      strictEqual(server.backend, 'node')
-      strictEqual(server.ws !== null, true)
-    })
-
-    test('should load the backend lazily via listen(), not in the constructor', () => {
+    test('should load the transport lazily via listen(), not in the constructor', () => {
       // Constructing must not touch the uws module at all.
-      new Server({ http: { onRequest: () => {} }, backend: 'uws' })
+      new Server({ http: { onRequest: () => {} } })
 
       strictEqual(getCurrentMockApp(), null)
     })

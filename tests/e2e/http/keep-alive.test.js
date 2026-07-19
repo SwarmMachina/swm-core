@@ -56,7 +56,7 @@ test('reuses a keep-alive connection after a request whose body is never read', 
   const agent = new http.Agent({ keepAlive: true, maxSockets: 1 })
 
   try {
-    // Handler ignores the body; the backend must drain it so the socket stays usable.
+    // Handler ignores the body; the transport must drain it so the socket stays usable.
     const first = await request(agent, { method: 'POST', port, path: '/noread', body: 'x'.repeat(4096) })
     const second = await request(agent, { method: 'GET', port, path: '/next' })
 

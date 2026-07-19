@@ -186,15 +186,10 @@ function selectWsProtocol(requestedHeader, selected) {
 }
 
 /**
- * Resolve a backend module to the uWS-shaped surface and its optional capabilities.
- * @param {'uws'|'node'} name
+ * Resolve the native transport surface and its optional capabilities.
  * @returns {Promise<{App: (...args: unknown[]) => object, us_listen_socket_close: (socket: unknown) => void, capabilities?: object}>}
  */
-async function loadBackend(name) {
-  if (name === 'node') {
-    return import('./backends/node-http/index.js')
-  }
-
+async function loadBackend() {
   const mod = await import('./backends/uws.js')
 
   return mod.load()
@@ -257,7 +252,6 @@ export default class Server {
    * @param {number} [opt.port]
    * @param {number} [opt.maxBodySize] - in mb
    * @param {WSOptions|null} [opt.ws]
-   * @param {'uws'|'node'} [opt.backend] - Transport backend. 'uws' (default) is the native turbo engine; 'node' is the opt-in node:http backend.
    */
   constructor(opt = {}) {
     if (typeof opt !== 'object' || opt === null || Array.isArray(opt)) {
@@ -270,15 +264,11 @@ export default class Server {
       )
     }
 
-    const {
-      http: httpOptions,
-      onServerError,
-      host = '127.0.0.1',
-      port = 6000,
-      maxBodySize = 1,
-      ws: wsOptions,
-      backend = 'uws'
-    } = opt
+    if ('backend' in opt) {
+      throw new TypeError('backend is no longer configurable; swm-uws is always used')
+    }
+
+    const { http: httpOptions, onServerError, host = '127.0.0.1', port = 6000, maxBodySize = 1, ws: wsOptions } = opt
     const http = normalizeHttpOptions(httpOptions)
     const ws = normalizeWsOptions(wsOptions)
 
@@ -302,11 +292,6 @@ export default class Server {
       throw new TypeError('onServerError must be a function')
     }
 
-    if (backend !== 'uws' && backend !== 'node') {
-      throw new TypeError("backend must be 'uws' or 'node'")
-    }
-
-    this.backend = backend
     this.host = host
     this.port = port
     this.http = http
@@ -369,7 +354,7 @@ export default class Server {
    */
   async #doListen() {
     if (!this.app) {
-      this.#backend = await loadBackend(this.backend)
+      this.#backend = await loadBackend()
       this.bindingCapabilities = Object.freeze({ ...(this.#backend.capabilities || {}) })
       this.app = this.#backend.App()
       this.app.onError?.((err) => void this.safeCall(this.onServerError, err))

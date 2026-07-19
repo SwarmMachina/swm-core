@@ -3,21 +3,12 @@ import { parseArgs } from 'node:util'
 const { values } = parseArgs({
   options: {
     duration: { type: 'string', default: '300' },
-    backend: { type: 'string', default: 'uws' },
     scenarios: { type: 'string', default: '' },
     interval: { type: 'string', default: '5' },
-    // Calibrated 2026-07-11 from 540s/5s steady-state runs: whole-run post-warmup
-    // slopes were uws -20.3 / node +149.4 KB/s, but last-half slopes were
-    // uws -50.6 / node +62.6 KB/s with RSS plateauing (node peaked 254.7MB @345s,
-    // ended 220.8MB) and flat heapUsed - asymptotic warmup growth, not retention.
-    // Default = ~3x the worst last-half slope (200 KB/s).
+    // Default is a conservative 200 KB/s ceiling for post-warmup RSS growth.
     'max-slope': { type: 'string', default: '204800' }
   }
 })
-
-// Must be set before e2e-server.js is imported: it reads the env at load time.
-process.env.SWM_BACKEND = values.backend
-
 const { startHttpServer, startWsServer } = await import('../helpers/e2e-server.js')
 const { makeHttpScenarios } = await import('../leak/scenarios/http.js')
 const { makeWsScenarios } = await import('../leak/scenarios/ws.js')
@@ -55,9 +46,7 @@ const samples = []
 let iterations = 0
 let nextSampleAt = startedAt + intervalMs
 
-console.log(
-  `soak: backend=${values.backend} duration=${values.duration}s scenarios=${entries.map((e) => e.scenario.name).join(',')}`
-)
+console.log(`soak: duration=${values.duration}s scenarios=${entries.map((e) => e.scenario.name).join(',')}`)
 
 /** @returns {void} */
 function takeSample() {
