@@ -389,7 +389,7 @@ export default class HttpContext {
       const hasEq = eq !== -1 && eq < end
       const key = hasEq ? fullQuery.slice(start, eq) : fullQuery.slice(start, end)
 
-      if (!(key in this.#query)) {
+      if (!Object.hasOwn(this.#query, key)) {
         this.#query[key] = hasEq ? fullQuery.slice(eq + 1, end) : ''
       }
 
@@ -473,14 +473,14 @@ export default class HttpContext {
    * @returns {string|undefined}
    */
   query(name) {
-    if (name in this.#query) {
+    if (Object.hasOwn(this.#query, name)) {
       return this.#query[name]
     }
 
     if (this.#fullQueryCached) {
       this.#parseFullQuery()
 
-      if (name in this.#query) {
+      if (Object.hasOwn(this.#query, name)) {
         return this.#query[name]
       }
 
@@ -505,7 +505,7 @@ export default class HttpContext {
    * @returns {string|undefined}
    */
   param(i) {
-    if (i in this.#params) {
+    if (Object.hasOwn(this.#params, i)) {
       return this.#params[i]
     }
 
@@ -543,7 +543,7 @@ export default class HttpContext {
   header(name) {
     const headerName = name.toLowerCase()
 
-    if (headerName in this.#headers) {
+    if (Object.hasOwn(this.#headers, headerName)) {
       return this.#headers[headerName]
     }
 

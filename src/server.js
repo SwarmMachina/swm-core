@@ -40,17 +40,17 @@ export default class Server {
       throw new TypeError('Server options must be an object')
     }
 
-    if ('router' in opt || 'routes' in opt || 'onHttpError' in opt) {
+    if (Object.hasOwn(opt, 'router') || Object.hasOwn(opt, 'routes') || Object.hasOwn(opt, 'onHttpError')) {
       throw new TypeError(
         'Legacy HTTP options are no longer supported; use http.onRequest, http.routes, and http.onError'
       )
     }
 
-    if ('backend' in opt) {
+    if (Object.hasOwn(opt, 'backend')) {
       throw new TypeError('backend is no longer configurable; swm-uws is always used')
     }
 
-    if ('maxBodySize' in opt) {
+    if (Object.hasOwn(opt, 'maxBodySize')) {
       throw new TypeError('maxBodySize is no longer a server option; use http.maxBodySize and ws.maxBodySize')
     }
 

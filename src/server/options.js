@@ -122,7 +122,7 @@ function validateRoute(route, index) {
     throw new TypeError(`http.routes[${index}] must be an object`)
   }
 
-  if ('preHandler' in route) {
+  if (Object.hasOwn(route, 'preHandler')) {
     throw new TypeError(`http.routes[${index}].preHandler is no longer supported; use before`)
   }
 
@@ -219,11 +219,11 @@ export function normalizeWsOptions(ws) {
 
   assertOptionsObject(ws, 'ws')
 
-  if ('enabled' in ws) {
+  if (Object.hasOwn(ws, 'enabled')) {
     throw new TypeError('ws.enabled is no longer supported; use ws: null to disable WebSocket')
   }
 
-  if ('wsIdleTimeoutSec' in ws || 'wsUpgradeTimeoutMs' in ws) {
+  if (Object.hasOwn(ws, 'wsIdleTimeoutSec') || Object.hasOwn(ws, 'wsUpgradeTimeoutMs')) {
     throw new TypeError(
       'Legacy WebSocket timeout options are no longer supported; use ws.idleTimeoutSec and ws.upgradeTimeoutMs'
     )
