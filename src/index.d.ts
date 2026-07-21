@@ -118,7 +118,7 @@ export type ServerOptions = CommonServerOptions &
   ({ http: HttpOptions; ws?: WSOptions | null } | { http?: HttpOptions | null; ws: WSOptions })
 
 /** Per-request context passed to HTTP handlers. Instances are pooled and reused. */
-export class HttpContext {
+export interface HttpContext {
   /** Whether a response has already been sent. */
   replied: boolean
   /** Whether the underlying request was aborted by the client. */
@@ -180,6 +180,12 @@ export type WSSendStatus = 0 | 1 | 2
  */
 export interface RawWebSocket {
   getUserData(): any
+  getBufferedAmount(): number
+  getRemoteAddress(): ArrayBuffer
+  getRemoteAddressAsText(): ArrayBuffer
+  getRemotePort(): number
+  isSubscribed(topic: string): boolean
+  getTopics(): string[]
   send(data: string | ArrayBuffer | ArrayBufferView, isBinary?: boolean): WSSendStatus
   end(code?: number, reason?: string): void
   close(): void
@@ -199,7 +205,7 @@ export type UWebSocket = RawWebSocket
  * For cross-connection sends, use `connectionKey` + `Server.sendTo`, or store
  * the raw `ws` handle and remove it on close.
  */
-export class WSContext {
+export interface WSContext {
   /** User data returned from `ws.onUpgrade`. */
   data: any
 
@@ -222,11 +228,15 @@ export class WSContext {
   decode(message: ArrayBuffer | ArrayBufferView): string
 }
 
-export default class Server {
+declare class Server {
   constructor(options: ServerOptions)
 
   readonly host: string
   readonly port: number
+  /** Number of HTTP requests whose lifecycle has not completed. */
+  readonly activeHttp: number
+  /** Number of open WebSocket connections. */
+  readonly activeWs: number
   /** Start the server and begin accepting connections. */
   listen(): Promise<this>
   /** Gracefully shut down, waiting up to `timeout` ms for active connections to finish. @default 10000 */
@@ -256,6 +266,9 @@ export default class Server {
   /** Number of registered addressable connections. */
   readonly connectionCount: number
 }
+
+export default Server
+export type { Server }
 
 export interface CorsOptions {
   /** @default '*' */

@@ -67,6 +67,14 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Packed consumer type resolution
+        if: matrix.node-version == '22'
+        run: npm run test:types
+
+      - name: Package metadata and contents
+        if: matrix.node-version == '22'
+        run: npm run test:package
+
       - name: HTTP e2e tests
         run: npm run test:e2e:http
 
