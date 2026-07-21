@@ -2,9 +2,11 @@ import BodyParser from './body-parser.js'
 import ResStreamer from './res-streamer.js'
 import { CACHED_ERRORS, JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './constants.js'
 import { assertHeaderValue, getPreparedHeaders } from './prepared-headers.js'
+import { getRemoteAddress } from './remote-address.js'
 
 export default class HttpContext {
   #ip = ''
+  #ipCached = false
   #method = ''
   #url = ''
   #headersCached = false
@@ -190,6 +192,7 @@ export default class HttpContext {
       this.#contentLength = undefined
       this.#pendingHeaders.clear()
       this.#ip = ''
+      this.#ipCached = false
       this.#url = ''
       this.#method = ''
       this.#headersCached = false
@@ -254,6 +257,7 @@ export default class HttpContext {
       this.#contentLength = undefined
       this.#pendingHeaders.clear()
       this.#ip = ''
+      this.#ipCached = false
       this.#url = ''
       this.#method = ''
       this.#headersCached = false
@@ -404,17 +408,12 @@ export default class HttpContext {
   }
 
   ip() {
-    if (!this.res) {
-      return ''
-    }
-
-    if (this.#ip) {
+    if (this.#ipCached) {
       return this.#ip
     }
 
-    const ipBuffer = this.res.getProxiedRemoteAddressAsText?.() || this.res.getRemoteAddressAsText?.()
-
-    this.#ip = ipBuffer ? Buffer.from(ipBuffer).toString('utf8') : ''
+    this.#ip = getRemoteAddress(this.res)
+    this.#ipCached = true
 
     return this.#ip
   }

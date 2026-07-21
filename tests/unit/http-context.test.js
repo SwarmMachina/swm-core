@@ -167,7 +167,7 @@ describe('HttpContext', () => {
         strictEqual(ctx.ip(), '')
       })
 
-      test('should use getProxiedRemoteAddressAsText if available', () => {
+      test('should use the binary proxied address if available', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq()
@@ -176,10 +176,11 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         strictEqual(ctx.ip(), '1.2.3.4')
-        strictEqual(res.getProxiedRemoteAddressAsTextCallCount(), 1)
+        strictEqual(res.getProxiedRemoteAddressCallCount(), 1)
+        strictEqual(res.getProxiedRemoteAddressAsTextCallCount(), 0)
       })
 
-      test('should fallback to getRemoteAddressAsText if proxied is not available', () => {
+      test('should fallback to the binary remote address if proxied is empty', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq()
@@ -188,7 +189,9 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         strictEqual(ctx.ip(), '5.6.7.8')
-        strictEqual(res.getRemoteAddressAsTextCallCount(), 1)
+        strictEqual(res.getProxiedRemoteAddressCallCount(), 1)
+        strictEqual(res.getRemoteAddressCallCount(), 1)
+        strictEqual(res.getRemoteAddressAsTextCallCount(), 0)
       })
 
       test('should cache result', () => {
@@ -202,7 +205,7 @@ describe('HttpContext', () => {
         ctx.ip()
         ctx.ip()
 
-        strictEqual(res.getProxiedRemoteAddressAsTextCallCount(), 1)
+        strictEqual(res.getProxiedRemoteAddressCallCount(), 1)
       })
     })
 

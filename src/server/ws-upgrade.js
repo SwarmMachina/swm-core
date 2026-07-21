@@ -1,4 +1,5 @@
 import { STATUS_TEXT } from '../constants.js'
+import { getRemoteAddress } from '../remote-address.js'
 import { isPromise, selectWsProtocol } from './utils.js'
 
 export default class WebSocketUpgradeRuntime {
@@ -62,13 +63,15 @@ export default class WebSocketUpgradeRuntime {
     const secWebSocketExtensions = req.getHeader('sec-websocket-extensions')
     const meta = {
       url: () => req.getUrl(),
-      ip: () => {
-        const ipBuffer = res.getProxiedRemoteAddressAsText?.() || res.getRemoteAddressAsText?.()
-
-        return ipBuffer ? Buffer.from(ipBuffer).toString('utf8') : ''
-      },
+      ip: () => getRemoteAddress(res),
       getParameter: (index) => req.getParameter(index),
-      getQuery: (key) => req.getQuery(key),
+      getQuery: (key) => {
+        if (key === undefined) {
+          return req.getQuery()
+        }
+
+        return req.getQuery(key)
+      },
       getHeader: (name) => req.getHeader(name),
       aborted: false
     }

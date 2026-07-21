@@ -11,8 +11,12 @@ export function createMockRes(options = {}) {
   let collectBodyCb = null
   let getProxiedRemoteAddressAsTextCallCount = 0
   let getRemoteAddressAsTextCallCount = 0
-  let proxiedIp = null
-  let remoteIp = null
+  let getProxiedRemoteAddressCallCount = 0
+  let getRemoteAddressCallCount = 0
+  let proxiedIp = new ArrayBuffer(0)
+  let proxiedAddress = new ArrayBuffer(0)
+  let remoteIp = new ArrayBuffer(0)
+  let remoteAddress = new ArrayBuffer(0)
   let writeOffset = 0
   let writeResultSequence = []
   let writeResultFn = null
@@ -39,16 +43,32 @@ export function createMockRes(options = {}) {
       onDataCb(buffer, isLast)
     },
     setProxiedIp(ip) {
-      proxiedIp = ip ? Buffer.from(ip) : null
+      proxiedIp = ip ? Uint8Array.from(Buffer.from(ip)).buffer : new ArrayBuffer(0)
+      proxiedAddress = ipv4Buffer(ip)
     },
     setRemoteIp(ip) {
-      remoteIp = ip ? Buffer.from(ip) : null
+      remoteIp = ip ? Uint8Array.from(Buffer.from(ip)).buffer : new ArrayBuffer(0)
+      remoteAddress = ipv4Buffer(ip)
+    },
+    setProxiedAddress(bytes, text = '') {
+      proxiedAddress = Uint8Array.from(bytes).buffer
+      proxiedIp = Uint8Array.from(Buffer.from(text)).buffer
+    },
+    setRemoteAddress(bytes, text = '') {
+      remoteAddress = Uint8Array.from(bytes).buffer
+      remoteIp = Uint8Array.from(Buffer.from(text)).buffer
     },
     getProxiedRemoteAddressAsTextCallCount() {
       return getProxiedRemoteAddressAsTextCallCount
     },
     getRemoteAddressAsTextCallCount() {
       return getRemoteAddressAsTextCallCount
+    },
+    getProxiedRemoteAddressCallCount() {
+      return getProxiedRemoteAddressCallCount
+    },
+    getRemoteAddressCallCount() {
+      return getRemoteAddressCallCount
     },
     getWarnings() {
       return [...warnings]
@@ -116,10 +136,20 @@ export function createMockRes(options = {}) {
 
       return proxiedIp
     },
+    getProxiedRemoteAddress() {
+      getProxiedRemoteAddressCallCount++
+
+      return proxiedAddress
+    },
     getRemoteAddressAsText() {
       getRemoteAddressAsTextCallCount++
 
       return remoteIp
+    },
+    getRemoteAddress() {
+      getRemoteAddressCallCount++
+
+      return remoteAddress
     },
     write(chunk) {
       calls.push(['write', chunk])
@@ -190,6 +220,22 @@ export function createMockRes(options = {}) {
   }
 
   return res
+}
+
+/**
+ * @param {unknown} ip
+ * @returns {ArrayBuffer}
+ */
+function ipv4Buffer(ip) {
+  if (typeof ip !== 'string') {
+    return new ArrayBuffer(0)
+  }
+
+  const octets = ip.split('.').map(Number)
+
+  return octets.length === 4 && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+    ? Uint8Array.from(octets).buffer
+    : new ArrayBuffer(0)
 }
 
 /**

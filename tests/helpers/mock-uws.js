@@ -259,10 +259,16 @@ export function createMockHttpResponse() {
       return true
     },
     getRemoteAddressAsText() {
-      return undefined
+      return new ArrayBuffer(0)
     },
     getProxiedRemoteAddressAsText() {
-      return undefined
+      return new ArrayBuffer(0)
+    },
+    getRemoteAddress() {
+      return new ArrayBuffer(0)
+    },
+    getProxiedRemoteAddress() {
+      return new ArrayBuffer(0)
     }
   }
 }
