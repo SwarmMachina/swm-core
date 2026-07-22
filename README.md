@@ -23,7 +23,7 @@ native binding.
 
 ```bash
 # Install the package and its swm-uws runtime dependency
-npm install @swarmmachina/swm-core
+pnpm add @swarmmachina/swm-core
 ```
 
 ### Runtime requirements
@@ -45,9 +45,9 @@ the same `swm-core` HTTP and WebSocket paths against the dev-only
 `uWebSockets.js@20.69.0` reference, changing only the native binding.
 
 ```bash
-npm run test:e2e:bindings
-npm run bench:bindings
-npm run bench:bindings:deep
+pnpm test:e2e:bindings
+pnpm bench:bindings
+pnpm bench:bindings:deep
 ```
 
 `bench:bindings` is the CI gate; `bench:bindings:deep` is the longer diagnostic
@@ -57,8 +57,8 @@ Parameters can be overridden with `BINDING_BENCH_*` or `DEEP_BINDING_*`.
 To advance the runtime binding and its upstream reference together, run:
 
 ```bash
-npm run deps:update:bindings -- 0.5.0 v20.69.0
-npm run test:e2e:bindings
+pnpm deps:update:bindings 0.5.0 v20.69.0
+pnpm test:e2e:bindings
 ```
 
 The updater changes both pins and the lockfile; do not edit them independently.
@@ -108,8 +108,8 @@ database before it asks for the body:
 
 ```javascript
 const server = new Server({
-  prefetch: true,
   http: {
+    prefetch: true,
     onRequest: async (ctx) => {
       if (ctx.method() !== 'post') {
         return null
@@ -134,7 +134,7 @@ const server = new Server({
 ```
 
 Declarative routes can enable or disable prefetch individually. An omitted
-`prefetch` inherits the server-level flag:
+route `prefetch` inherits `http.prefetch`:
 
 ```javascript
 const server = new Server({
@@ -334,10 +334,7 @@ const server = new Server({
   },
   ws: {
     idleTimeoutSec: 30,
-    onUpgrade: (meta) => ({
-      isAllowed: true,
-      userData: { ip: meta.ip() }
-    }),
+    onUpgrade: (meta) => ({ ip: meta.ip() }),
     onOpen: (ctx) => {
       console.log('Client connected:', ctx.data.ip)
       ctx.send('Welcome!')
@@ -372,14 +369,13 @@ new Server(options)
 
 **Options:**
 
-| Option          | Type            | Default       | Description                                      |
-| --------------- | --------------- | ------------- | ------------------------------------------------ |
-| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)       |
-| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below)  |
-| `onServerError` | `Function`      | `() => {}`    | Post-listen transport error handler              |
-| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                      |
-| `port`          | `Number`        | `6000`        | Server port (1-65535)                            |
-| `prefetch`      | `Boolean`       | `false`       | Collect HTTP request bodies before user handlers |
+| Option          | Type            | Default       | Description                                     |
+| --------------- | --------------- | ------------- | ----------------------------------------------- |
+| `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)      |
+| `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below) |
+| `onServerError` | `Function`      | `() => {}`    | Post-listen transport error handler             |
+| `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                     |
+| `port`          | `Number`        | `6000`        | Server port (1-65535)                           |
 
 At least one of `http` or `ws` must be an object. A nullish value disables that
 application layer. `http: null` with a configured `ws` still creates the minimal
@@ -400,6 +396,7 @@ a fixed `404` without allocating an `HttpContext`.
 | `maxBodySize`      | `Number`   | `1`         | Max HTTP request body size in MB (1-64).                   |
 | `maxBodyBudget`    | `Number`   | `0`         | Aggregate body collection budget in MB; `0` disables it.   |
 | `requestTimeoutMs` | `Number`   | `0`         | Async handler timeout in ms (100-300000); `0` disables it. |
+| `prefetch`         | `Boolean`  | `false`     | Collect request bodies before user handlers run.           |
 | `onRequest`        | `Function` | default 404 | Universal request handler `(ctx) => any`                   |
 | `routes`           | `Array`    | default 404 | Declarative route definitions                              |
 | `onError`          | `Function` | `() => {}`  | Request error handler `(ctx, error) => void`               |
@@ -416,8 +413,8 @@ all three explicitly:
 
 ```javascript
 const server = new Server({
-  prefetch: true,
   http: {
+    prefetch: true,
     maxBodySize: 8,
     maxBodyBudget: 256,
     requestTimeoutMs: 30_000,
@@ -448,31 +445,61 @@ passed to `http.onError`.
 | `path`     | `String`           | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                               |
 | `handler`  | `Function`         | Handler function `(ctx) => any \| Promise<any>`                                                          |
 | `before`   | `Function`/`Array` | Optional. One function or an array, run before `handler` (see [Route before hooks](#route-before-hooks)) |
-| `prefetch` | `Boolean`          | Optional route override. `true` enables prefetch, `false` forces lazy, omitted inherits the server mode  |
+| `prefetch` | `Boolean`          | Optional route override. `true` enables prefetch, `false` forces lazy, omitted inherits `http.prefetch`  |
 
 **WebSocket Options (`ws` object):**
 
-| Option             | Type       | Default                                               | Description                                                                                                                                                                                                                                                              |
-| ------------------ | ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `maxBodySize`      | `Number`   | `1`                                                   | Max WebSocket message payload size in MB (1-64).                                                                                                                                                                                                                         |
-| `idleTimeoutSec`   | `Number`   | `15`                                                  | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
-| `upgradeTimeoutMs` | `Number`   | `10000`                                               | Deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                                       |
-| `onOpen`           | `Function` | `(ctx) => {}`                                         | Called when client connects.                                                                                                                                                                                                                                             |
-| `onMessage`        | `Function` | `(ctx, message, isBinary) => {}`                      | Called when message received.                                                                                                                                                                                                                                            |
-| `onDropped`        | `Function` | `(ctx, message, isBinary) => {}`                      | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
-| `onClose`          | `Function` | `(ctx, code, message) => {}`                          | Called when client disconnects.                                                                                                                                                                                                                                          |
-| `onDrain`          | `Function` | `(ctx) => {}`                                         | Called when socket is writable again.                                                                                                                                                                                                                                    |
-| `onError`          | `Function` | `(ctx, error) => {}`                                  | Called on WebSocket error.                                                                                                                                                                                                                                               |
-| `onUpgrade`        | `Function` | `(meta) => ({isAllowed: true, userData?, protocol?})` | Validate WebSocket upgrade. `protocol`, when returned, must exactly match one token from `meta.getHeader('sec-websocket-protocol')`. Call metadata getters synchronously before any `await`; the underlying uWS request is only valid for the synchronous callback.      |
-| `onSubscription`   | `Function` | `(ctx, topic, newCount, oldCount) => {}`              | Called on topic subscription change.                                                                                                                                                                                                                                     |
-| `connectionKey`    | `Function` | `undefined`                                           | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
+| Option             | Type       | Default                                  | Description                                                                                                                                                                                                                                                              |
+| ------------------ | ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxBodySize`      | `Number`   | `1`                                      | Max WebSocket message payload size in MB (1-64).                                                                                                                                                                                                                         |
+| `idleTimeoutSec`   | `Number`   | `15`                                     | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
+| `upgradeTimeoutMs` | `Number`   | `10000`                                  | Deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                                       |
+| `onOpen`           | `Function` | `(ctx) => {}`                            | Called when client connects.                                                                                                                                                                                                                                             |
+| `onMessage`        | `Function` | `(ctx, message, isBinary) => {}`         | Called when message received.                                                                                                                                                                                                                                            |
+| `onDropped`        | `Function` | `(ctx, message, isBinary) => {}`         | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
+| `onClose`          | `Function` | `(ctx, code, message) => {}`             | Called when client disconnects.                                                                                                                                                                                                                                          |
+| `onDrain`          | `Function` | `(ctx) => {}`                            | Called when socket is writable again.                                                                                                                                                                                                                                    |
+| `onError`          | `Function` | `(ctx, error) => {}`                     | Called on WebSocket error.                                                                                                                                                                                                                                               |
+| `onUpgrade`        | `Function` | `(meta) => ({})`                         | Authenticate the upgrade. Return `false` to reject with `403`, or a flat object to accept and expose it as `ctx.data`. Async handlers receive an owned metadata snapshot after their synchronous prefix.                                                                 |
+| `selectProtocol`   | `Function` | `undefined`                              | Optional synchronous `(requested, userData) => string \| undefined` subprotocol selector. The returned token must be present in the client-requested list.                                                                                                               |
+| `onSubscription`   | `Function` | `(ctx, topic, newCount, oldCount) => {}` | Called on topic subscription change.                                                                                                                                                                                                                                     |
+| `connectionKey`    | `Function` | `undefined`                              | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
 
 `ws: {}` enables WebSocket with permissive upgrades and no-op lifecycle
 callbacks. Use `ws: null` (or omit `ws` when `http` is configured) to disable it.
 
-When a client requests WebSocket subprotocols, `onUpgrade` must explicitly
-return the selected token as `protocol`. The value must be one of the requested
-tokens; raw client input is never reflected automatically.
+`selectProtocol` runs synchronously after `onUpgrade` accepts. Return one of the
+requested tokens; returning `undefined` (or omitting the selector) negotiates no
+subprotocol.
+
+```javascript
+const server = new Server({
+  http: null,
+  ws: {
+    onUpgrade: async (meta) => {
+      const token = meta.getHeader('authorization')
+      const user = await authenticate(token)
+
+      return user ? { userId: user.id, role: user.role } : false
+    },
+    selectProtocol: (requested, userData) => {
+      if (userData.role === 'admin' && requested.includes('admin.v1')) {
+        return 'admin.v1'
+      }
+
+      return requested.includes('chat.v1') ? 'chat.v1' : undefined
+    }
+  }
+})
+
+// Browser/client: offer the protocols the client supports.
+const socket = new WebSocket('wss://example.com', ['chat.v1', 'admin.v1'])
+```
+
+The negotiated value is available as `socket.protocol`. Async upgrades snapshot
+URL, IP, headers, query, and the `/*` parameter before the native request
+expires, so `UpgradeMeta` remains safe after an `await`. This snapshot is
+unrelated to `http.prefetch`.
 
 ### Server Methods
 
@@ -972,7 +999,7 @@ The `ctx` object passed to WebSocket handlers:
 
 | Property   | Type              | Description                                                                                                                                                                                     |
 | ---------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.data` | `Object`          | User data from `onUpgrade` return value (`userData` field)                                                                                                                                      |
+| `ctx.data` | `Object`          | Flat user data object returned by `onUpgrade`                                                                                                                                                   |
 | `ctx.ws`   | `RawWebSocket`    | Raw uWS WebSocket handle. Identity-stable for the connection; the exported `RawWebSocket` type documents the supported surface (see [Context lifetime & pooling](#wscontext-lifetime--pooling)) |
 | `ctx.key`  | `string`/`number` | Key this connection is registered under (from `connectionKey`), or `null`. Read-only.                                                                                                           |
 
@@ -1223,10 +1250,7 @@ const server = new Server({
   port: 3000,
   http: null,
   ws: {
-    onUpgrade: (meta) => ({
-      isAllowed: true,
-      userData: { username: meta.getQuery('username') || 'Anonymous' }
-    }),
+    onUpgrade: (meta) => ({ username: meta.getQuery('username') || 'Anonymous' }),
     onOpen: (ctx) => {
       console.log('User joined:', ctx.data.username)
       ctx.subscribe('chat')
@@ -1282,18 +1306,15 @@ const server = new Server({
       const token = meta.getQuery('token') || meta.getHeader('authorization')
 
       if (!token) {
-        return { isAllowed: false }
+        return false
       }
 
       try {
         const user = await validateToken(token)
 
-        return {
-          isAllowed: true,
-          userData: { userId: user.id, username: user.name }
-        }
+        return { userId: user.id, username: user.name }
       } catch (error) {
-        return { isAllowed: false }
+        return false
       }
     },
     onOpen: (ctx) => {
@@ -1325,10 +1346,7 @@ const server = new Server({
   port: 3000,
   http: null,
   ws: {
-    onUpgrade: (meta) => ({
-      isAllowed: true,
-      userData: { userId: meta.getQuery('userId') }
-    }),
+    onUpgrade: (meta) => ({ userId: meta.getQuery('userId') }),
     // Address each connection by its user id.
     connectionKey: (ctx) => ctx.data.userId,
     onMessage: (ctx, message) => {
@@ -1418,8 +1436,8 @@ const server = new Server({
 
 - Run in order and stay synchronous until a hook actually returns a Promise;
   replying (`ctx.replied`) stops the chain.
-- Before reading a body after an async hook, enable `prefetch` or start the body
-  reader inside that hook before its first `await`; see
+- Before reading a body after an async hook, enable `http.prefetch` or route
+  `prefetch`, or start the body reader inside that hook before its first `await`; see
   [Async Work Before Using the Request Body](#async-work-before-using-the-request-body).
 - Composed once at registration — zero per-request cost for routes without one.
 - Declarative `http.routes` API only (not `http.onRequest`).
@@ -1571,10 +1589,10 @@ const server = new Server({
 
 ```bash
 # Run tests
-npm test
+pnpm test
 
 # Run tests with coverage
-npm run test:coverage
+pnpm test:coverage
 ```
 
 Body-prefetch performance comparison (balanced lazy/prefetch order, including
@@ -1588,7 +1606,7 @@ BODY_PREFETCH_CONNECTIONS=100 \
 BODY_PREFETCH_GET_PIPELINING=10 \
 BODY_PREFETCH_BODY_PIPELINING=1 \
 BODY_PREFETCH_SAMPLE_MS=250 \
-npm run bench:body-prefetch
+pnpm bench:body-prefetch
 ```
 
 The generated JSON and Markdown reports are written to
@@ -1603,7 +1621,7 @@ BODY_SAFETY_WARMUP=2 \
 BODY_SAFETY_DURATION=6 \
 BODY_SAFETY_CONNECTIONS=100 \
 BODY_SAFETY_SAMPLE_MS=250 \
-npm run bench:body-safety
+pnpm bench:body-safety
 ```
 
 This compares `maxBodyBudget: 0` with `256` on a prefetched body workload, and
@@ -1612,7 +1630,7 @@ written to `benchmark/profiles/body-safety/`.
 
 ## Regression profiling (CI)
 
-`npm run profile:ci` checks HTTP, body-parser and WebSocket performance against
+`pnpm profile:ci` checks HTTP, body-parser and WebSocket performance against
 `benchmark/baselines/*.json`. CI runs it on release tags and manual dispatches.
 
 The self-hosted `regression-gate` runs, in order:
@@ -1626,13 +1644,13 @@ Reports are uploaded as CI artifacts when available.
 ## Release
 
 CI publishes only tags matching the package version (`vX.Y.Z`). The tagged commit
-must belong to `master`, and `package.json` and `package-lock.json` must agree.
+must belong to `master`, and `package.json` and `pnpm-lock.yaml` must agree.
 
 CI packs once, verifies the tarball and checksum, then publishes that exact
 artifact. A retry succeeds only when the existing npm package has the same
 integrity. Manual dispatch runs all gates without publishing.
 
-Local release: `npm run release`.
+Local release: `pnpm release`.
 
 Rollback by moving `latest` to a known-good version and deprecating the bad one.
 Never reuse a published version or release tag.
