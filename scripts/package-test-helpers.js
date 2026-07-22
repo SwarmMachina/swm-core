@@ -24,11 +24,11 @@ export function makeTempDir(prefix) {
  * @returns {object}
  */
 export function pack(repo, destination) {
-  const output = execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', destination], {
+  const output = execFileSync('pnpm', ['pack', '--json', '--pack-destination', destination], {
     cwd: repo,
     encoding: 'utf8'
   })
-  const [result] = JSON.parse(output)
+  const result = JSON.parse(output)
 
   return {
     ...result,

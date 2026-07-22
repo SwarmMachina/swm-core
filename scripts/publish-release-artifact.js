@@ -11,7 +11,7 @@ const ARTIFACT_DIR = path.dirname(fileURLToPath(import.meta.url))
  * @returns {{ found: boolean, integrity?: string }}
  */
 function readPublishedIntegrity(spec) {
-  const result = spawnSync('npm', ['view', spec, 'dist.integrity', '--json'], {
+  const result = spawnSync('pnpm', ['view', spec, 'dist.integrity', '--json'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -26,11 +26,13 @@ function readPublishedIntegrity(spec) {
     return { found: true, integrity }
   }
 
-  if (/\bE404\b/.test(result.stderr)) {
+  const errorOutput = `${result.stdout}\n${result.stderr}`
+
+  if (/\bE404\b|ERR_PNPM_FETCH_404/.test(errorOutput)) {
     return { found: false }
   }
 
-  throw new Error(`could not determine whether ${spec} is already published: ${result.stderr.trim()}`)
+  throw new Error(`could not determine whether ${spec} is already published: ${errorOutput.trim()}`)
 }
 
 /**
@@ -75,7 +77,7 @@ async function main() {
     return
   }
 
-  execFileSync('npm', ['publish', tarballPath, '--access', 'public', '--ignore-scripts'], {
+  execFileSync('pnpm', ['publish', tarballPath, '--access', 'public', '--ignore-scripts'], {
     stdio: 'inherit'
   })
 }

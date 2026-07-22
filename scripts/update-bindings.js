@@ -12,10 +12,12 @@ if (!/^\d+\.\d+\.\d+$/.test(swmVersion || '') || !/^v20\.\d+\.0$/.test(upstreamT
 }
 
 const packagePath = resolve(root, 'package.json')
-const lockPath = resolve(root, 'package-lock.json')
+const lockPath = resolve(root, 'pnpm-lock.yaml')
+const workspacePath = resolve(root, 'pnpm-workspace.yaml')
 const previousPackage = readFileSync(packagePath, 'utf8')
 const packageJson = JSON.parse(previousPackage)
 const previousLock = readFileSync(lockPath, 'utf8')
+const previousWorkspace = readFileSync(workspacePath, 'utf8')
 const previousSwmVersion = packageJson.dependencies['@swarmmachina/swm-uws']
 const previousUpstream = packageJson.devDependencies['uwebsockets.js']
 const previousUpstreamTag = /#(v20\.\d+\.0)$/.exec(previousUpstream)?.[1]
@@ -23,37 +25,36 @@ const previousUpstreamTag = /#(v20\.\d+\.0)$/.exec(previousUpstream)?.[1]
 packageJson.dependencies['@swarmmachina/swm-uws'] = swmVersion
 packageJson.devDependencies['uwebsockets.js'] = `github:uNetworking/uWebSockets.js#${upstreamTag}`
 writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
+writeFileSync(
+  workspacePath,
+  previousWorkspace.replaceAll(`'@swarmmachina/swm-uws@${previousSwmVersion}'`, `'@swarmmachina/swm-uws@${swmVersion}'`)
+)
 
 try {
-  execFileSync(
-    'npm',
-    [
-      'install',
-      '--package-lock-only',
-      '--save-dev',
-      '--save-exact',
-      `uwebsockets.js@github:uNetworking/uWebSockets.js#${upstreamTag}`
-    ],
-    { cwd: root, stdio: 'inherit' }
-  )
-  execFileSync('npm', ['install', '--package-lock-only', '--save-exact', `@swarmmachina/swm-uws@${swmVersion}`], {
+  execFileSync('pnpm', ['install', '--lockfile-only', '--no-frozen-lockfile', '--ignore-scripts'], {
     cwd: root,
     stdio: 'inherit'
   })
+  const [lockedProject] = JSON.parse(
+    execFileSync(
+      'pnpm',
+      ['list', '@swarmmachina/swm-uws', 'uwebsockets.js', '--depth', '0', '--json', '--lockfile-only'],
+      { cwd: root, encoding: 'utf8' }
+    )
+  )
+  const lockedSwmVersion = lockedProject?.dependencies?.['@swarmmachina/swm-uws']?.version
+  const lockedUpstreamVersion = lockedProject?.devDependencies?.['uwebsockets.js']?.version
+
+  if (lockedSwmVersion !== swmVersion || lockedUpstreamVersion !== upstreamTag.slice(1)) {
+    throw new Error(
+      `Lockfile resolution mismatch: swm-uws=${lockedSwmVersion}, uWebSockets.js=${lockedUpstreamVersion}`
+    )
+  }
 } catch (error) {
   writeFileSync(packagePath, previousPackage)
   writeFileSync(lockPath, previousLock)
+  writeFileSync(workspacePath, previousWorkspace)
   throw error
-}
-
-const lockJson = JSON.parse(readFileSync(lockPath, 'utf8'))
-const lockedSwmVersion = lockJson.packages?.['node_modules/@swarmmachina/swm-uws']?.version
-const lockedUpstreamVersion = lockJson.packages?.['node_modules/uwebsockets.js']?.version
-
-if (lockedSwmVersion !== swmVersion || lockedUpstreamVersion !== upstreamTag.slice(1)) {
-  writeFileSync(packagePath, previousPackage)
-  writeFileSync(lockPath, previousLock)
-  throw new Error(`Lockfile resolution mismatch: swm-uws=${lockedSwmVersion}, uWebSockets.js=${lockedUpstreamVersion}`)
 }
 
 const readmePath = resolve(root, 'README.md')

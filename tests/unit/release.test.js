@@ -3,30 +3,23 @@ import { describe, test } from 'node:test'
 import { verifyPackedFiles } from '../../scripts/build-release-artifact.js'
 import { verifyReleaseMetadata } from '../../scripts/verify-release.js'
 
-const manifest = { name: '@swarmmachina/swm-core', version: '2.0.3' }
-const lockfile = { packages: { '': { ...manifest } } }
+const manifest = { name: '@swarmmachina/swm-core', version: '2.0.3', packageManager: 'pnpm@11.3.0' }
 
 describe('release metadata', () => {
-  test('accepts a synchronized manifest, lockfile and tag', () => {
-    deepStrictEqual(verifyReleaseMetadata({ manifest, lockfile, tag: 'v2.0.3' }), {
-      ...manifest,
+  test('accepts a valid manifest and matching tag', () => {
+    deepStrictEqual(verifyReleaseMetadata({ manifest, tag: 'v2.0.3' }), {
+      name: manifest.name,
+      version: manifest.version,
       tag: 'v2.0.3'
     })
   })
 
   test('rejects a tag that does not match the package version', () => {
-    throws(() => verifyReleaseMetadata({ manifest, lockfile, tag: 'v2.0.2' }), /release tag mismatch/)
+    throws(() => verifyReleaseMetadata({ manifest, tag: 'v2.0.2' }), /release tag mismatch/)
   })
 
-  test('rejects a stale lockfile version', () => {
-    throws(
-      () =>
-        verifyReleaseMetadata({
-          manifest,
-          lockfile: { packages: { '': { ...manifest, version: '2.0.2' } } }
-        }),
-      /package-lock.json version mismatch/
-    )
+  test('rejects a missing pnpm version pin', () => {
+    throws(() => verifyReleaseMetadata({ manifest: { ...manifest, packageManager: undefined } }), /must pin pnpm/)
   })
 })
 

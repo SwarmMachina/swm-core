@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -9,14 +10,12 @@ const VERSION_RE =
 /**
  * @param {object} params
  * @param {object} params.manifest
- * @param {object} params.lockfile
  * @param {string|undefined} params.tag
  * @returns {{ name: string, version: string, tag: string|null }}
  */
-export function verifyReleaseMetadata({ manifest, lockfile, tag }) {
+export function verifyReleaseMetadata({ manifest, tag }) {
   const name = manifest.name
   const version = manifest.version
-  const locked = lockfile.packages?.['']
 
   if (typeof name !== 'string' || name.length === 0) {
     throw new Error('package.json must contain a package name')
@@ -26,12 +25,8 @@ export function verifyReleaseMetadata({ manifest, lockfile, tag }) {
     throw new Error(`package.json contains an invalid release version: ${String(version)}`)
   }
 
-  if (locked?.name !== name) {
-    throw new Error(`package-lock.json name mismatch: expected ${name}, got ${String(locked?.name)}`)
-  }
-
-  if (locked?.version !== version) {
-    throw new Error(`package-lock.json version mismatch: expected ${version}, got ${String(locked?.version)}`)
+  if (!/^pnpm@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.packageManager || '')) {
+    throw new Error(`package.json must pin pnpm in packageManager, got ${String(manifest.packageManager)}`)
   }
 
   if (tag != null && tag !== '') {
@@ -50,12 +45,18 @@ export function verifyReleaseMetadata({ manifest, lockfile, tag }) {
  * @returns {Promise<{ name: string, version: string, tag: string|null }>}
  */
 export async function verifyRepositoryRelease(tag) {
-  const [manifest, lockfile] = await Promise.all([
-    fs.readFile(path.join(ROOT, 'package.json'), 'utf8').then(JSON.parse),
-    fs.readFile(path.join(ROOT, 'package-lock.json'), 'utf8').then(JSON.parse)
-  ])
+  const manifest = await fs.readFile(path.join(ROOT, 'package.json'), 'utf8').then(JSON.parse)
 
-  return verifyReleaseMetadata({ manifest, lockfile, tag })
+  try {
+    execFileSync('pnpm', ['install', '--lockfile-only', '--frozen-lockfile', '--ignore-scripts'], {
+      cwd: ROOT,
+      stdio: 'ignore'
+    })
+  } catch {
+    throw new Error('pnpm-lock.yaml does not match package.json')
+  }
+
+  return verifyReleaseMetadata({ manifest, tag })
 }
 
 const isMain = process.argv[1] != null && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href

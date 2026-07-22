@@ -35,7 +35,7 @@ try {
   )
   cpSync(join(root, 'tests/fixtures/types'), join(consumer, 'fixtures'), { recursive: true })
 
-  execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund'], {
+  execFileSync('pnpm', ['install', '--ignore-scripts', '--no-frozen-lockfile'], {
     cwd: consumer,
     stdio: 'inherit'
   })
@@ -86,7 +86,7 @@ try {
       const resolved = ts.resolveModuleName(specifier, containingFile, options, ts.sys).resolvedModule
 
       assert.ok(resolved, `${mode.name}: ${specifier} did not resolve`)
-      assert.equal(resolved.resolvedFileName, join(realpathSync(consumer), expected))
+      assert.equal(realpathSync(resolved.resolvedFileName), realpathSync(join(consumer, expected)))
     }
   }
 

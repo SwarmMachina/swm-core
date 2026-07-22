@@ -6,7 +6,7 @@
     "packageName": "@swarmmachina/swm-core",
     "packageVersion": "2.0.3",
     "runner": "benchmark/regression-ci.js",
-    "script": "npm run profile:ci -- --suite http",
+    "script": "pnpm profile:ci --suite http",
     "framework": "core"
   },
   "calibration": {

@@ -53,18 +53,16 @@ async function main() {
 
   await assertEmptyOutputDirectory()
 
-  const stdout = execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', OUT_DIR], {
+  const stdout = execFileSync('pnpm', ['pack', '--json', '--pack-destination', OUT_DIR], {
     cwd: ROOT,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit']
   })
-  const entries = JSON.parse(stdout)
+  const packed = JSON.parse(stdout)
 
-  if (!Array.isArray(entries) || entries.length !== 1) {
-    throw new Error(`npm pack returned ${Array.isArray(entries) ? entries.length : 'invalid'} entries`)
+  if (packed == null || typeof packed !== 'object' || Array.isArray(packed)) {
+    throw new Error('pnpm pack returned invalid metadata')
   }
-
-  const packed = entries[0]
 
   if (packed.name !== metadata.name || packed.version !== metadata.version) {
     throw new Error(
@@ -75,7 +73,8 @@ async function main() {
 
   verifyPackedFiles(packed.files || [])
 
-  const tarballPath = path.join(OUT_DIR, packed.filename)
+  const filename = path.basename(packed.filename)
+  const tarballPath = path.join(OUT_DIR, filename)
   const tarball = await fs.readFile(tarballPath)
   const sha256 = createHash('sha256').update(tarball).digest('hex')
   const sha512 = createHash('sha512').update(tarball).digest('hex')
@@ -88,7 +87,7 @@ async function main() {
     version: metadata.version,
     tag: metadata.tag,
     gitSha: process.env.GITHUB_SHA || null,
-    filename: packed.filename,
+    filename,
     size: tarball.length,
     sha256,
     sha512,
@@ -99,12 +98,12 @@ async function main() {
     fs.writeFile(path.join(OUT_DIR, 'release-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`),
     fs.writeFile(
       path.join(OUT_DIR, 'SHA256SUMS'),
-      `${sha256}  ${packed.filename}\n${publishScriptSha256}  ${PUBLISH_SCRIPT}\n`
+      `${sha256}  ${filename}\n${publishScriptSha256}  ${PUBLISH_SCRIPT}\n`
     ),
     fs.writeFile(path.join(OUT_DIR, PUBLISH_SCRIPT), publishScript)
   ])
 
-  console.log(`[release] built ${packed.filename} (${tarball.length} bytes, sha256=${manifest.sha256})`)
+  console.log(`[release] built ${filename} (${tarball.length} bytes, sha256=${manifest.sha256})`)
 }
 
 const isMain = process.argv[1] != null && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
