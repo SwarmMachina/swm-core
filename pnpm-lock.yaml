@@ -29,6 +29,9 @@ importers:
       fastify:
         specifier: ^5.8.5
         version: 5.8.5
+      hdr-histogram-percentiles-obj:
+        specifier: 3.0.0
+        version: 3.0.0
       micro:
         specifier: ^10.0.1
         version: 10.0.1
