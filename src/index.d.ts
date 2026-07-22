@@ -44,8 +44,8 @@ export interface UpgradeMeta {
   aborted: boolean
 }
 
-/** `false` denies the upgrade; an object is attached to the accepted WebSocket as its user data. */
-export type UpgradeResult = object | false
+/** `null` denies the upgrade; an object is attached to the accepted WebSocket as its user data. */
+export type UpgradeResult = object | null
 
 export interface WSOptions {
   /** Max WebSocket message payload size in MB (1-64). @default 1 */

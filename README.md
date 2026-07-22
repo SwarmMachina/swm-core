@@ -460,7 +460,7 @@ passed to `http.onError`.
 | `onClose`          | `Function` | `(ctx, code, message) => {}`             | Called when client disconnects.                                                                                                                                                                                                                                          |
 | `onDrain`          | `Function` | `(ctx) => {}`                            | Called when socket is writable again.                                                                                                                                                                                                                                    |
 | `onError`          | `Function` | `(ctx, error) => {}`                     | Called on WebSocket error.                                                                                                                                                                                                                                               |
-| `onUpgrade`        | `Function` | `(meta) => ({})`                         | Authenticate the upgrade. Return `false` to reject with `403`, or a flat object to accept and expose it as `ctx.data`. Async handlers receive an owned metadata snapshot after their synchronous prefix.                                                                 |
+| `onUpgrade`        | `Function` | `(meta) => ({})`                         | Authorize the upgrade. Return `null` to reject with `403`, or a flat object to accept; that object becomes `ctx.data`. Async handlers can safely use `meta` after an `await`.                                                                                            |
 | `selectProtocol`   | `Function` | `undefined`                              | Optional synchronous `(requested, userData) => string \| undefined` subprotocol selector. The returned token must be present in the client-requested list.                                                                                                               |
 | `onSubscription`   | `Function` | `(ctx, topic, newCount, oldCount) => {}` | Called on topic subscription change.                                                                                                                                                                                                                                     |
 | `connectionKey`    | `Function` | `undefined`                              | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
@@ -480,7 +480,7 @@ const server = new Server({
       const token = meta.getHeader('authorization')
       const user = await authenticate(token)
 
-      return user ? { userId: user.id, role: user.role } : false
+      return user ? { userId: user.id, role: user.role } : null
     },
     selectProtocol: (requested, userData) => {
       if (userData.role === 'admin' && requested.includes('admin.v1')) {
@@ -1306,7 +1306,7 @@ const server = new Server({
       const token = meta.getQuery('token') || meta.getHeader('authorization')
 
       if (!token) {
-        return false
+        return null
       }
 
       try {
@@ -1314,7 +1314,7 @@ const server = new Server({
 
         return { userId: user.id, username: user.name }
       } catch (error) {
-        return false
+        return null
       }
     },
     onOpen: (ctx) => {

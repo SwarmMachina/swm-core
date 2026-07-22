@@ -99,6 +99,7 @@ type BindingPublicTypes = [
 ]
 
 const upgradeResult: UpgradeResult = { userId: 'reader' }
+const rejectedUpgrade: UpgradeResult = null
 const wsOptions: WSOptions = {
   onUpgrade: async (meta) => ({ token: meta.getHeader('authorization') }),
   selectProtocol: (requested, userData) => {
@@ -133,4 +134,5 @@ declare const bindingTypes: BindingPublicTypes
 void coreTypes
 void bindingTypes
 void upgradeResult
+void rejectedUpgrade
 void wsOptions

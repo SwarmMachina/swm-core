@@ -1756,7 +1756,7 @@ describe('Server', () => {
       const server = makeServer({
         onRequest: () => {},
         ws: {
-          onUpgrade: () => false
+          onUpgrade: () => null
         }
       })
       const res = createMockHttpResponse()
