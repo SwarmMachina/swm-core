@@ -41,8 +41,8 @@ describe('release tarball contents', () => {
 })
 
 describe('published package lookup', () => {
-  test('recognizes pnpm 11 missing-version errors', () => {
-    deepStrictEqual(isMissingPublishedPackage('{"code":"ERR_PNPM_PACKAGE_NOT_FOUND"}'), true)
+  test('recognizes npm missing-version errors', () => {
+    deepStrictEqual(isMissingPublishedPackage('{"code":"E404"}'), true)
   })
 
   test('does not hide registry failures', () => {

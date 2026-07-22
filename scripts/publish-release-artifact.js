@@ -11,7 +11,7 @@ const ARTIFACT_DIR = path.dirname(fileURLToPath(import.meta.url))
  * @returns {boolean}
  */
 export function isMissingPublishedPackage(output) {
-  return /\b(?:E404|ERR_PNPM_FETCH_404|ERR_PNPM_PACKAGE_NOT_FOUND)\b/.test(output)
+  return /\bE404\b/.test(output)
 }
 
 /**
@@ -19,7 +19,7 @@ export function isMissingPublishedPackage(output) {
  * @returns {{ found: boolean, integrity?: string }}
  */
 function readPublishedIntegrity(spec) {
-  const result = spawnSync('pnpm', ['view', spec, 'dist.integrity', '--json'], {
+  const result = spawnSync('npm', ['view', spec, 'dist.integrity', '--json'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe']
   })
