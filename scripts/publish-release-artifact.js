@@ -2,9 +2,17 @@ import { createHash } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ARTIFACT_DIR = path.dirname(fileURLToPath(import.meta.url))
+
+/**
+ * @param {string} output
+ * @returns {boolean}
+ */
+export function isMissingPublishedPackage(output) {
+  return /\b(?:E404|ERR_PNPM_FETCH_404|ERR_PNPM_PACKAGE_NOT_FOUND)\b/.test(output)
+}
 
 /**
  * @param {string} spec
@@ -28,7 +36,7 @@ function readPublishedIntegrity(spec) {
 
   const errorOutput = `${result.stdout}\n${result.stderr}`
 
-  if (/\bE404\b|ERR_PNPM_FETCH_404/.test(errorOutput)) {
+  if (isMissingPublishedPackage(errorOutput)) {
     return { found: false }
   }
 
@@ -77,12 +85,16 @@ async function main() {
     return
   }
 
-  execFileSync('pnpm', ['publish', tarballPath, '--access', 'public', '--ignore-scripts'], {
+  execFileSync('npm', ['publish', tarballPath, '--provenance', '--access', 'public', '--ignore-scripts'], {
     stdio: 'inherit'
   })
 }
 
-main().catch((error) => {
-  console.error(`[release] ${error.message}`)
-  process.exitCode = 1
-})
+const isMain = process.argv[1] != null && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+
+if (isMain) {
+  main().catch((error) => {
+    console.error(`[release] ${error.message}`)
+    process.exitCode = 1
+  })
+}

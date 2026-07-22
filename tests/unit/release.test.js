@@ -1,6 +1,7 @@
 import { deepStrictEqual, throws } from 'node:assert'
 import { describe, test } from 'node:test'
 import { verifyPackedFiles } from '../../scripts/build-release-artifact.js'
+import { isMissingPublishedPackage } from '../../scripts/publish-release-artifact.js'
 import { verifyReleaseMetadata } from '../../scripts/verify-release.js'
 
 const manifest = { name: '@swarmmachina/swm-core', version: '2.0.3', packageManager: 'pnpm@11.3.0' }
@@ -36,5 +37,15 @@ describe('release tarball contents', () => {
 
   test('rejects accidental non-package files', () => {
     throws(() => verifyPackedFiles([...required, 'tests/private.test.js'].map((path) => ({ path }))), /unexpected file/)
+  })
+})
+
+describe('published package lookup', () => {
+  test('recognizes pnpm 11 missing-version errors', () => {
+    deepStrictEqual(isMissingPublishedPackage('{"code":"ERR_PNPM_PACKAGE_NOT_FOUND"}'), true)
+  })
+
+  test('does not hide registry failures', () => {
+    deepStrictEqual(isMissingPublishedPackage('{"code":"ERR_PNPM_FETCH_500"}'), false)
   })
 })

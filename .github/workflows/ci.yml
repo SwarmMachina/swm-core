@@ -216,6 +216,7 @@ jobs:
     if: success() && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
+      id-token: write
 
     steps:
       - name: Setup pnpm
@@ -226,7 +227,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Download verified release artifact

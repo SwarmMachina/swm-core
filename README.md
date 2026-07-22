@@ -1647,8 +1647,8 @@ CI publishes only tags matching the package version (`vX.Y.Z`). The tagged commi
 must belong to `master`, and `package.json` and `pnpm-lock.yaml` must agree.
 
 CI packs once, verifies the tarball and checksum, then publishes that exact
-artifact. A retry succeeds only when the existing npm package has the same
-integrity. Manual dispatch runs all gates without publishing.
+artifact with npm provenance. A retry succeeds only when the existing npm
+package has the same integrity. Manual dispatch runs all gates without publishing.
 
 Local release: `pnpm release`.
 
