@@ -227,7 +227,7 @@ export default class HttpRuntime {
         const { method, path, handler, before, prefetch } = route
         const methodName = method === 'delete' ? 'del' : method
         const composedHandler = composeRouteHandler(handler, before)
-        const shouldPrefetch = prefetch ?? server.prefetch
+        const shouldPrefetch = prefetch ?? server.http.prefetch
         const routeHandler = shouldPrefetch ? withBodyPrefetch(composedHandler) : composedHandler
         const paramNames = path.match(/:[^/]+/g)?.map((name) => name.slice(1)) ?? []
 
@@ -242,7 +242,7 @@ export default class HttpRuntime {
     }
 
     if (server.http?.onRequest) {
-      const onRequest = server.prefetch ? withBodyPrefetch(server.http.onRequest) : server.http.onRequest
+      const onRequest = server.http.prefetch ? withBodyPrefetch(server.http.onRequest) : server.http.onRequest
 
       app.any('/*', (res, req) => handleWithContext(res, req, onRequest))
 

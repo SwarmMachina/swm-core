@@ -1,7 +1,7 @@
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'del', 'patch', 'options', 'head', 'any'])
 
 export const NOOP = () => {}
-export const ALLOW_WS_UPGRADE = () => Promise.resolve({ isAllowed: true })
+export const ALLOW_WS_UPGRADE = () => ({})
 
 /** @typedef {import('../ws-context.js').default} WSCtx */
 /** @typedef {import('../http-context.js').default} HttpCtx */
@@ -18,7 +18,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 0
  * @property {(ctx: WSCtx) => unknown} [onOpen]
  * @property {(ctx: WSCtx) => unknown} [onDrain]
  * @property {(ctx: WSCtx, msg: ArrayBuffer, isBinary: boolean) => unknown} [onDropped]
- * @property {(meta: object) => ({isAllowed: boolean, userData?: object, protocol?: string}|Promise<{isAllowed: boolean, userData?: object, protocol?: string}>)} [onUpgrade]
+ * @property {(meta: object) => (object|false|Promise<object|false>)} [onUpgrade]
+ * @property {(requested: string[], userData: object) => (string|undefined)} [selectProtocol]
  * @property {(ctx: WSCtx|null, err: Error) => unknown} [onError]
  * @property {(ctx: WSCtx, code: number, reason: ArrayBuffer) => unknown} [onClose]
  * @property {(ctx: WSCtx, msg: ArrayBuffer, isBinary: boolean) => unknown} [onMessage]
@@ -159,11 +160,11 @@ function validateRoute(route, index) {
  * @param {unknown} value
  * @returns {boolean}
  */
-export function normalizePrefetch(value) {
+function normalizePrefetch(value) {
   const prefetch = value ?? false
 
   if (typeof prefetch !== 'boolean') {
-    throw new TypeError('prefetch must be a boolean')
+    throw new TypeError('http.prefetch must be a boolean')
   }
 
   return prefetch
@@ -175,7 +176,7 @@ export function normalizePrefetch(value) {
  *  {
  *    onRequest: ((ctx: HttpCtx) => unknown|Promise<unknown>)|null,
  *    routes: Route[]|null, onError: (ctx: HttpCtx, err: Error) => unknown|Promise<unknown>,
- *    maxBodySize: number, maxBodyBudget: number, requestTimeoutMs: number
+ *    maxBodySize: number, maxBodyBudget: number, requestTimeoutMs: number, prefetch: boolean
  *  }|null}
  */
 export function normalizeHttpOptions(http) {
@@ -202,6 +203,7 @@ export function normalizeHttpOptions(http) {
     onRequest: http.onRequest ?? null,
     routes: http.routes ?? null,
     onError: http.onError ?? NOOP,
+    prefetch: normalizePrefetch(http.prefetch),
     maxBodySize,
     maxBodyBudget: normalizeMaxBodyBudget(http.maxBodyBudget, maxBodySize),
     requestTimeoutMs: normalizeRequestTimeout(http.requestTimeoutMs)
@@ -236,6 +238,7 @@ export function normalizeWsOptions(ws) {
       'onDrain',
       'onDropped',
       'onUpgrade',
+      'selectProtocol',
       'onError',
       'onClose',
       'onMessage',

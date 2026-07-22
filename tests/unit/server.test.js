@@ -46,7 +46,7 @@ describe('Server', () => {
       strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
       strictEqual(server.httpBodyBudget, null)
       strictEqual(server.httpRequestTimeoutMs, 0)
-      strictEqual(server.prefetch, false)
+      strictEqual(server.http.prefetch, false)
       strictEqual(server.ws, null)
       strictEqual(server.wsIdleTimeoutSec, 15)
     })
@@ -74,16 +74,23 @@ describe('Server', () => {
       strictEqual(server.host, '0.0.0.0')
     })
 
-    test('should configure server-level prefetch', () => {
-      const server = makeServer({ onRequest: () => {}, prefetch: true })
+    test('should configure HTTP-level prefetch', () => {
+      const server = makeServer({ http: { onRequest: () => {}, prefetch: true } })
 
-      strictEqual(server.prefetch, true)
+      strictEqual(server.http.prefetch, true)
     })
 
-    test('should reject an invalid server-level prefetch', () => {
-      throws(() => makeServer({ onRequest: () => {}, prefetch: 'yes' }), {
+    test('should reject an invalid HTTP-level prefetch', () => {
+      throws(() => makeServer({ http: { onRequest: () => {}, prefetch: 'yes' } }), {
         name: 'TypeError',
-        message: 'prefetch must be a boolean'
+        message: 'http.prefetch must be a boolean'
+      })
+    })
+
+    test('should reject the removed server-level prefetch option', () => {
+      throws(() => makeServer({ onRequest: () => {}, prefetch: true }), {
+        name: 'TypeError',
+        message: 'prefetch is no longer a server option; use http.prefetch'
       })
     })
 
@@ -189,6 +196,10 @@ describe('Server', () => {
       throws(() => makeServer({ http: null, ws: { onMessage: 'nope' } }), {
         name: 'TypeError',
         message: 'ws.onMessage must be a function'
+      })
+      throws(() => makeServer({ http: null, ws: { selectProtocol: 'nope' } }), {
+        name: 'TypeError',
+        message: 'ws.selectProtocol must be a function'
       })
       throws(() => makeServer({ http: {}, onServerError: 'nope' }), {
         name: 'TypeError',
@@ -424,7 +435,8 @@ describe('Server', () => {
       const onDrain = () => {}
       const onDropped = () => {}
       const onSubscription = () => {}
-      const onUpgrade = () => Promise.resolve({ isAllowed: true })
+      const onUpgrade = () => Promise.resolve({})
+      const selectProtocol = () => undefined
       const server = makeServer({
         onRequest: () => {},
         ws: {
@@ -435,7 +447,8 @@ describe('Server', () => {
           onDrain,
           onDropped,
           onSubscription,
-          onUpgrade
+          onUpgrade,
+          selectProtocol
         }
       })
 
@@ -447,6 +460,7 @@ describe('Server', () => {
       strictEqual(server.onWsDropped, onDropped)
       strictEqual(server.onWsSubscription, onSubscription)
       strictEqual(server.onWsUpgrade, onUpgrade)
+      strictEqual(server.wsProtocolSelector, selectProtocol)
     })
 
     test('should initialize context pools', () => {
@@ -621,10 +635,12 @@ describe('Server', () => {
       strictEqual(res.calls.find((call) => call.method === 'end').body, '{"ok":true}')
     })
 
-    test('should apply server prefetch to onRequest', async () => {
+    test('should apply HTTP prefetch to onRequest', async () => {
       const server = makeServer({
-        prefetch: true,
-        onRequest: (ctx) => ctx.text()
+        http: {
+          prefetch: true,
+          onRequest: (ctx) => ctx.text()
+        }
       })
 
       await server.listen()
@@ -643,10 +659,12 @@ describe('Server', () => {
       strictEqual(res.calls.find((call) => call.method === 'end').body, 'ok')
     })
 
-    test('should let a route disable inherited server prefetch', async () => {
+    test('should let a route disable inherited HTTP prefetch', async () => {
       const server = makeServer({
-        prefetch: true,
-        routes: [{ method: 'post', path: '/x', prefetch: false, handler: () => 'ok' }]
+        http: {
+          prefetch: true,
+          routes: [{ method: 'post', path: '/x', prefetch: false, handler: () => 'ok' }]
+        }
       })
 
       await server.listen()
@@ -1700,7 +1718,13 @@ describe('Server', () => {
       const server = makeServer({
         onRequest: () => {},
         ws: {
-          onUpgrade: () => ({ isAllowed: true, userData, protocol: 'protocol123' })
+          onUpgrade: () => userData,
+          selectProtocol: (requested, data) => {
+            deepStrictEqual(requested, ['protocol123'])
+            strictEqual(data, userData)
+
+            return 'protocol123'
+          }
         }
       })
       const res = createMockHttpResponse()
@@ -1732,7 +1756,7 @@ describe('Server', () => {
       const server = makeServer({
         onRequest: () => {},
         ws: {
-          onUpgrade: () => ({ isAllowed: false })
+          onUpgrade: () => false
         }
       })
       const res = createMockHttpResponse()
@@ -1782,41 +1806,79 @@ describe('Server', () => {
       strictEqual(errorErr, error)
     })
 
-    test('should snapshot sec-websocket-* headers synchronously, not read them after an async onUpgrade resolves', async () => {
-      let resolveFn
+    test('should snapshot upgrade metadata before an asynchronous onUpgrade resumes', async () => {
+      const gate = Promise.withResolvers()
+      const userData = { role: 'reader' }
 
-      const upgradePromise = new Promise((resolve) => {
-        resolveFn = resolve
-      })
+      let observation
+
       const server = makeServer({
         onRequest: () => {},
         ws: {
-          onUpgrade: () => upgradePromise
+          onUpgrade: async (meta) => {
+            await gate.promise
+
+            observation = {
+              url: meta.url(),
+              parameter: meta.getParameter(0),
+              query: meta.getQuery(),
+              one: meta.getQuery('one'),
+              missing: meta.getQuery('missing'),
+              header: meta.getHeader('x-auth')
+            }
+
+            return userData
+          },
+          selectProtocol: (requested, data) => {
+            deepStrictEqual(requested, ['sync-protocol', 'events'])
+            strictEqual(data, userData)
+
+            return 'sync-protocol'
+          }
         }
       })
       const res = createMockHttpResponse()
       const req = createMockHttpRequest()
 
+      req.setUrl('/original')
+      req.setParameter(0, 'original-param')
+      req.setFullQuery('one=original&empty=')
       req.setHeader('sec-websocket-key', 'sync-key')
-      req.setHeader('sec-websocket-protocol', 'sync-protocol')
+      req.setHeader('sec-websocket-protocol', 'sync-protocol, events')
       req.setHeader('sec-websocket-extensions', 'sync-extensions')
+      req.setHeader('x-auth', 'original-token')
       const context = {}
 
       server.onUpgrade(res, req, context)
 
-      // Real uWS invalidates `req` once the synchronous handler call returns;
-      // simulate that by mutating the headers a real req could no longer hold.
+      req.setUrl('/stale')
+      req.setParameter(0, 'stale-param')
+      req.setFullQuery('one=stale')
       req.setHeader('sec-websocket-key', 'STALE-after-return')
       req.setHeader('sec-websocket-protocol', 'STALE-after-return')
       req.setHeader('sec-websocket-extensions', 'STALE-after-return')
+      req.setHeader('x-auth', 'stale-token')
 
-      resolveFn({ isAllowed: true, userData: {}, protocol: 'sync-protocol' })
+      gate.resolve()
 
-      await Promise.resolve()
+      await new Promise((resolve) => setImmediate(resolve))
 
       const upgradeCall = res.calls.find((c) => c.method === 'upgrade')
 
+      deepStrictEqual(observation, {
+        url: '/original',
+        parameter: 'original-param',
+        query: 'one=original&empty=',
+        one: 'original',
+        missing: undefined,
+        header: 'original-token'
+      })
+      deepStrictEqual(
+        req.calls.filter((call) => call.method === 'snapshot'),
+        [{ method: 'snapshot', paramCount: 1 }]
+      )
       strictEqual(upgradeCall !== undefined, true)
+      strictEqual(upgradeCall.userData, userData)
       strictEqual(upgradeCall.secKey, 'sync-key')
       strictEqual(upgradeCall.protocol, 'sync-protocol')
       strictEqual(upgradeCall.extensions, 'sync-extensions')
@@ -1828,7 +1890,8 @@ describe('Server', () => {
       const server = makeServer({
         onRequest: () => {},
         ws: {
-          onUpgrade: () => ({ isAllowed: true, protocol: 'admin' }),
+          onUpgrade: () => ({}),
+          selectProtocol: () => 'admin',
           onError: (ctx, err) => {
             receivedError = err
           }
@@ -1870,7 +1933,7 @@ describe('Server', () => {
 
       res.triggerAborted()
 
-      resolveFn({ isAllowed: true, userData: {} })
+      resolveFn({})
 
       await Promise.resolve()
 

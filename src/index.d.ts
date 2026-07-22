@@ -29,15 +29,11 @@ export interface Route {
   handler: Handler
   /** One handler or a chain, run before `handler`. Replying short-circuits the chain. Declarative `routes` only. */
   before?: Handler | Handler[]
-  /** Override server-level body prefetch for this route. */
+  /** Override `http.prefetch` for this route. */
   prefetch?: boolean
 }
 
-/**
- * Metadata passed to `ws.onUpgrade`. Call these getters synchronously, before
- * any `await` — the underlying request is only valid for the duration of the
- * synchronous callback.
- */
+/** Metadata passed to `ws.onUpgrade`. Async handlers receive an owned snapshot after their synchronous prefix. */
 export interface UpgradeMeta {
   url(): string
   ip(): string
@@ -48,12 +44,8 @@ export interface UpgradeMeta {
   aborted: boolean
 }
 
-export interface UpgradeResult {
-  isAllowed: boolean
-  userData?: object
-  /** Selected subprotocol. Must be one of the tokens requested by the client. */
-  protocol?: string
-}
+/** `false` denies the upgrade; an object is attached to the accepted WebSocket as its user data. */
+export type UpgradeResult = object | false
 
 export interface WSOptions {
   /** Max WebSocket message payload size in MB (1-64). @default 1 */
@@ -73,6 +65,8 @@ export interface WSOptions {
   onDrain?: (ctx: WSContext) => any
   onError?: (ctx: WSContext | null, err: Error) => any
   onUpgrade?: (meta: UpgradeMeta) => UpgradeResult | Promise<UpgradeResult>
+  /** Select one client-requested subprotocol after `onUpgrade` succeeds. */
+  selectProtocol?: (requested: readonly string[], userData: object) => string | undefined
   onSubscription?: (ctx: WSContext, topic: ArrayBuffer, newCount: number, oldCount: number) => any
   /**
    * Optional connection key for `Server.sendTo`.
@@ -85,6 +79,8 @@ export interface WSOptions {
 }
 
 export interface HttpBaseOptions {
+  /** Start collecting request bodies before user handlers run. @default false */
+  prefetch?: boolean
   /** Max HTTP request body size in MB (1-64). @default 1 */
   maxBodySize?: number
   /** Aggregate memory budget for concurrently collected HTTP bodies in MB. Use 0 to disable; non-zero values must be >= maxBodySize. @default 0 */
@@ -109,8 +105,6 @@ export interface CommonServerOptions {
   host?: string
   /** @default 6000 */
   port?: number
-  /** Start collecting HTTP request bodies before user handlers run. @default false */
-  prefetch?: boolean
 }
 
 /** At least one application protocol must be configured. Nullish `http`/`ws` disables that layer. */

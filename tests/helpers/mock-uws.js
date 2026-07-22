@@ -357,6 +357,22 @@ export function createMockHttpRequest() {
       for (const name in headers) {
         cb(name, headers[name])
       }
+    },
+    snapshot(paramCount = 0) {
+      calls.push({ method: 'snapshot', paramCount })
+
+      return {
+        method,
+        url,
+        query:
+          typeof fullQuery === 'string'
+            ? fullQuery
+            : Object.entries(query)
+                .map(([name, value]) => (value === '' ? name : `${name}=${value}`))
+                .join('&'),
+        headers: Object.assign(Object.create(null), headers),
+        params: parameters.slice(0, paramCount)
+      }
     }
   }
 }

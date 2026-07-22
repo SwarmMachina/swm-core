@@ -1,6 +1,42 @@
 import { STATUS_TEXT } from '../constants.js'
 import { getRemoteAddress } from '../remote-address.js'
-import { isPromise, selectWsProtocol } from './utils.js'
+import { isPromise, parseWsProtocols, validateWsProtocolSelection } from './utils.js'
+
+const UPGRADE_PARAMETER_COUNT = 1
+
+/**
+ * @param {import('@swarmmachina/swm-uws').HttpRequest} req
+ * @param {import('@swarmmachina/swm-uws').HttpResponse} res
+ * @returns {{url: string, ip: string, query: string, headers: Record<string, string>, params: Array<string|undefined>}}
+ */
+function snapshotUpgradeRequest(req, res) {
+  let snapshot
+
+  if (typeof req.snapshot === 'function') {
+    snapshot = req.snapshot(UPGRADE_PARAMETER_COUNT)
+  } else {
+    const headers = Object.create(null)
+
+    req.forEach((name, value) => {
+      headers[name.toLowerCase()] = value
+    })
+
+    snapshot = {
+      url: req.getUrl(),
+      query: req.getQuery(),
+      headers,
+      params: [req.getParameter(0)]
+    }
+  }
+
+  return {
+    url: snapshot.url,
+    ip: getRemoteAddress(res),
+    query: snapshot.query,
+    headers: snapshot.headers,
+    params: snapshot.params
+  }
+}
 
 export default class WebSocketUpgradeRuntime {
   #server
@@ -14,17 +50,26 @@ export default class WebSocketUpgradeRuntime {
 
   /**
    * @param {import('@swarmmachina/swm-uws').HttpResponse} res
-   * @param {{userData?: object, protocol?: string}} result
+   * @param {object} userData
    * @param {string} secWebSocketKey
    * @param {string} requestedProtocol
    * @param {string} secWebSocketExtensions
    * @param {import('@swarmmachina/swm-uws').us_socket_context_t} context
    */
-  #acceptUpgrade(res, result, secWebSocketKey, requestedProtocol, secWebSocketExtensions, context) {
+  #acceptUpgrade(res, userData, secWebSocketKey, requestedProtocol, secWebSocketExtensions, context) {
     let protocol
 
     try {
-      protocol = selectWsProtocol(requestedProtocol, result.protocol)
+      const selector = this.#server.wsProtocolSelector
+
+      if (selector) {
+        const requested = parseWsProtocols(requestedProtocol)
+        const selected = selector(requested, userData)
+
+        protocol = validateWsProtocolSelection(requested, selected)
+      } else {
+        protocol = ''
+      }
     } catch (err) {
       res.cork(() => {
         res.writeStatus(STATUS_TEXT[403])
@@ -36,7 +81,7 @@ export default class WebSocketUpgradeRuntime {
     }
 
     res.cork(() => {
-      res.upgrade(result.userData || {}, secWebSocketKey, protocol, secWebSocketExtensions, context)
+      res.upgrade(userData, secWebSocketKey, protocol, secWebSocketExtensions, context)
     })
   }
 
@@ -61,18 +106,35 @@ export default class WebSocketUpgradeRuntime {
     const secWebSocketKey = req.getHeader('sec-websocket-key')
     const secWebSocketProtocol = req.getHeader('sec-websocket-protocol')
     const secWebSocketExtensions = req.getHeader('sec-websocket-extensions')
+
+    let requestSnapshot = null
+    let snapshotQuery = null
+
     const meta = {
-      url: () => req.getUrl(),
-      ip: () => getRemoteAddress(res),
-      getParameter: (index) => req.getParameter(index),
+      url: () => (requestSnapshot ? requestSnapshot.url : req.getUrl()),
+      ip: () => (requestSnapshot ? requestSnapshot.ip : getRemoteAddress(res)),
+      getParameter: (index) => (requestSnapshot ? requestSnapshot.params[index] : req.getParameter(index)),
       getQuery: (key) => {
+        if (requestSnapshot) {
+          if (key === undefined) {
+            return requestSnapshot.query
+          }
+
+          snapshotQuery ??= new URLSearchParams(requestSnapshot.query)
+
+          const value = snapshotQuery.get(key)
+
+          return value === null ? undefined : value
+        }
+
         if (key === undefined) {
           return req.getQuery()
         }
 
         return req.getQuery(key)
       },
-      getHeader: (name) => req.getHeader(name),
+      getHeader: (name) =>
+        requestSnapshot ? (requestSnapshot.headers[name.toLowerCase()] ?? '') : req.getHeader(name),
       aborted: false
     }
 
@@ -108,6 +170,21 @@ export default class WebSocketUpgradeRuntime {
     }
 
     if (isAsync) {
+      try {
+        requestSnapshot = snapshotUpgradeRequest(req, res)
+      } catch (err) {
+        void Promise.resolve(upgradeResult).catch(() => {})
+
+        res.cork(() => {
+          res.writeStatus(STATUS_TEXT[403])
+          res.end()
+        })
+
+        void server.safeCall(server.onWsError, null, err)
+
+        return
+      }
+
       let settled = false
 
       upgradeTimer = setTimeout(() => {
@@ -128,8 +205,8 @@ export default class WebSocketUpgradeRuntime {
         void server.safeCall(server.onWsError, null, error)
       }, server.wsUpgradeTimeoutMs)
 
-      void upgradeResult
-        .then((result = {}) => {
+      void Promise.resolve(upgradeResult)
+        .then((result) => {
           if (settled || meta.aborted) {
             return
           }
@@ -138,7 +215,7 @@ export default class WebSocketUpgradeRuntime {
           clearTimeout(upgradeTimer)
           upgradeTimer = null
 
-          if (result?.isAllowed) {
+          if (result && typeof result === 'object') {
             this.#acceptUpgrade(res, result, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
 
             return
@@ -170,9 +247,9 @@ export default class WebSocketUpgradeRuntime {
     }
 
     if (!meta.aborted) {
-      const result = upgradeResult || {}
+      const result = upgradeResult
 
-      if (result?.isAllowed) {
+      if (result && typeof result === 'object') {
         this.#acceptUpgrade(res, result, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
       } else {
         res.cork(() => {

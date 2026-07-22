@@ -72,10 +72,11 @@ test('ws echo: onOpen and onClose fire once per connection', async () => {
   assert.strictEqual(closes, 1)
 })
 
-test('ws upgrade selects only the subprotocol returned by onUpgrade', async () => {
+test('ws upgrade selects only the subprotocol returned by selectProtocol', async () => {
   handle = await startWsServer({
     ws: {
-      onUpgrade: () => ({ isAllowed: true, protocol: 'chat' })
+      onUpgrade: () => ({}),
+      selectProtocol: () => 'chat'
     }
   })
 
@@ -87,6 +88,42 @@ test('ws upgrade selects only the subprotocol returned by onUpgrade', async () =
   })
 
   assert.strictEqual(sock.protocol, 'chat')
+  sock.close()
+})
+
+test('async ws upgrade reads owned metadata after await', async () => {
+  let openedData
+
+  handle = await startWsServer({
+    ws: {
+      onUpgrade: async (meta) => {
+        await new Promise((resolve) => setImmediate(resolve))
+
+        return {
+          url: meta.url(),
+          query: meta.getQuery('token'),
+          header: meta.getHeader('x-auth')
+        }
+      },
+      onOpen: (ctx) => {
+        openedData = ctx.data
+      }
+    }
+  })
+
+  const sock = new WebSocket(`${handle.wsBaseUrl}/async?token=query-token`, {
+    headers: { 'x-auth': 'header-token' },
+    perMessageDeflate: false
+  })
+
+  await new Promise((resolve, reject) => {
+    sock.on('open', resolve)
+    sock.on('error', reject)
+  })
+
+  assert.strictEqual(openedData.url, '/async')
+  assert.strictEqual(openedData.query, 'query-token')
+  assert.strictEqual(openedData.header, 'header-token')
   sock.close()
 })
 

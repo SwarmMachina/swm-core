@@ -98,7 +98,19 @@ type BindingPublicTypes = [
   TemplatedApp
 ]
 
-const server: ServerType = new Server({ http: { onRequest: () => 'ok' } })
+const upgradeResult: UpgradeResult = { userId: 'reader' }
+const wsOptions: WSOptions = {
+  onUpgrade: async (meta) => ({ token: meta.getHeader('authorization') }),
+  selectProtocol: (requested, userData) => {
+    void userData
+
+    return requested.includes('chat') ? 'chat' : undefined
+  }
+}
+
+const server: ServerType = new Server({ http: { prefetch: true, onRequest: () => 'ok' } })
+// @ts-expect-error prefetch belongs to the HTTP application options
+new Server({ prefetch: true, http: { onRequest: () => 'ok' } })
 const app: AppInstance = createApp()
 
 void server
@@ -120,3 +132,5 @@ declare const bindingTypes: BindingPublicTypes
 
 void coreTypes
 void bindingTypes
+void upgradeResult
+void wsOptions

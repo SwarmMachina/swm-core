@@ -113,7 +113,7 @@ export function makeWsScenarios() {
 
   const echoServerOptions = (collect) => ({
     ws: {
-      onUpgrade: () => ({ isAllowed: true, userData: { marker: makeMarker(nextId++) } }),
+      onUpgrade: () => ({ marker: makeMarker(nextId++) }),
       onOpen: (ctx) => {
         collect(ctx)
         collect(ctx.data.marker)
@@ -316,10 +316,7 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
-            onUpgrade: (meta) => ({
-              isAllowed: true,
-              userData: { userId: Number(meta.getQuery('uid')), marker: makeMarker(nextId++) }
-            }),
+            onUpgrade: (meta) => ({ userId: Number(meta.getQuery('uid')), marker: makeMarker(nextId++) }),
             connectionKey: (ctx) => ctx.data.userId,
             onOpen: (ctx) => {
               collect(ctx)

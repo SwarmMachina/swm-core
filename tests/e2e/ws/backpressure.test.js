@@ -70,7 +70,7 @@ test(
 
     handle = await startWsServer({
       ws: {
-        onUpgrade: (meta) => ({ isAllowed: true, userData: { id: meta.getQuery('id') } }),
+        onUpgrade: (meta) => ({ id: meta.getQuery('id') }),
         connectionKey: (ctx) => ctx.data.id,
         onOpen: (ctx) => ctx.subscribe('fanout'),
         onDropped: (ctx, message, isBinary) => {

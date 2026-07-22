@@ -28,7 +28,7 @@ function connect(url) {
 test('connection registry: sendTo() delivers a message to the connection registered under a key', async () => {
   handle = await startWsServer({
     ws: {
-      onUpgrade: (meta) => ({ isAllowed: true, userData: { userId: meta.getQuery('userId') } }),
+      onUpgrade: (meta) => ({ userId: meta.getQuery('userId') }),
       connectionKey: (ctx) => ctx.data.userId,
       onMessage: (ctx, message) => {
         const { to, text } = JSON.parse(ctx.decode(message))
@@ -58,7 +58,7 @@ test('connection registry: sendTo() delivers a message to the connection registe
 test('connection registry: closing a connection removes it from the registry', async () => {
   handle = await startWsServer({
     ws: {
-      onUpgrade: (meta) => ({ isAllowed: true, userData: { userId: meta.getQuery('userId') } }),
+      onUpgrade: (meta) => ({ userId: meta.getQuery('userId') }),
       connectionKey: (ctx) => ctx.data.userId
     }
   })
@@ -79,7 +79,7 @@ test('connection registry: closing a connection removes it from the registry', a
 test('connection registry: closeConnection gracefully closes a connection by key', async () => {
   handle = await startWsServer({
     ws: {
-      onUpgrade: (meta) => ({ isAllowed: true, userData: { userId: meta.getQuery('userId') } }),
+      onUpgrade: (meta) => ({ userId: meta.getQuery('userId') }),
       connectionKey: (ctx) => ctx.data.userId
     }
   })
@@ -100,7 +100,7 @@ test('connection registry: closeConnection gracefully closes a connection by key
 test('connection registry: terminateConnection force-closes a connection by key', async () => {
   handle = await startWsServer({
     ws: {
-      onUpgrade: (meta) => ({ isAllowed: true, userData: { userId: meta.getQuery('userId') } }),
+      onUpgrade: (meta) => ({ userId: meta.getQuery('userId') }),
       connectionKey: (ctx) => ctx.data.userId
     }
   })

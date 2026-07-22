@@ -322,7 +322,7 @@ test(
 
           upgrades.push(observation)
 
-          return { isAllowed: observation.url === '/ws', userData: { role: 'reader' } }
+          return observation.url === '/ws' ? { role: 'reader' } : false
         },
         onOpen(ctx) {
           assert.deepEqual(corePrototypeReaders(ctx, 'WSContext'), CORE_READ_METHODS.WSContext)

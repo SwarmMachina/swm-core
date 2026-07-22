@@ -28,12 +28,24 @@ export function validateWsClose(code, reason) {
 }
 
 /**
- * Select and validate the application-requested WebSocket subprotocol.
  * @param {string} requestedHeader
+ * @returns {readonly string[]}
+ */
+export function parseWsProtocols(requestedHeader) {
+  return Object.freeze(
+    requestedHeader
+      .split(',')
+      .map((protocol) => protocol.trim())
+      .filter(Boolean)
+  )
+}
+
+/**
+ * @param {readonly string[]} requested
  * @param {unknown} selected
  * @returns {string}
  */
-export function selectWsProtocol(requestedHeader, selected) {
+export function validateWsProtocolSelection(requested, selected) {
   if (selected == null || selected === '') {
     return ''
   }
@@ -41,11 +53,6 @@ export function selectWsProtocol(requestedHeader, selected) {
   if (typeof selected !== 'string' || !WS_PROTOCOL_TOKEN.test(selected)) {
     throw new TypeError('WebSocket upgrade protocol must be a valid protocol token')
   }
-
-  const requested = requestedHeader
-    .split(',')
-    .map((protocol) => protocol.trim())
-    .filter(Boolean)
 
   if (!requested.includes(selected)) {
     throw new TypeError(`WebSocket upgrade protocol was not requested by the client: ${selected}`)

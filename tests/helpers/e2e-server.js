@@ -14,9 +14,8 @@ import { getFreePort } from '../../helpers/ports.js'
 export async function startHttpServer({ onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs, prefetch }) {
   const port = await getFreePort()
   const server = new Server({
-    http: { onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs },
-    port,
-    prefetch
+    http: { onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs, prefetch },
+    port
   })
 
   await server.listen()

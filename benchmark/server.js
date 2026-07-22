@@ -129,10 +129,10 @@ async function runCore(port, options = {}) {
   }
   const server = new Server({
     port,
-    prefetch,
     http: {
       onRequest,
       onError: console.error,
+      prefetch,
       maxBodySize: testName === 'prefetch-body-large' ? 2 : 1,
       maxBodyBudget,
       requestTimeoutMs

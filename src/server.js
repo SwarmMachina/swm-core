@@ -1,13 +1,7 @@
 import { load as loadTransport } from './backends/uws.js'
 import BodyBudget from './body-budget.js'
 import HttpRuntime from './server/http-runtime.js'
-import {
-  ALLOW_WS_UPGRADE,
-  NOOP,
-  normalizeHttpOptions,
-  normalizePrefetch,
-  normalizeWsOptions
-} from './server/options.js'
+import { ALLOW_WS_UPGRADE, NOOP, normalizeHttpOptions, normalizeWsOptions } from './server/options.js'
 import WebSocketRuntime from './server/ws-runtime.js'
 
 export default class Server {
@@ -28,11 +22,10 @@ export default class Server {
 
   /**
    * @param {object} [opt]
-   * @param {{onRequest?: (ctx: import('./http-context.js').default) => unknown|Promise<unknown>, routes?: import('./server/options.js').Route[], onError?: (ctx: import('./http-context.js').default, err: Error) => unknown|Promise<unknown>, maxBodySize?: number, maxBodyBudget?: number, requestTimeoutMs?: number}|null} [opt.http]
+   * @param {{onRequest?: (ctx: import('./http-context.js').default) => unknown|Promise<unknown>, routes?: import('./server/options.js').Route[], onError?: (ctx: import('./http-context.js').default, err: Error) => unknown|Promise<unknown>, prefetch?: boolean, maxBodySize?: number, maxBodyBudget?: number, requestTimeoutMs?: number}|null} [opt.http]
    * @param {(err: Error) => unknown|Promise<unknown>} [opt.onServerError]
    * @param {string} [opt.host]
    * @param {number} [opt.port]
-   * @param {boolean} [opt.prefetch]
    * @param {import('./server/options.js').WSOptions|null} [opt.ws]
    */
   constructor(opt = {}) {
@@ -54,17 +47,13 @@ export default class Server {
       throw new TypeError('maxBodySize is no longer a server option; use http.maxBodySize and ws.maxBodySize')
     }
 
-    const {
-      http: httpOptions,
-      onServerError,
-      host = '127.0.0.1',
-      port = 6000,
-      prefetch: prefetchOption,
-      ws: wsOptions
-    } = opt
+    if (Object.hasOwn(opt, 'prefetch')) {
+      throw new TypeError('prefetch is no longer a server option; use http.prefetch')
+    }
+
+    const { http: httpOptions, onServerError, host = '127.0.0.1', port = 6000, ws: wsOptions } = opt
     const http = normalizeHttpOptions(httpOptions)
     const ws = normalizeWsOptions(wsOptions)
-    const prefetch = normalizePrefetch(prefetchOption)
 
     if (!http && !ws) {
       throw new TypeError('At least one of "http" or "ws" must be configured')
@@ -86,7 +75,6 @@ export default class Server {
     this.port = port
     this.http = http
     this.ws = ws
-    this.prefetch = prefetch
     this.httpMaxBodyBytes = Math.floor((http?.maxBodySize ?? 1) * 1024 * 1024)
     this.httpBodyBudget = http?.maxBodyBudget ? new BodyBudget(Math.floor(http.maxBodyBudget * 1024 * 1024)) : null
     this.httpRequestTimeoutMs = http?.requestTimeoutMs ?? 0
@@ -102,6 +90,7 @@ export default class Server {
     this.onWsDropped = ws?.onDropped ?? NOOP
     this.onWsSubscription = ws?.onSubscription ?? NOOP
     this.onWsUpgrade = ws?.onUpgrade ?? ALLOW_WS_UPGRADE
+    this.wsProtocolSelector = ws?.selectProtocol ?? null
     this.wsConnectionKey = null
     this.wsIdleTimeoutSec = 15
     this.wsUpgradeTimeoutMs = 10_000
