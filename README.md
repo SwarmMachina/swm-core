@@ -1674,6 +1674,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 Licensed under the MPL-2.0 License.
 
-Copyright © 2025 SwarmMachina Team
+Copyright Contributors to SwarmMachina.
 
 See [LICENSE](LICENSE) file for details.
