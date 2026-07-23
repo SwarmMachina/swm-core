@@ -1,8 +1,9 @@
 // noinspection JSCheckFunctionSignatures
 
 import { describe, test } from 'node:test'
-import { deepStrictEqual, rejects, strictEqual } from 'node:assert/strict'
-import BodyParser from '../../src/body-parser.js'
+import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
+import BodyParser, { nextBodyCapacity } from '../../src/body-parser.js'
+import BodyBudget from '../../src/body-budget.js'
 import { CACHED_ERRORS } from '../../src/constants.js'
 import { createMockReq, createMockRes } from '../helpers/mock-http.js'
 import HttpContext from '../../src/http-context.js'
@@ -220,17 +221,7 @@ describe('BodyParser', () => {
 
     test('should reserve known body bytes and release them on clear', async () => {
       const parser = new BodyParser()
-      const budget = {
-        usedBytes: 0,
-        reserve(bytes) {
-          this.usedBytes += bytes
-
-          return true
-        },
-        release(bytes) {
-          this.usedBytes -= bytes
-        }
-      }
+      const budget = new BodyBudget(16)
       const server = { bindingCapabilities: {}, httpBodyBudget: budget }
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -254,7 +245,7 @@ describe('BodyParser', () => {
       const parser = new BodyParser()
       const server = {
         bindingCapabilities: {},
-        httpBodyBudget: { reserve: () => false, release() {} }
+        httpBodyBudget: new BodyBudget(0)
       }
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -267,23 +258,13 @@ describe('BodyParser', () => {
       await rejects(parser.body(), (err) => err === CACHED_ERRORS.bodyBudgetExceeded)
       strictEqual(
         res.calls.some((call) => call[0] === 'onData'),
-        false
+        true
       )
     })
 
     test('should release the body reservation on request timeout', async () => {
       const parser = new BodyParser()
-      const budget = {
-        usedBytes: 0,
-        reserve(bytes) {
-          this.usedBytes += bytes
-
-          return true
-        },
-        release(bytes) {
-          this.usedBytes -= bytes
-        }
-      }
+      const budget = new BodyBudget(16)
       const server = { bindingCapabilities: {}, httpBodyBudget: budget }
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -825,6 +806,22 @@ describe('BodyParser', () => {
         return true
       })
     })
+
+    test('should not let a per-call maxSize raise the configured server limit', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '10' } })
+
+      ctx.reset(res, req)
+      parser.reset(ctx, 5)
+
+      await rejects(parser.body(20), (err) => {
+        strictEqual(err.message, 'Request body too large')
+
+        return true
+      })
+    })
   })
 
   describe('body() - error cases', () => {
@@ -1096,7 +1093,7 @@ describe('BodyParser', () => {
       })
     })
 
-    test('should do nothing if already done', async () => {
+    test('should invalidate materialized storage and release it on abort', async () => {
       const parser = new BodyParser()
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -1113,9 +1110,9 @@ describe('BodyParser', () => {
 
       parser.abort()
 
-      const result = await parser.body()
-
-      strictEqual(result.length, 2)
+      await rejects(parser.body(), (error) => error === CACHED_ERRORS.aborted)
+      strictEqual(parser.diagnostics.state, 'aborted')
+      strictEqual(parser.diagnostics.reservedBytes, 0)
     })
 
     test('should work in unknown length mode', async () => {
@@ -1223,5 +1220,135 @@ describe('BodyParser', () => {
         return true
       })
     })
+  })
+})
+
+describe('BodyParser security invariants', () => {
+  test('capacity growth stays safe beyond signed 32-bit boundaries without allocating', () => {
+    strictEqual(nextBodyCapacity(0, 0, 0), 0)
+    strictEqual(nextBodyCapacity(0, 1, 10), 10)
+    strictEqual(nextBodyCapacity(2 ** 30, 2 ** 31 - 1, 2 ** 31), 2 ** 31)
+    strictEqual(nextBodyCapacity(2 ** 31, 2 ** 31 + 1, 2 ** 32), 2 ** 32)
+    strictEqual(
+      nextBodyCapacity(Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER),
+      Number.MAX_SAFE_INTEGER
+    )
+    strictEqual(nextBodyCapacity(8, 9, 9), 9)
+
+    throws(() => nextBodyCapacity(8, 10, 9), RangeError)
+    throws(() => nextBodyCapacity(-1, 0, 9), TypeError)
+    throws(() => nextBodyCapacity(0, Number.MAX_SAFE_INTEGER + 1, Number.MAX_SAFE_INTEGER), TypeError)
+  })
+
+  test('known-length storage is not observable until isLast proves exact initialization', async () => {
+    const parser = new BodyParser()
+    const ctx = new HttpContext(null)
+    const res = createMockRes()
+    const req = createMockReq({ headers: { 'content-length': '4' } })
+
+    ctx.reset(res, req)
+    parser.reset(ctx, 4)
+
+    let settled = false
+
+    const body = parser.body().finally(() => {
+      settled = true
+    })
+
+    res.pushData('test', false)
+    await Promise.resolve()
+    strictEqual(settled, false)
+    strictEqual(parser.diagnostics.state, 'collecting')
+
+    res.pushData('', true)
+    deepStrictEqual(await body, Buffer.from('test'))
+  })
+
+  test('an extra chunk after the declared length rejects and retains no partial body', async () => {
+    const parser = new BodyParser()
+    const ctx = new HttpContext(null)
+    const res = createMockRes()
+    const req = createMockReq({ headers: { 'content-length': '4' } })
+
+    ctx.reset(res, req)
+    parser.reset(ctx, 4)
+
+    const body = parser.body()
+
+    res.pushData('test', false)
+    res.pushData('x', true)
+
+    await rejects(body, (error) => error === CACHED_ERRORS.sizeMismatch)
+    await rejects(parser.body(), (error) => error === CACHED_ERRORS.sizeMismatch)
+    strictEqual(parser.diagnostics.state, 'failed')
+    strictEqual(parser.diagnostics.reservedBytes, 0)
+  })
+
+  test('reconciles unknown-length capacity and keeps it accounted until clear', async () => {
+    const budget = new BodyBudget(100)
+    const parser = new BodyParser()
+    const server = { bindingCapabilities: {}, httpBodyBudget: budget }
+    const ctx = new HttpContext(null)
+    const res = createMockRes()
+    const req = createMockReq()
+
+    ctx.reset(res, req, server)
+    parser.reset(ctx, 100)
+
+    const body = parser.body()
+
+    strictEqual(budget.usedBytes, 100)
+    res.pushData('x', true)
+    strictEqual((await body).toString(), 'x')
+    strictEqual(budget.usedBytes, 1)
+    strictEqual(parser.diagnostics.reservedBytes, 1)
+
+    parser.clear()
+    strictEqual(budget.usedBytes, 0)
+    strictEqual(budget.activeReservations, 0)
+  })
+
+  test('a stale native callback cannot release the next generation reservation', async () => {
+    const budget = new BodyBudget(3)
+    const server = { bindingCapabilities: { collectBody: true }, httpBodyBudget: budget }
+    const parser = new BodyParser()
+    const firstCtx = new HttpContext(null)
+    const firstRes = createMockRes()
+
+    firstCtx.reset(firstRes, createMockReq({ headers: { 'content-length': '3' } }), server)
+    parser.reset(firstCtx, 3)
+    parser.prefetch()
+    strictEqual(budget.usedBytes, 3)
+
+    const secondCtx = new HttpContext(null)
+    const secondRes = createMockRes()
+
+    secondCtx.reset(secondRes, createMockReq({ headers: { 'content-length': '3' } }), server)
+    parser.reset(secondCtx, 3)
+    parser.prefetch()
+    strictEqual(budget.usedBytes, 3)
+
+    firstRes.pushCollectedBody(Buffer.from('old'))
+    strictEqual(budget.usedBytes, 3)
+    strictEqual(parser.diagnostics.state, 'collecting')
+
+    secondRes.pushCollectedBody(Buffer.from('new'))
+    strictEqual(await parser.text(), 'new')
+    strictEqual(budget.usedBytes, 3)
+
+    parser.clear()
+    strictEqual(budget.usedBytes, 0)
+  })
+
+  test('rejects invalid per-call body byte limits without coercion', async () => {
+    const parser = new BodyParser()
+    const ctx = new HttpContext(null)
+
+    ctx.reset(createMockRes(), createMockReq())
+    parser.reset(ctx)
+
+    for (const value of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER, '1', null, {}, Object(1)]) {
+      await rejects(parser.body(value), /maxSize must be specified in bytes/)
+    }
   })
 })

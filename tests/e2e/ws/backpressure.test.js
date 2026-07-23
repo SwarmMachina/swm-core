@@ -72,9 +72,16 @@ test(
       ws: {
         onUpgrade: (meta) => ({ id: meta.getQuery('id') }),
         connectionKey: (ctx) => ctx.data.id,
+        maxBackpressure: 1024 * 64,
+        closeOnBackpressureLimit: false,
         onOpen: (ctx) => ctx.subscribe('fanout'),
         onDropped: (ctx, message, isBinary) => {
-          dropped.push({ id: ctx.data.id, size: message.byteLength, isBinary })
+          dropped.push({
+            id: ctx.data.id,
+            size: message.byteLength,
+            isBinary,
+            bufferedAmount: ctx.ws.getBufferedAmount()
+          })
         }
       }
     })
@@ -158,6 +165,11 @@ test(
       true,
       'onDropped must preserve the rejected payload metadata'
     )
+    assert.strictEqual(
+      dropped.every((event) => event.bufferedAmount >= 64 * 1024),
+      true,
+      'dropped callbacks must observe the configured per-socket backpressure ceiling'
+    )
 
     assert.strictEqual(handle.server.publish('fanout', 'tail-after-drops', false), true)
     await withTimeout(tailReceived, 2000, 'healthy client did not receive the tail message')
@@ -183,3 +195,89 @@ test(
     )
   }
 )
+
+test('closeOnBackpressureLimit closes only the stalled WebSocket', { timeout: 10_000 }, async () => {
+  const closed = Promise.withResolvers()
+  const dropped = []
+
+  handle = await startWsServer({
+    ws: {
+      maxBackpressure: 1024 * 64,
+      closeOnBackpressureLimit: true,
+      onUpgrade: (meta) => ({ id: meta.getQuery('id') }),
+      connectionKey: (ctx) => ctx.data.id,
+      onDropped: (ctx) => dropped.push(ctx.data.id),
+      onClose: (ctx) => {
+        if (ctx.data.id === 'slow') {
+          closed.resolve()
+        }
+      }
+    }
+  })
+
+  const slow = await connect(`${handle.wsBaseUrl}/?id=slow`)
+  const fast = await connect(`${handle.wsBaseUrl}/?id=fast`)
+
+  clients.push(slow, fast)
+  slow._socket.pause()
+
+  const fastReceived = Promise.withResolvers()
+
+  fast.once('message', (message) => fastReceived.resolve(message.toString()))
+
+  const payload = Buffer.alloc(MESSAGE_SIZE, 0x41)
+
+  for (let round = 0; round < MAX_SEND_ROUNDS && dropped.length === 0; round++) {
+    for (let index = 0; index < SENDS_PER_ROUND; index++) {
+      handle.server.sendTo('slow', payload, true)
+    }
+
+    await nextTurn()
+  }
+
+  await withTimeout(closed.promise, 2000, 'stalled WebSocket was not closed at the backpressure limit')
+  assert.strictEqual(dropped.includes('slow'), true)
+  assert.strictEqual(handle.server.hasConnection('slow'), false)
+  assert.strictEqual(handle.server.sendTo('fast', 'healthy', false), true)
+  assert.strictEqual(await withTimeout(fastReceived.promise, 2000, 'healthy WebSocket stopped receiving'), 'healthy')
+  assert.strictEqual(handle.server.hasConnection('fast'), true)
+})
+
+test('onDrain reports recovery after a stalled socket resumes reading', { timeout: 10_000 }, async () => {
+  const drained = Promise.withResolvers()
+
+  handle = await startWsServer({
+    ws: {
+      maxBackpressure: 8 * 1024 * 1024,
+      closeOnBackpressureLimit: false,
+      onUpgrade: () => ({ id: 'slow' }),
+      connectionKey: (ctx) => ctx.data.id,
+      onDrain: (ctx) => {
+        drained.resolve(ctx.ws.getBufferedAmount())
+      }
+    }
+  })
+
+  const slow = await connect(handle.wsBaseUrl)
+
+  clients.push(slow)
+  slow._socket.pause()
+
+  const payload = Buffer.alloc(MESSAGE_SIZE, 0x44)
+  const raw = handle.server.getConnection('slow')
+
+  assert.ok(raw)
+
+  for (let index = 0; index < 64 && raw.getBufferedAmount() === 0; index++) {
+    assert.strictEqual(handle.server.sendTo('slow', payload, true), true)
+  }
+
+  assert.ok(raw.getBufferedAmount() > 0, 'test did not create native WebSocket backpressure')
+  slow._socket.resume()
+
+  assert.strictEqual(
+    await withTimeout(drained.promise, 3000, 'native WebSocket did not emit drain after reads resumed'),
+    0
+  )
+  assert.strictEqual(handle.server.hasConnection('slow'), true)
+})

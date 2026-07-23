@@ -44,7 +44,8 @@ describe('Server', () => {
       strictEqual(server.host, '127.0.0.1')
       strictEqual(server.port, 6000)
       strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
-      strictEqual(server.httpBodyBudget, null)
+      strictEqual(server.httpBodyBudget.limitBytes, 256 * 1024 * 1024)
+      strictEqual(server.effectiveConfig.http.maxBodyBudget, 256 * 1024 * 1024)
       strictEqual(server.httpRequestTimeoutMs, 0)
       strictEqual(server.http.prefetch, false)
       strictEqual(server.ws, null)
@@ -78,6 +79,9 @@ describe('Server', () => {
       const server = makeServer({ http: { onRequest: () => {}, prefetch: true } })
 
       strictEqual(server.http.prefetch, true)
+      strictEqual(server.http.maxBodyBudget, 256 * 1024 * 1024)
+      strictEqual(server.httpBodyBudget.limitBytes, 256 * 1024 * 1024)
+      strictEqual(server.effectiveConfig.http.maxBodyBudget, 256 * 1024 * 1024)
     })
 
     test('should reject an invalid HTTP-level prefetch', () => {
@@ -102,14 +106,19 @@ describe('Server', () => {
     })
 
     test('should use custom http.maxBodySize', () => {
-      const server = makeServer({ http: { onRequest: () => {}, maxBodySize: 5 } })
+      const server = makeServer({ http: { onRequest: () => {}, maxBodySize: 5 * 1024 * 1024 } })
 
       strictEqual(server.httpMaxBodyBytes, 5 * 1024 * 1024)
     })
 
     test('should configure aggregate body budget and request timeout', () => {
       const server = makeServer({
-        http: { onRequest: () => {}, maxBodySize: 2, maxBodyBudget: 8, requestTimeoutMs: 15_000 }
+        http: {
+          onRequest: () => {},
+          maxBodySize: 2 * 1024 * 1024,
+          maxBodyBudget: 8 * 1024 * 1024,
+          requestTimeoutMs: 15_000
+        }
       })
 
       strictEqual(server.httpBodyBudget.limitBytes, 8 * 1024 * 1024)
@@ -285,45 +294,65 @@ describe('Server', () => {
     test('should throw error when http.maxBodySize is not a number', () => {
       throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: '1' } }), {
         name: 'TypeError',
-        message: 'http.maxBodySize must be in range 1 - 64'
+        message: 'http.maxBodySize must be specified in bytes as a non-negative safe integer no greater than 67108864'
       })
     })
 
-    test('should throw error when http.maxBodySize is less than 1', () => {
-      throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: 0 } }), {
-        name: 'TypeError',
-        message: 'http.maxBodySize must be in range 1 - 64'
-      })
+    test('should preserve an explicit zero-byte http.maxBodySize', () => {
+      strictEqual(makeServer({ http: { onRequest: () => {}, maxBodySize: 0 } }).httpMaxBodyBytes, 0)
     })
 
-    test('should throw error when http.maxBodySize is greater than 64', () => {
-      throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: 65 } }), {
+    test('should throw error above the supported 64 MiB HTTP body maximum', () => {
+      throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: 64 * 1024 * 1024 + 1 } }), {
         name: 'TypeError',
-        message: 'http.maxBodySize must be in range 1 - 64'
+        message: 'http.maxBodySize must be specified in bytes as a non-negative safe integer no greater than 67108864'
       })
     })
 
     test('should accept valid http.maxBodySize range', () => {
       const server1 = makeServer({ http: { onRequest: () => {}, maxBodySize: 1 } })
 
-      strictEqual(server1.httpMaxBodyBytes, 1024 * 1024)
+      strictEqual(server1.httpMaxBodyBytes, 1)
 
-      const server2 = makeServer({ http: { onRequest: () => {}, maxBodySize: 64 } })
+      const server2 = makeServer({ http: { onRequest: () => {}, maxBodySize: 64 * 1024 * 1024 } })
 
       strictEqual(server2.httpMaxBodyBytes, 64 * 1024 * 1024)
     })
 
-    test('should require http.maxBodyBudget to cover one maximum body', () => {
-      throws(() => makeServer({ http: { onRequest: () => {}, maxBodySize: 8, maxBodyBudget: 4 } }), {
-        name: 'TypeError',
-        message: 'http.maxBodyBudget must be 0 or a safe finite number >= 8'
+    test('distinguishes omitted, zero, finite, and unlimited body budgets', () => {
+      const omitted = makeServer({ http: { onRequest: () => {} } })
+
+      strictEqual(omitted.httpBodyBudget.limitBytes, 256 * 1024 * 1024)
+      strictEqual(omitted.effectiveConfig.http.maxBodyBudget, 256 * 1024 * 1024)
+
+      const zero = makeServer({ http: { onRequest: () => {}, maxBodyBudget: 0 } })
+
+      strictEqual(zero.httpBodyBudget.limitBytes, 0)
+      strictEqual(zero.effectiveConfig.http.maxBodyBudget, 0)
+
+      const finite = makeServer({ http: { onRequest: () => {}, maxBodyBudget: 8192 } })
+
+      strictEqual(finite.httpBodyBudget.limitBytes, 8192)
+      strictEqual(makeServer({ http: { onRequest: () => {}, maxBodyBudget: null } }).httpBodyBudget, null)
+    })
+
+    test('uses the same finite default budget for route prefetch', () => {
+      const server = makeServer({
+        http: {
+          routes: [{ method: 'post', path: '/', prefetch: true, handler: () => {} }]
+        }
       })
 
-      strictEqual(makeServer({ http: { onRequest: () => {}, maxBodyBudget: 0 } }).httpBodyBudget, null)
-      strictEqual(
-        makeServer({ http: { onRequest: () => {}, maxBodyBudget: 8192 } }).httpBodyBudget.limitBytes,
-        8192 * 1024 * 1024
-      )
+      strictEqual(server.httpBodyBudget.limitBytes, 256 * 1024 * 1024)
+    })
+
+    test('rejects invalid body budget byte counts without coercion', () => {
+      for (const value of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '1', {}, Object(1)]) {
+        throws(() => makeServer({ http: { onRequest: () => {}, maxBodyBudget: value } }), {
+          name: 'TypeError',
+          message: 'http.maxBodyBudget must be specified in bytes as a non-negative safe integer or null'
+        })
+      }
     })
 
     test('should validate http.requestTimeoutMs and allow zero', () => {
@@ -338,25 +367,77 @@ describe('Server', () => {
     test('should reject legacy root maxBodySize', () => {
       throws(() => makeServer({ onRequest: () => {}, maxBodySize: 1 }), {
         name: 'TypeError',
-        message: 'maxBodySize is no longer a server option; use http.maxBodySize and ws.maxBodySize'
+        message: 'maxBodySize is no longer a server option; use http.maxBodySize or ws.maxPayloadLength'
       })
     })
 
     test('should configure HTTP and WebSocket body limits independently', () => {
       const server = makeServer({
-        http: { onRequest: () => {}, maxBodySize: 2 },
-        ws: { maxBodySize: 7 }
+        http: { onRequest: () => {}, maxBodySize: 2 * 1024 * 1024 },
+        ws: { maxPayloadLength: 7 * 1024 * 1024 }
       })
 
       strictEqual(server.httpMaxBodyBytes, 2 * 1024 * 1024)
       strictEqual(server.wsMaxPayloadBytes, 7 * 1024 * 1024)
     })
 
-    test('should validate ws.maxBodySize independently', () => {
-      throws(() => makeServer({ http: {}, ws: { maxBodySize: 65 } }), {
+    test('should reject legacy ws.maxBodySize terminology', () => {
+      throws(() => makeServer({ http: {}, ws: { maxBodySize: 1 } }), {
         name: 'TypeError',
-        message: 'ws.maxBodySize must be in range 1 - 64'
+        message: 'ws.maxBodySize is no longer supported; use ws.maxPayloadLength in bytes'
       })
+    })
+
+    test('should validate and expose WebSocket byte limits', () => {
+      const server = makeServer({
+        http: {},
+        ws: {
+          maxPayloadLength: 1024 * 32,
+          maxBackpressure: 1024 * 64,
+          closeOnBackpressureLimit: true
+        }
+      })
+
+      strictEqual(server.wsMaxPayloadBytes, 32_768)
+      strictEqual(server.wsMaxBackpressureBytes, 65_536)
+      strictEqual(server.wsCloseOnBackpressureLimit, true)
+      deepStrictEqual(server.effectiveConfig.ws, {
+        maxPayloadLength: 32_768,
+        maxBackpressure: 65_536,
+        closeOnBackpressureLimit: true,
+        idleTimeoutSec: 15,
+        upgradeTimeoutMs: 10_000
+      })
+    })
+
+    test('should use explicit swm-core WebSocket resource defaults', () => {
+      const server = makeServer({ http: null, ws: {} })
+
+      strictEqual(server.wsMaxPayloadBytes, 1024 * 1024)
+      strictEqual(server.wsMaxBackpressureBytes, 64 * 1024)
+      strictEqual(server.wsCloseOnBackpressureLimit, false)
+    })
+
+    test('should reject invalid WebSocket byte counts without coercion', () => {
+      const invalid = [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER, '1', null, {}, Object(1)]
+
+      for (const value of invalid) {
+        throws(() => makeServer({ http: null, ws: { maxPayloadLength: value } }), TypeError)
+        throws(() => makeServer({ http: null, ws: { maxBackpressure: value } }), TypeError)
+      }
+
+      throws(
+        () => makeServer({ http: null, ws: { maxPayloadLength: 64 * 1024 * 1024 + 1 } }),
+        /ws\.maxPayloadLength must be specified in bytes/
+      )
+      throws(
+        () => makeServer({ http: null, ws: { maxBackpressure: 0x1_0000_0000 } }),
+        /ws\.maxBackpressure must be specified in bytes/
+      )
+      throws(
+        () => makeServer({ http: null, ws: { closeOnBackpressureLimit: 1 } }),
+        /ws\.closeOnBackpressureLimit must be a boolean/
+      )
     })
 
     test('should enable WebSocket when ws is an empty object', () => {
@@ -417,14 +498,18 @@ describe('Server', () => {
     })
 
     test('should validate ws.upgradeTimeoutMs', () => {
-      throws(() => makeServer({ onRequest: () => {}, ws: { upgradeTimeoutMs: 99 } }), {
-        name: 'TypeError',
-        message: 'ws.upgradeTimeoutMs must be in range 100 - 300000'
-      })
+      for (const value of [0, 1, 99, 100, 2500]) {
+        strictEqual(makeServer({ onRequest: () => {}, ws: { upgradeTimeoutMs: value } }).wsUpgradeTimeoutMs, value)
+      }
+
       throws(() => makeServer({ onRequest: () => {}, ws: { upgradeTimeoutMs: 300_001 } }), {
         name: 'TypeError',
-        message: 'ws.upgradeTimeoutMs must be in range 100 - 300000'
+        message: 'ws.upgradeTimeoutMs must be a safe integer in milliseconds in range 0 - 300000'
       })
+
+      for (const value of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER, '0', null, {}]) {
+        throws(() => makeServer({ onRequest: () => {}, ws: { upgradeTimeoutMs: value } }), TypeError)
+      }
     })
 
     test('should assign WebSocket handlers when provided', () => {
@@ -886,7 +971,12 @@ describe('Server', () => {
     test('should register WebSocket when ws is configured', async () => {
       const server = makeServer({
         onRequest: () => {},
-        ws: { idleTimeoutSec: 20, maxBodySize: 6 }
+        ws: {
+          idleTimeoutSec: 20,
+          maxPayloadLength: 6 * 1024 * 1024,
+          maxBackpressure: 128 * 1024,
+          closeOnBackpressureLimit: true
+        }
       })
 
       await server.listen()
@@ -899,6 +989,8 @@ describe('Server', () => {
       strictEqual(wsCall.config.idleTimeout, 20)
       strictEqual(wsCall.config.upgradeTimeout, 10_000)
       strictEqual(wsCall.config.maxPayloadLength, 6 * 1024 * 1024)
+      strictEqual(wsCall.config.maxBackpressure, 128 * 1024)
+      strictEqual(wsCall.config.closeOnBackpressureLimit, true)
       strictEqual(typeof wsCall.config.open, 'function')
       strictEqual(typeof wsCall.config.message, 'function')
       strictEqual(typeof wsCall.config.dropped, 'function')
@@ -1945,6 +2037,48 @@ describe('Server', () => {
       const status403Call = res.calls.find((c) => c.method === 'writeStatus' && c.status === STATUS_TEXT[403])
 
       strictEqual(status403Call, undefined)
+    })
+
+    test('should let an immediately resolved async decision win with a zero-millisecond timeout', async () => {
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          upgradeTimeoutMs: 0,
+          onUpgrade: () => Promise.resolve({ accepted: true })
+        }
+      })
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      req.setHeader('sec-websocket-key', 'key')
+      server.onUpgrade(res, req, {})
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(res.isUpgraded(), true)
+      strictEqual(res.getStatus(), null)
+    })
+
+    test('should time out an unresolved upgrade at zero milliseconds', async () => {
+      let receivedError
+
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          upgradeTimeoutMs: 0,
+          onUpgrade: () => new Promise(() => {}),
+          onError: (_ctx, error) => {
+            receivedError = error
+          }
+        }
+      })
+      const res = createMockHttpResponse()
+
+      server.onUpgrade(res, createMockHttpRequest(), {})
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      strictEqual(res.getStatus(), STATUS_TEXT[408])
+      strictEqual(receivedError?.code, 'WS_UPGRADE_TIMEOUT')
+      strictEqual(receivedError?.message, 'WebSocket upgrade timed out after 0ms')
     })
 
     test('should terminate an async upgrade that exceeds ws.upgradeTimeoutMs', async () => {

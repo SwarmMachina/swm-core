@@ -75,10 +75,10 @@ function sendReady(port) {
 
 /**
  * @param {number} port
- * @param {{prefetch?: boolean, maxBodyBudget?: number, requestTimeoutMs?: number}} [options]
+ * @param {{prefetch?: boolean, maxBodyBudget?: number|null, requestTimeoutMs?: number}} [options]
  */
 async function runCore(port, options = {}) {
-  const { prefetch = false, maxBodyBudget = 0, requestTimeoutMs = 0 } = options
+  const { prefetch = false, maxBodyBudget = null, requestTimeoutMs = 0 } = options
   const { default: Server, prepareHeaders } = await import('../src/index.js')
   const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
   const onRequest = (ctx) => {
@@ -133,7 +133,7 @@ async function runCore(port, options = {}) {
       onRequest,
       onError: console.error,
       prefetch,
-      maxBodySize: testName === 'prefetch-body-large' ? 2 : 1,
+      maxBodySize: testName === 'prefetch-body-large' ? 2 * 1024 * 1024 : 1024 * 1024,
       maxBodyBudget,
       requestTimeoutMs
     }
@@ -249,7 +249,7 @@ async function main() {
   }
 
   if (fw === 'core-prefetch-budget') {
-    await runCore(port, { prefetch: true, maxBodyBudget: 256 })
+    await runCore(port, { prefetch: true, maxBodyBudget: 256 * 1024 * 1024 })
 
     return
   }

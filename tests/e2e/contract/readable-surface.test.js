@@ -252,6 +252,8 @@ test(
 
       return {
         ip: ctx.ip(),
+        proxiedPort: ctx.res.getProxiedRemotePort(),
+        peerPort: ctx.res.getRemotePort(),
         method: ctx.method(),
         url: ctx.url(),
         fullQuery: ctx.fullQuery(),
@@ -425,6 +427,16 @@ test(
       assert.match(directResponse, /"ip":"127\.0\.0\.1"/)
       assert.match(proxyResponse, /"ip":"203\.0\.113\.10"/)
       assert.equal(httpObservations.length, 2)
+      assert.equal(httpObservations[0].sync.proxiedPort, 0)
+      assert.equal(httpObservations[0].sync.peerPort > 0, true)
+      // The production swm-uws binding returns the network-order PROXY v2
+      // source port correctly. Pinned upstream uWebSockets.js v20.69.0 exposes
+      // the same two bytes swapped (0x12a1); keep that compatibility anomaly
+      // visible rather than hiding it behind a swm-core heuristic.
+      const expectedProxiedPort = process.execArgv.includes('--conditions=uwebsockets-reference') ? 0x12a1 : 41_234
+
+      assert.equal(httpObservations[1].sync.proxiedPort, expectedProxiedPort)
+      assert.equal(httpObservations[1].sync.peerPort > 0, true)
 
       for (const { sync, repeated, async } of httpObservations) {
         assert.deepEqual(repeated, sync)

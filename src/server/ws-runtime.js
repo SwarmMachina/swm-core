@@ -357,6 +357,8 @@ export default class WebSocketRuntime {
       upgradeTimeout: server.wsUpgradeTimeoutMs,
       sendPingsAutomatically: true,
       maxPayloadLength: server.wsMaxPayloadBytes,
+      maxBackpressure: server.wsMaxBackpressureBytes,
+      closeOnBackpressureLimit: server.wsCloseOnBackpressureLimit,
       open: this.onOpen,
       message: this.onMessage,
       dropped: this.onDropped,

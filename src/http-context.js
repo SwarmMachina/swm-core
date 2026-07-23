@@ -3,6 +3,7 @@ import ResStreamer from './res-streamer.js'
 import { CACHED_ERRORS, JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './constants.js'
 import { assertHeaderValue, getPreparedHeaders } from './prepared-headers.js'
 import { getRemoteAddress } from './remote-address.js'
+import { DEFAULT_HTTP_MAX_BODY_SIZE_BYTES } from './server/options.js'
 
 export default class HttpContext {
   #ip = ''
@@ -184,7 +185,7 @@ export default class HttpContext {
    * @param {number} [maxSize]
    * @returns {HttpContext}
    */
-  reset(res, req, server, maxSize = 1024 * 1024 * 16) {
+  reset(res, req, server, maxSize = DEFAULT_HTTP_MAX_BODY_SIZE_BYTES) {
     this.stopRequestTimeout()
 
     if (!this.#cleared) {
@@ -570,9 +571,15 @@ export default class HttpContext {
       return this.#contentLength
     }
 
+    if (!/^(?:0|[1-9]\d*)$/.test(clh)) {
+      this.#contentLength = null
+
+      return this.#contentLength
+    }
+
     const n = Number(clh)
 
-    if (!Number.isInteger(n) || n < 0) {
+    if (!Number.isSafeInteger(n)) {
       this.#contentLength = null
 
       return this.#contentLength

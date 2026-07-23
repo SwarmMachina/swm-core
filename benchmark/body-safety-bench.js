@@ -156,7 +156,7 @@ async function main() {
     '',
     `Parameters: runs=${parameters.runs}, warmup=${parameters.warmupSec}s, duration=${parameters.durationSec}s, connections=${parameters.connections}, sample=${parameters.sampleMs}ms.`,
     '',
-    'Aggregate budget compares prefetch with `maxBodyBudget: 0` against `256`. Request timeout compares async handlers with `requestTimeoutMs: 0` against `30000`.',
+    'Aggregate budget compares explicit unlimited (`maxBodyBudget: null`) against `256 * 1024 * 1024` bytes on a prefetched workload. Request timeout compares async handlers with `requestTimeoutMs: 0` against `30000`.',
     '',
     '| Case | Baseline rps | Enabled rps | Δ rps | Baseline p99 | Enabled p99 | Baseline ELU | Enabled ELU | Baseline RSS MB | Enabled RSS MB | Errors |',
     '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',

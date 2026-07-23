@@ -51,7 +51,7 @@ export function makeHttpScenarios() {
       iterations: 300,
       serverOptions(collect) {
         return {
-          maxBodyBudget: 1,
+          maxBodyBudget: 1024 * 1024,
           routes: [
             {
               method: 'post',
@@ -85,7 +85,7 @@ export function makeHttpScenarios() {
       iterations: 300,
       serverOptions(collect) {
         return {
-          maxBodyBudget: 1,
+          maxBodyBudget: 1024 * 1024,
           routes: [
             {
               method: 'post',

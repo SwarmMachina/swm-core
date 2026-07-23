@@ -22,7 +22,7 @@ export default class Server {
 
   /**
    * @param {object} [opt]
-   * @param {{onRequest?: (ctx: import('./http-context.js').default) => unknown|Promise<unknown>, routes?: import('./server/options.js').Route[], onError?: (ctx: import('./http-context.js').default, err: Error) => unknown|Promise<unknown>, prefetch?: boolean, maxBodySize?: number, maxBodyBudget?: number, requestTimeoutMs?: number}|null} [opt.http]
+   * @param {{onRequest?: (ctx: import('./http-context.js').default) => unknown|Promise<unknown>, routes?: import('./server/options.js').Route[], onError?: (ctx: import('./http-context.js').default, err: Error) => unknown|Promise<unknown>, prefetch?: boolean, maxBodySize?: number, maxBodyBudget?: number|null, requestTimeoutMs?: number}|null} [opt.http]
    * @param {(err: Error) => unknown|Promise<unknown>} [opt.onServerError]
    * @param {string} [opt.host]
    * @param {number} [opt.port]
@@ -44,7 +44,7 @@ export default class Server {
     }
 
     if (Object.hasOwn(opt, 'maxBodySize')) {
-      throw new TypeError('maxBodySize is no longer a server option; use http.maxBodySize and ws.maxBodySize')
+      throw new TypeError('maxBodySize is no longer a server option; use http.maxBodySize or ws.maxPayloadLength')
     }
 
     if (Object.hasOwn(opt, 'prefetch')) {
@@ -75,10 +75,12 @@ export default class Server {
     this.port = port
     this.http = http
     this.ws = ws
-    this.httpMaxBodyBytes = Math.floor((http?.maxBodySize ?? 1) * 1024 * 1024)
-    this.httpBodyBudget = http?.maxBodyBudget ? new BodyBudget(Math.floor(http.maxBodyBudget * 1024 * 1024)) : null
+    this.httpMaxBodyBytes = http?.maxBodySize ?? 0
+    this.httpBodyBudget = http && http.maxBodyBudget !== null ? new BodyBudget(http.maxBodyBudget) : null
     this.httpRequestTimeoutMs = http?.requestTimeoutMs ?? 0
-    this.wsMaxPayloadBytes = Math.floor((ws?.maxBodySize ?? 1) * 1024 * 1024)
+    this.wsMaxPayloadBytes = ws?.maxPayloadLength ?? 0
+    this.wsMaxBackpressureBytes = ws?.maxBackpressure ?? 0
+    this.wsCloseOnBackpressureLimit = ws?.closeOnBackpressureLimit ?? false
 
     this.httpErrorHandler = http?.onError ?? NOOP
     this.onServerError = typeof onServerError === 'function' ? onServerError : NOOP
@@ -97,9 +99,29 @@ export default class Server {
 
     if (ws) {
       this.wsIdleTimeoutSec = Math.floor(ws.idleTimeoutSec ?? 15)
-      this.wsUpgradeTimeoutMs = Math.floor(ws.upgradeTimeoutMs ?? 10_000)
+      this.wsUpgradeTimeoutMs = ws.upgradeTimeoutMs
       this.wsConnectionKey = ws.connectionKey ?? null
     }
+
+    this.effectiveConfig = Object.freeze({
+      http: http
+        ? Object.freeze({
+            prefetch: http.prefetch,
+            maxBodySize: this.httpMaxBodyBytes,
+            maxBodyBudget: http.maxBodyBudget,
+            requestTimeoutMs: this.httpRequestTimeoutMs
+          })
+        : null,
+      ws: ws
+        ? Object.freeze({
+            maxPayloadLength: this.wsMaxPayloadBytes,
+            maxBackpressure: this.wsMaxBackpressureBytes,
+            closeOnBackpressureLimit: this.wsCloseOnBackpressureLimit,
+            idleTimeoutSec: this.wsIdleTimeoutSec,
+            upgradeTimeoutMs: this.wsUpgradeTimeoutMs
+          })
+        : null
+    })
 
     this.app = null
     this.socket = null

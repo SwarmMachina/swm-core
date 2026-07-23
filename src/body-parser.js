@@ -1,144 +1,271 @@
 import { CACHED_ERRORS } from './constants.js'
+import { DEFAULT_HTTP_MAX_BODY_SIZE_BYTES, validateBodyByteLimit } from './server/options.js'
 
 const NOOP = () => {}
+const INITIAL_BODY_CAPACITY = 4096
+
+/**
+ * @param {unknown} value
+ * @param {string} name
+ */
+function assertCapacityValue(value, name) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${name} must be a non-negative safe integer`)
+  }
+}
+
+/**
+ * Calculate a bounded grow-buffer capacity without signed 32-bit coercion.
+ * @param {number} current
+ * @param {number} required
+ * @param {number} limit
+ * @param {number} [initial]
+ * @returns {number}
+ */
+export function nextBodyCapacity(current, required, limit, initial = INITIAL_BODY_CAPACITY) {
+  assertCapacityValue(current, 'current capacity')
+  assertCapacityValue(required, 'required capacity')
+  assertCapacityValue(limit, 'capacity limit')
+  assertCapacityValue(initial, 'initial capacity')
+
+  if (current > limit) {
+    throw new RangeError('current capacity exceeds the capacity limit')
+  }
+
+  if (required > limit) {
+    throw new RangeError('required capacity exceeds the capacity limit')
+  }
+
+  if (required <= current) {
+    return current
+  }
+
+  const base = current === 0 ? Math.min(initial, limit) : current
+  const doubled = base > Math.floor(limit / 2) ? limit : base * 2
+  const next = Math.min(limit, Math.max(required, base, doubled))
+
+  if (next < required || next <= current) {
+    throw new RangeError('body capacity cannot make safe progress')
+  }
+
+  return next
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Uint8Array}
+ */
+function byteView(value) {
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value)
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  }
+
+  throw new TypeError('Body collector returned a non-buffer value')
+}
+
+/**
+ * @param {ArrayBuffer|ArrayBufferView} value
+ * @returns {Buffer}
+ */
+function exactBuffer(value) {
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(value)
+  }
+
+  const view = byteView(value)
+  const buffer = Buffer.allocUnsafeSlow(view.byteLength)
+
+  buffer.set(view)
+
+  return buffer
+}
 
 export default class BodyParser {
-  /** @type {Buffer} */
+  /** @type {'cleared'|'idle'|'collecting'|'materialized'|'failed'|'aborted'} */
+  #state = 'cleared'
+  /** @type {Buffer|null} */
   #body = null
-  /** @type {Error} */
+  /** @type {Error|null} */
   #bodyError = null
-  /** @type {Promise} */
+  /** @type {Promise<Buffer>|null} */
   #bodyPromise = null
-  /** @type {(value: Buffer) => void} */
+  /** @type {((value: Buffer) => void)|null} */
   #bodyResolve = null
-  /** @type {(reason: Error) => void} */
+  /** @type {((reason: Error) => void)|null} */
   #bodyReject = null
-  /** @type {boolean} */
-  #done = false
-  /** @type {boolean} */
-  #started = false
-  /** @type {number} */
   #collectionLimit = 0
-  /** @type {number} */
   #generation = 0
-  /** @type {number} */
-  #reservedBytes = 0
+  /** @type {object|null} */
+  #owner = null
   /** @type {import('./body-budget.js').default|null} */
   #budget = null
-
-  /** @type {HttpContext} */
+  /** @type {{bytes: number, owner: object, active: boolean}|null} */
+  #reservation = null
+  /** @type {HttpContext|null} */
   #ctx = null
+  #maxSize = DEFAULT_HTTP_MAX_BODY_SIZE_BYTES
 
-  /** @type {number} */
-  #maxSize = 1024 * 1024 * 16
-
-  // --- state for known-length mode ---
+  // Known-length state.
   /** @type {Buffer|null} */
   #dst = null
   #offset = 0
   #expected = 0
 
-  // --- state for unknown-length (grow buffer) ---
+  // Unknown-length state.
   /** @type {Buffer|null} */
   #grow = null
   #len = 0
   #cap = 0
   #limit = 0
 
-  #onDataKnown(ab, isLast) {
-    if (this.#done) {
+  get diagnostics() {
+    return Object.freeze({
+      state: this.#state,
+      generation: this.#generation,
+      collectionLimit: this.#collectionLimit,
+      reservedBytes: this.#reservation?.bytes ?? 0
+    })
+  }
+
+  #onDataKnown(value, isLast) {
+    if (this.#state !== 'collecting') {
       return
     }
 
     if (!this.#ctx || this.#ctx.aborted) {
-      return this.#reject(CACHED_ERRORS.aborted)
+      this.#reject(CACHED_ERRORS.aborted, 'aborted')
+
+      return
     }
 
-    const u8 = new Uint8Array(ab)
-    const next = this.#offset + u8.byteLength
+    try {
+      const chunk = byteView(value)
+      const remaining = this.#expected - this.#offset
 
-    if (next > this.#expected) {
-      return this.#reject(CACHED_ERRORS.sizeMismatch)
-    }
+      if (chunk.byteLength > remaining) {
+        this.#reject(CACHED_ERRORS.sizeMismatch)
 
-    this.#dst.set(u8, this.#offset)
-    this.#offset = next
+        return
+      }
 
-    if (isLast && this.#offset !== this.#expected) {
-      return this.#reject(CACHED_ERRORS.sizeMismatch)
-    }
+      this.#dst.set(chunk, this.#offset)
+      this.#offset += chunk.byteLength
 
-    if (this.#offset === this.#expected) {
-      return this.#resolve(this.#dst)
+      if (!isLast) {
+        return
+      }
+
+      if (this.#offset !== this.#expected) {
+        this.#reject(CACHED_ERRORS.sizeMismatch)
+
+        return
+      }
+
+      this.#resolve(this.#dst, this.#expected)
+    } catch {
+      this.#reject(CACHED_ERRORS.serverError)
     }
   }
 
-  #onDataUnknown(ab, isLast) {
-    if (this.#done) {
+  #onDataUnknown(value, isLast) {
+    if (this.#state !== 'collecting') {
       return
     }
 
     if (!this.#ctx || this.#ctx.aborted) {
-      return this.#reject(CACHED_ERRORS.aborted)
-    }
+      this.#reject(CACHED_ERRORS.aborted, 'aborted')
 
-    const u8 = new Uint8Array(ab)
-    const chunkLen = u8.byteLength
-
-    if (chunkLen === 0 && isLast && this.#len === 0) {
-      return this.#resolve(Buffer.alloc(0))
-    }
-
-    const nextLen = this.#len + chunkLen
-
-    if (nextLen > this.#limit) {
-      return this.#reject(CACHED_ERRORS.bodyTooLarge)
-    }
-
-    if (nextLen > this.#cap) {
-      let cap = this.#cap || 4096
-
-      while (cap < nextLen) {
-        cap <<= 1
-      }
-
-      if (cap > this.#limit) {
-        cap = this.#limit
-      }
-
-      const b = Buffer.allocUnsafe(cap)
-
-      if (this.#len > 0) {
-        this.#grow.copy(b, 0, 0, this.#len)
-      }
-
-      this.#grow = b
-      this.#cap = cap
-    }
-
-    this.#grow.set(u8, this.#len)
-    this.#len = nextLen
-
-    if (!isLast) {
       return
     }
 
-    const view = this.#grow.subarray(0, this.#len)
-    const out = this.#cap > this.#len << 1 ? Buffer.from(view) : view
+    try {
+      const chunk = byteView(value)
+      const chunkLength = chunk.byteLength
 
-    return this.#resolve(out)
+      if (chunkLength > this.#limit - this.#len) {
+        this.#reject(CACHED_ERRORS.bodyTooLarge)
+
+        return
+      }
+
+      const nextLength = this.#len + chunkLength
+
+      if (nextLength === 0) {
+        if (isLast) {
+          this.#resolve(Buffer.alloc(0), 0)
+        }
+
+        return
+      }
+
+      if (nextLength > this.#cap) {
+        const capacity = nextBodyCapacity(this.#cap, nextLength, this.#limit)
+        // Security invariant: only [0, nextLength) is initialized below and
+        // only [0, len) may later become observable. The unwritten capacity
+        // tail is retained internally and discarded or kept outside the view.
+        const buffer = Buffer.allocUnsafeSlow(capacity)
+
+        if (this.#len > 0) {
+          this.#grow.copy(buffer, 0, 0, this.#len)
+        }
+
+        buffer.set(chunk, this.#len)
+        this.#grow = buffer
+        this.#cap = capacity
+        this.#len = nextLength
+      } else {
+        this.#grow.set(chunk, this.#len)
+        this.#len = nextLength
+      }
+
+      if (!isLast) {
+        return
+      }
+
+      if (this.#len === 0) {
+        this.#resolve(Buffer.alloc(0), 0)
+
+        return
+      }
+
+      const view = this.#grow.subarray(0, this.#len)
+
+      if (this.#cap - this.#len > this.#len) {
+        const compact = Buffer.allocUnsafeSlow(this.#len)
+
+        compact.set(view)
+        this.#resolve(compact, this.#len)
+
+        return
+      }
+
+      // `view` retains the whole grow allocation, so retained accounting must
+      // keep `cap`, not merely the logical body length.
+      this.#resolve(view, this.#cap)
+    } catch {
+      this.#reject(CACHED_ERRORS.serverError)
+    }
   }
 
-  /**
-   * @param {Buffer} dst
-   */
-  #resolve(dst) {
-    if (this.#done) {
+  #resolve(body, retainedBytes) {
+    if (this.#state !== 'collecting') {
       return
     }
 
-    this.#done = true
-    this.#body = dst
+    if (!this.#reconcileReservation(retainedBytes)) {
+      this.#reject(CACHED_ERRORS.serverError)
+
+      return
+    }
+
+    this.#state = 'materialized'
+    this.#body = body
+    this.#dst = null
+    this.#grow = null
 
     if (this.#bodyPromise) {
       const resolve = this.#bodyResolve
@@ -146,20 +273,16 @@ export default class BodyParser {
       this.#bodyPromise = null
       this.#bodyReject = null
       this.#bodyResolve = null
-
-      resolve(dst)
+      resolve(body)
     }
   }
 
-  /**
-   * @param {Error} error
-   */
-  #reject(error) {
-    if (this.#done) {
+  #reject(error, state = 'failed') {
+    if (this.#state !== 'idle' && this.#state !== 'collecting') {
       return
     }
 
-    this.#done = true
+    this.#state = state
     this.#bodyError = error
     this.#discardStorage()
     this.#releaseReservation()
@@ -170,7 +293,6 @@ export default class BodyParser {
       this.#bodyPromise = null
       this.#bodyReject = null
       this.#bodyResolve = null
-
       reject(error)
     }
   }
@@ -189,119 +311,115 @@ export default class BodyParser {
   #reserve(bytes) {
     const budget = this.#ctx?.server?.httpBodyBudget
 
-    if (!budget || bytes <= 0) {
+    if (!budget) {
       return true
     }
 
-    if (!budget.reserve(bytes)) {
+    const reservation = budget.tryReserve(bytes, this.#owner)
+
+    if (!reservation) {
       return false
     }
 
     this.#budget = budget
-    this.#reservedBytes = bytes
+    this.#reservation = reservation
 
     return true
   }
 
-  #releaseReservation() {
-    if (this.#reservedBytes === 0) {
-      return
+  #reconcileReservation(bytes) {
+    if (!this.#reservation) {
+      return true
     }
 
-    this.#budget?.release(this.#reservedBytes)
-    this.#budget = null
-    this.#reservedBytes = 0
+    return this.#budget.resize(this.#reservation, bytes, this.#owner)
   }
 
-  #cancel(error) {
-    if (this.#bodyError === error && this.#done) {
+  #releaseReservation() {
+    const reservation = this.#reservation
+    const budget = this.#budget
+    const owner = this.#owner
+
+    if (!reservation) {
       return
     }
 
-    const reject = this.#bodyPromise && !this.#done ? this.#bodyReject : null
+    // Null first so cleanup remains idempotent even if a surrounding terminal
+    // path is re-entered. BodyBudget itself asserts double release and owners.
+    this.#reservation = null
+    this.#budget = null
+    budget.release(reservation, owner)
+  }
+
+  #cancel(error, state) {
+    if (this.#state === 'cleared' || this.#state === 'failed' || this.#state === 'aborted') {
+      return
+    }
+
+    const reject = this.#bodyPromise ? this.#bodyReject : null
 
     this.#generation++
-    this.#done = true
-    this.#started = true
+    this.#state = state
     this.#bodyError = error
     this.#bodyPromise = null
     this.#bodyReject = null
     this.#bodyResolve = null
     this.#discardStorage()
     this.#releaseReservation()
-
     reject?.(error)
+  }
+
+  #clearRequestState() {
+    this.#body = null
+    this.#bodyError = null
+    this.#bodyPromise = null
+    this.#bodyResolve = null
+    this.#bodyReject = null
+    this.#collectionLimit = 0
+    this.#budget = null
+    this.#reservation = null
+    this.#discardStorage()
   }
 
   /**
    * @param {HttpContext} ctx
    * @param {number} [maxSize]
    */
-  reset(ctx, maxSize) {
+  reset(ctx, maxSize = this.#maxSize) {
+    if (this.#state === 'collecting' || this.#state === 'idle') {
+      this.#cancel(CACHED_ERRORS.aborted, 'aborted')
+    }
+
     this.#releaseReservation()
     this.#generation++
-    this.#body = null
-    this.#bodyError = null
-    this.#bodyPromise = null
-    this.#bodyResolve = null
-    this.#bodyReject = null
-    this.#done = false
-    this.#started = false
-    this.#collectionLimit = 0
-    this.#reservedBytes = 0
-    this.#budget = null
-
-    this.#maxSize = maxSize || this.#maxSize
-
-    this.#dst = null
-    this.#offset = 0
-    this.#expected = 0
-
-    this.#grow = null
-    this.#len = 0
-    this.#cap = 0
-    this.#limit = 0
-
+    this.#clearRequestState()
+    this.#maxSize = validateBodyByteLimit(maxSize, 'maxSize')
     this.#ctx = ctx
+    this.#owner = Object.freeze({ generation: this.#generation })
+    this.#state = 'idle'
   }
 
   clear() {
-    if (this.#bodyPromise !== null && !this.#done) {
-      this.#reject(CACHED_ERRORS.aborted)
+    if (this.#state === 'collecting' || this.#state === 'idle') {
+      this.#cancel(CACHED_ERRORS.aborted, 'aborted')
     }
 
-    this.#generation++
     this.#releaseReservation()
-    this.#body = null
-    this.#bodyError = null
-    this.#bodyPromise = null
-    this.#bodyResolve = null
-    this.#bodyReject = null
-    this.#done = false
-    this.#started = false
-    this.#collectionLimit = 0
-    this.#reservedBytes = 0
-    this.#budget = null
-
-    this.#dst = null
-    this.#offset = 0
-    this.#expected = 0
-
-    this.#grow = null
-    this.#len = 0
-    this.#cap = 0
-    this.#limit = 0
-
+    this.#generation++
+    this.#clearRequestState()
     this.#ctx = null
+    this.#owner = null
+    this.#state = 'cleared'
   }
 
   prefetch() {
-    if (this.#started || this.#done || this.#body !== null || this.#bodyError !== null) {
+    if (this.#state !== 'idle') {
       return this.#bodyError
     }
 
     if (!this.#ctx) {
       this.#bodyError = CACHED_ERRORS.serverError
+      this.#state = 'failed'
 
       return this.#bodyError
     }
@@ -311,101 +429,130 @@ export default class BodyParser {
     return this.#bodyError
   }
 
-  /**
-   * @param {number} limit
-   */
+  #discardIncomingBody(ctx) {
+    try {
+      ctx.res?.onData?.(NOOP)
+    } catch {
+      // The controlled request error remains the primary failure.
+    }
+  }
+
   #start(limit) {
     const ctx = this.#ctx
 
-    this.#started = true
+    this.#state = 'collecting'
     this.#collectionLimit = limit
 
     const contentLength = ctx.contentLength()
 
     if (ctx.aborted) {
-      this.#reject(CACHED_ERRORS.aborted)
+      this.#reject(CACHED_ERRORS.aborted, 'aborted')
 
       return
     }
 
     if (contentLength !== null && contentLength > limit) {
+      this.#discardIncomingBody(ctx)
       this.#reject(CACHED_ERRORS.bodyTooLarge)
 
       return
     }
 
     if (contentLength === 0) {
-      ctx.res.onData(NOOP)
-      this.#resolve(Buffer.alloc(0))
+      this.#discardIncomingBody(ctx)
+      this.#resolve(Buffer.alloc(0), 0)
 
       return
     }
 
-    const reservation = contentLength ?? limit
+    const reservationBytes = contentLength ?? limit
 
-    if (!this.#reserve(reservation)) {
+    if (!this.#reserve(reservationBytes)) {
+      this.#discardIncomingBody(ctx)
       this.#reject(CACHED_ERRORS.bodyBudgetExceeded)
 
       return
     }
 
-    const generation = this.#generation
+    const owner = this.#owner
 
     if (ctx.server?.bindingCapabilities?.collectBody === true && typeof ctx.res?.collectBody === 'function') {
-      ctx.res.collectBody(limit, (body) => {
-        if (this.#generation !== generation || this.#ctx !== ctx) {
-          return
-        }
+      try {
+        ctx.res.collectBody(limit, (body) => {
+          if (this.#owner !== owner || this.#ctx !== ctx || this.#state !== 'collecting') {
+            return
+          }
 
-        if (body === null) {
-          this.#reject(CACHED_ERRORS.bodyTooLarge)
+          try {
+            if (body === null) {
+              this.#reject(CACHED_ERRORS.bodyTooLarge)
 
-          return
-        }
+              return
+            }
 
-        const buffer = Buffer.from(body)
+            const buffer = exactBuffer(body)
 
-        if (contentLength !== null && buffer.length !== contentLength) {
-          this.#reject(CACHED_ERRORS.sizeMismatch)
+            if (buffer.length > limit) {
+              this.#reject(CACHED_ERRORS.bodyTooLarge)
 
-          return
-        }
+              return
+            }
 
-        this.#resolve(buffer)
-      })
+            if (contentLength !== null && buffer.length !== contentLength) {
+              this.#reject(CACHED_ERRORS.sizeMismatch)
+
+              return
+            }
+
+            this.#resolve(buffer, buffer.byteLength)
+          } catch {
+            this.#reject(CACHED_ERRORS.serverError)
+          }
+        })
+      } catch {
+        this.#reject(CACHED_ERRORS.serverError)
+      }
 
       return
     }
 
     if (contentLength !== null) {
-      this.#expected = contentLength
-      this.#offset = 0
-      this.#dst = Buffer.allocUnsafe(contentLength)
+      try {
+        this.#expected = contentLength
+        this.#offset = 0
+        // Security invariant: this uninitialized buffer becomes observable only
+        // after isLast and after every byte in [0, expected) was written by this
+        // request. Error and abort paths discard it.
+        this.#dst = Buffer.allocUnsafeSlow(contentLength)
 
-      ctx.res.onData((ab, isLast) => {
-        if (this.#generation === generation && this.#ctx === ctx) {
-          this.#onDataKnown(ab, isLast)
+        ctx.res.onData((value, isLast) => {
+          if (this.#owner === owner && this.#ctx === ctx) {
+            this.#onDataKnown(value, isLast)
+          }
+        })
+      } catch {
+        this.#reject(CACHED_ERRORS.serverError)
+      }
+
+      return
+    }
+
+    this.#limit = limit
+    this.#len = 0
+    this.#cap = 0
+    this.#grow = null
+
+    try {
+      ctx.res.onData((value, isLast) => {
+        if (this.#owner === owner && this.#ctx === ctx) {
+          this.#onDataUnknown(value, isLast)
         }
       })
-    } else {
-      this.#limit = limit
-      this.#len = 0
-      this.#cap = 0
-      this.#grow = null
-
-      ctx.res.onData((ab, isLast) => {
-        if (this.#generation === generation && this.#ctx === ctx) {
-          this.#onDataUnknown(ab, isLast)
-        }
-      })
+    } catch {
+      this.#reject(CACHED_ERRORS.serverError)
     }
   }
 
-  /**
-   * @param {Buffer} body
-   * @param {number} limit
-   * @returns {Buffer}
-   */
   #checkLimit(body, limit) {
     if (body.length > limit) {
       throw CACHED_ERRORS.bodyTooLarge
@@ -415,17 +562,30 @@ export default class BodyParser {
   }
 
   /**
+   * The first body call (or prefetch) fixes the collector limit. Later smaller
+   * limits are checked against the materialized body; larger limits do not
+   * restart or expand a failed/in-flight collector.
    * @param {number} [maxSize]
    * @returns {Promise<Buffer>}
    */
   body(maxSize) {
-    const limit = maxSize ?? this.#maxSize
+    let limit
 
-    if (this.#body !== null) {
+    try {
+      const requestedLimit = maxSize === undefined ? this.#maxSize : validateBodyByteLimit(maxSize, 'maxSize')
+
+      // Accessors may narrow the server policy for a specific parse, but can
+      // never widen the configured per-request ceiling.
+      limit = Math.min(requestedLimit, this.#maxSize)
+    } catch (error) {
+      return Promise.reject(error)
+    }
+
+    if (this.#state === 'materialized') {
       try {
         return Promise.resolve(this.#checkLimit(this.#body, limit))
-      } catch (err) {
-        return Promise.reject(err)
+      } catch (error) {
+        return Promise.reject(error)
       }
     }
 
@@ -433,21 +593,18 @@ export default class BodyParser {
       return Promise.reject(this.#bodyError)
     }
 
-    if (!this.#ctx) {
+    if (!this.#ctx || this.#state === 'cleared') {
       this.#bodyError = CACHED_ERRORS.serverError
+      this.#state = 'failed'
 
       return Promise.reject(this.#bodyError)
     }
 
-    if (!this.#started) {
+    if (this.#state === 'idle') {
       this.#start(limit)
 
-      if (this.#body !== null) {
-        try {
-          return Promise.resolve(this.#checkLimit(this.#body, limit))
-        } catch (err) {
-          return Promise.reject(err)
-        }
+      if (this.#state === 'materialized') {
+        return Promise.resolve(this.#body)
       }
 
       if (this.#bodyError !== null) {
@@ -461,7 +618,6 @@ export default class BodyParser {
       this.#bodyPromise = promise
       this.#bodyResolve = resolve
       this.#bodyReject = reject
-      this.#done = false
     }
 
     if (limit >= this.#collectionLimit) {
@@ -472,52 +628,32 @@ export default class BodyParser {
   }
 
   abort() {
-    if (this.#done) {
-      return
-    }
-
-    this.#cancel(CACHED_ERRORS.aborted)
+    this.#cancel(CACHED_ERRORS.aborted, 'aborted')
   }
 
   timeout() {
-    this.#cancel(CACHED_ERRORS.requestTimeout)
+    this.#cancel(CACHED_ERRORS.requestTimeout, 'failed')
   }
 
-  /**
-   * @param {number} [maxSize]
-   * @returns {Promise<Buffer>}
-   */
   buffer(maxSize) {
     return this.body(maxSize)
   }
 
-  /**
-   * @param {number} [maxSize]
-   * @returns {Promise<string>}
-   */
   async text(maxSize) {
-    const buf = await this.body(maxSize)
+    const buffer = await this.body(maxSize)
 
-    if (buf.length === 0) {
-      return ''
-    }
-
-    return buf.toString('utf8')
+    return buffer.length === 0 ? '' : buffer.toString('utf8')
   }
 
-  /**
-   * @param {number} [maxSize]
-   * @returns {Promise<unknown>}
-   */
   async json(maxSize) {
-    const buf = await this.body(maxSize)
+    const buffer = await this.body(maxSize)
 
-    if (buf.length === 0) {
+    if (buffer.length === 0) {
       return null
     }
 
     try {
-      return JSON.parse(buf.toString('utf8'))
+      return JSON.parse(buffer.toString('utf8'))
     } catch {
       throw CACHED_ERRORS.invalidJSON
     }

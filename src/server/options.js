@@ -6,13 +6,20 @@ export const ALLOW_WS_UPGRADE = () => ({})
 /** @typedef {import('../ws-context.js').default} WSCtx */
 /** @typedef {import('../http-context.js').default} HttpCtx */
 
-const DEFAULT_MAX_BODY_SIZE_MB = 1
-const DEFAULT_MAX_BODY_BUDGET_MB = 0
+export const DEFAULT_HTTP_MAX_BODY_SIZE_BYTES = 1024 * 1024
+export const MAX_HTTP_BODY_SIZE_BYTES = 64 * 1024 * 1024
+export const DEFAULT_HTTP_BODY_BUDGET_BYTES = 256 * 1024 * 1024
+export const DEFAULT_WS_MAX_PAYLOAD_LENGTH_BYTES = 1024 * 1024
+export const DEFAULT_WS_MAX_BACKPRESSURE_BYTES = 64 * 1024
+const MAX_UWS_UNSIGNED_SIZE = 0xffff_ffff
 const DEFAULT_REQUEST_TIMEOUT_MS = 0
+const DEFAULT_WS_UPGRADE_TIMEOUT_MS = 10_000
 
 /**
  * @typedef {object} WSOptions
- * @property {number} [maxBodySize]
+ * @property {number} [maxPayloadLength]
+ * @property {number} [maxBackpressure]
+ * @property {boolean} [closeOnBackpressureLimit]
  * @property {number} [idleTimeoutSec]
  * @property {number} [upgradeTimeoutMs]
  * @property {(ctx: WSCtx) => unknown} [onOpen]
@@ -62,39 +69,39 @@ function validateCallbacks(options, names, namespace) {
 
 /**
  * @param {unknown} value
- * @param {string} namespace
+ * @param {string} [name]
  * @returns {number}
  */
-function normalizeMaxBodySize(value, namespace) {
-  const maxBodySize = value ?? DEFAULT_MAX_BODY_SIZE_MB
-
-  if (!(Number.isFinite(maxBodySize) && maxBodySize >= 1 && maxBodySize <= 64)) {
-    throw new TypeError(`${namespace}.maxBodySize must be in range 1 - 64`)
+export function validateBodyByteLimit(value, name = 'maxSize') {
+  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_HTTP_BODY_SIZE_BYTES) {
+    throw new TypeError(
+      `${name} must be specified in bytes as a non-negative safe integer no greater than ${MAX_HTTP_BODY_SIZE_BYTES}`
+    )
   }
 
-  return maxBodySize
+  return value
 }
 
 /**
  * @param {unknown} value
- * @param {number} maxBodySize
- * @returns {number}
+ * @returns {number|null}
  */
-function normalizeMaxBodyBudget(value, maxBodySize) {
-  const maxBodyBudget = value ?? DEFAULT_MAX_BODY_BUDGET_MB
-
-  if (
-    maxBodyBudget !== 0 &&
-    !(
-      Number.isFinite(maxBodyBudget) &&
-      maxBodyBudget >= maxBodySize &&
-      Number.isSafeInteger(Math.floor(maxBodyBudget * 1024 * 1024))
-    )
-  ) {
-    throw new TypeError(`http.maxBodyBudget must be 0 or a safe finite number >= ${maxBodySize}`)
+function normalizeMaxBodyBudget(value) {
+  if (value === undefined) {
+    return DEFAULT_HTTP_BODY_BUDGET_BYTES
   }
 
-  return maxBodyBudget
+  // `null` is the only explicit unlimited sentinel. In particular, zero is a
+  // real zero-byte budget and can never become unlimited through truthiness.
+  if (value === null) {
+    return null
+  }
+
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError('http.maxBodyBudget must be specified in bytes as a non-negative safe integer or null')
+  }
+
+  return value
 }
 
 /**
@@ -112,6 +119,23 @@ function normalizeRequestTimeout(value) {
   }
 
   return requestTimeoutMs
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} name
+ * @param {number} fallback
+ * @param {number} maximum
+ * @returns {number}
+ */
+function normalizeWsByteCount(value, name, fallback, maximum = MAX_UWS_UNSIGNED_SIZE) {
+  const bytes = value === undefined ? fallback : value
+
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > maximum) {
+    throw new TypeError(`${name} must be specified in bytes as a non-negative safe integer no greater than ${maximum}`)
+  }
+
+  return bytes
 }
 
 /**
@@ -176,7 +200,7 @@ function normalizePrefetch(value) {
  *  {
  *    onRequest: ((ctx: HttpCtx) => unknown|Promise<unknown>)|null,
  *    routes: Route[]|null, onError: (ctx: HttpCtx, err: Error) => unknown|Promise<unknown>,
- *    maxBodySize: number, maxBodyBudget: number, requestTimeoutMs: number, prefetch: boolean
+ *    maxBodySize: number, maxBodyBudget: number|null, requestTimeoutMs: number, prefetch: boolean
  *  }|null}
  */
 export function normalizeHttpOptions(http) {
@@ -197,15 +221,19 @@ export function normalizeHttpOptions(http) {
 
   http.routes?.forEach(validateRoute)
 
-  const maxBodySize = normalizeMaxBodySize(http.maxBodySize, 'http')
+  const prefetch = normalizePrefetch(http.prefetch)
+  const maxBodySize = validateBodyByteLimit(
+    http.maxBodySize === undefined ? DEFAULT_HTTP_MAX_BODY_SIZE_BYTES : http.maxBodySize,
+    'http.maxBodySize'
+  )
 
   return {
     onRequest: http.onRequest ?? null,
     routes: http.routes ?? null,
     onError: http.onError ?? NOOP,
-    prefetch: normalizePrefetch(http.prefetch),
+    prefetch,
     maxBodySize,
-    maxBodyBudget: normalizeMaxBodyBudget(http.maxBodyBudget, maxBodySize),
+    maxBodyBudget: normalizeMaxBodyBudget(http.maxBodyBudget),
     requestTimeoutMs: normalizeRequestTimeout(http.requestTimeoutMs)
   }
 }
@@ -231,6 +259,10 @@ export function normalizeWsOptions(ws) {
     )
   }
 
+  if (Object.hasOwn(ws, 'maxBodySize')) {
+    throw new TypeError('ws.maxBodySize is no longer supported; use ws.maxPayloadLength in bytes')
+  }
+
   validateCallbacks(
     ws,
     [
@@ -248,11 +280,10 @@ export function normalizeWsOptions(ws) {
     'ws'
   )
 
-  if (
-    ws.upgradeTimeoutMs != null &&
-    !(Number.isFinite(ws.upgradeTimeoutMs) && ws.upgradeTimeoutMs >= 100 && ws.upgradeTimeoutMs <= 300_000)
-  ) {
-    throw new TypeError('ws.upgradeTimeoutMs must be in range 100 - 300000')
+  const upgradeTimeoutMs = ws.upgradeTimeoutMs === undefined ? DEFAULT_WS_UPGRADE_TIMEOUT_MS : ws.upgradeTimeoutMs
+
+  if (!Number.isSafeInteger(upgradeTimeoutMs) || upgradeTimeoutMs < 0 || upgradeTimeoutMs > 300_000) {
+    throw new TypeError('ws.upgradeTimeoutMs must be a safe integer in milliseconds in range 0 - 300000')
   }
 
   const idleTimeout = ws.idleTimeoutSec ?? 15
@@ -261,8 +292,22 @@ export function normalizeWsOptions(ws) {
     throw new TypeError('ws.idleTimeoutSec must be >= 5')
   }
 
+  const closeOnBackpressureLimit = ws.closeOnBackpressureLimit ?? false
+
+  if (typeof closeOnBackpressureLimit !== 'boolean') {
+    throw new TypeError('ws.closeOnBackpressureLimit must be a boolean')
+  }
+
   return {
     ...ws,
-    maxBodySize: normalizeMaxBodySize(ws.maxBodySize, 'ws')
+    maxPayloadLength: normalizeWsByteCount(
+      ws.maxPayloadLength,
+      'ws.maxPayloadLength',
+      DEFAULT_WS_MAX_PAYLOAD_LENGTH_BYTES,
+      MAX_HTTP_BODY_SIZE_BYTES
+    ),
+    maxBackpressure: normalizeWsByteCount(ws.maxBackpressure, 'ws.maxBackpressure', DEFAULT_WS_MAX_BACKPRESSURE_BYTES),
+    closeOnBackpressureLimit,
+    upgradeTimeoutMs
   }
 }

@@ -6,15 +6,24 @@ import { getFreePort } from '../../helpers/ports.js'
  * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.onRequest]
  * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>}>} [opt.routes]
  * @param {number} [opt.maxBodySize]
- * @param {number} [opt.maxBodyBudget]
+ * @param {number|null} [opt.maxBodyBudget]
  * @param {number} [opt.requestTimeoutMs]
  * @param {boolean} [opt.prefetch]
+ * @param {(ctx: import('../../src/http-context.js').default, error: Error) => unknown} [opt.onError]
  * @returns {Promise<{server: Server, port: number, baseUrl: string, close: () => Promise<void>}>}
  */
-export async function startHttpServer({ onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs, prefetch }) {
+export async function startHttpServer({
+  onRequest,
+  routes,
+  maxBodySize,
+  maxBodyBudget,
+  requestTimeoutMs,
+  prefetch,
+  onError
+}) {
   const port = await getFreePort()
   const server = new Server({
-    http: { onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs, prefetch },
+    http: { onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs, prefetch, onError },
     port
   })
 
@@ -33,16 +42,17 @@ export async function startHttpServer({ onRequest, routes, maxBodySize, maxBodyB
  * @param {import('../../src/index.js').WSOptions} [opt.ws]
  * @param {(ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>} [opt.onRequest]
  * @param {Array<{method: string, path: string, handler: (ctx: import('../../src/http-context.js').default) => unknown|Promise<unknown>}>} [opt.routes]
- * @param {number} [opt.maxBodySize]
+ * @param {number} [opt.maxPayloadLength]
  * @returns {Promise<{server: Server, port: number, httpBaseUrl: string, wsBaseUrl: string, close: () => Promise<void>}>}
  */
-export async function startWsServer({ ws, onRequest, routes, maxBodySize } = {}) {
+export async function startWsServer({ ws, onRequest, routes, maxPayloadLength } = {}) {
   const port = await getFreePort()
   const http = onRequest !== undefined || routes !== undefined ? { onRequest, routes } : null
+  const wsOptions = ws && maxPayloadLength !== undefined ? { maxPayloadLength, ...ws } : ws
   const server = new Server({
     port,
     http,
-    ws: ws && { maxBodySize: maxBodySize ?? 16, ...ws }
+    ws: wsOptions
   })
 
   await server.listen()

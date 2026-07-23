@@ -148,3 +148,140 @@ test('transport aborts an asynchronous upgrade after ws.upgradeTimeoutMs', async
     sock.once('close', done)
   })
 })
+
+test('maxPayloadLength accepts exact text/binary messages and rejects one byte over', { timeout: 5000 }, async () => {
+  const received = []
+
+  handle = await startWsServer({
+    ws: {
+      maxPayloadLength: 1024 * 32,
+      onMessage: (ctx, message, isBinary) => {
+        received.push({ length: message.byteLength, isBinary })
+        ctx.send(String(message.byteLength))
+      }
+    }
+  })
+
+  const exact = new WebSocket(handle.wsBaseUrl, { perMessageDeflate: false })
+
+  await new Promise((resolve, reject) => {
+    exact.once('open', resolve)
+    exact.once('error', reject)
+  })
+
+  const responses = []
+
+  exact.on('message', (message) => responses.push(message.toString()))
+  exact.send('x'.repeat(32_768))
+  exact.send(Buffer.alloc(32_768))
+
+  while (responses.length < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+
+  assert.deepStrictEqual(received, [
+    { length: 32_768, isBinary: false },
+    { length: 32_768, isBinary: true }
+  ])
+  assert.deepStrictEqual(responses, ['32768', '32768'])
+  exact.close()
+
+  const oversized = new WebSocket(handle.wsBaseUrl, { perMessageDeflate: false })
+
+  await new Promise((resolve, reject) => {
+    oversized.once('open', resolve)
+    oversized.once('error', reject)
+  })
+
+  oversized.send(Buffer.alloc(32_769))
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('oversized WebSocket was not closed')), 2000)
+
+    oversized.once('close', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+    oversized.once('error', () => {})
+  })
+
+  assert.deepStrictEqual(received, [
+    { length: 32_768, isBinary: false },
+    { length: 32_768, isBinary: true }
+  ])
+})
+
+test('maxPayloadLength applies to the reconstructed fragmented message', { timeout: 5000 }, async () => {
+  let callbacks = 0
+
+  handle = await startWsServer({
+    ws: {
+      maxPayloadLength: 1024 * 32,
+      onMessage: (ctx, message) => {
+        callbacks++
+        ctx.send(String(message.byteLength))
+      }
+    }
+  })
+
+  const exact = new WebSocket(handle.wsBaseUrl, { perMessageDeflate: false })
+
+  await new Promise((resolve, reject) => {
+    exact.once('open', resolve)
+    exact.once('error', reject)
+  })
+
+  const exactReply = new Promise((resolve) => exact.once('message', (message) => resolve(message.toString())))
+
+  exact.send(Buffer.alloc(16_384), { binary: true, fin: false })
+  exact.send(Buffer.alloc(16_384), { binary: true, fin: true })
+  assert.strictEqual(await exactReply, '32768')
+  assert.strictEqual(callbacks, 1)
+  exact.close()
+
+  const oversized = new WebSocket(handle.wsBaseUrl, { perMessageDeflate: false })
+
+  await new Promise((resolve, reject) => {
+    oversized.once('open', resolve)
+    oversized.once('error', reject)
+  })
+
+  oversized.send(Buffer.alloc(16_384), { binary: true, fin: false })
+  oversized.send(Buffer.alloc(16_385), { binary: true, fin: true })
+
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('oversized fragmented WebSocket was not closed')), 2000)
+
+    oversized.once('close', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+    oversized.once('error', () => {})
+  })
+
+  assert.strictEqual(callbacks, 1)
+})
+
+test('supported bindings do not negotiate permessage-deflate', { timeout: 5000 }, async () => {
+  const received = Promise.withResolvers()
+
+  handle = await startWsServer({
+    ws: {
+      maxPayloadLength: 1024 * 32,
+      onMessage: (_ctx, message) => received.resolve(message.byteLength)
+    }
+  })
+
+  const socket = new WebSocket(handle.wsBaseUrl, {
+    perMessageDeflate: { threshold: 0 }
+  })
+
+  await new Promise((resolve, reject) => {
+    socket.once('open', resolve)
+    socket.once('error', reject)
+  })
+
+  assert.strictEqual(socket.extensions, '')
+  socket.send(Buffer.alloc(32_768))
+  assert.strictEqual(await received.promise, 32_768)
+  socket.close()
+})

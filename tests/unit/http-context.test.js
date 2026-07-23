@@ -538,18 +538,12 @@ describe('HttpContext', () => {
     test('should return null for invalid values', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
-      const req1 = createMockReq({ headers: { 'content-length': '-1' } })
-      const req2 = createMockReq({ headers: { 'content-length': '1.5' } })
-      const req3 = createMockReq({ headers: { 'content-length': 'abc' } })
+      const invalidValues = ['-1', '+1', ' 1', '1 ', '1.5', '1e3', 'abc', String(Number.MAX_SAFE_INTEGER + 1)]
 
-      ctx.reset(res, req1)
-      strictEqual(ctx.contentLength(), null)
-
-      ctx.reset(res, req2)
-      strictEqual(ctx.contentLength(), null)
-
-      ctx.reset(res, req3)
-      strictEqual(ctx.contentLength(), null)
+      for (const value of invalidValues) {
+        ctx.reset(res, createMockReq({ headers: { 'content-length': value } }))
+        strictEqual(ctx.contentLength(), null, `${JSON.stringify(value)} must not be accepted`)
+      }
     })
 
     test('should cache result', () => {
