@@ -38,34 +38,6 @@ ships platform-specific prebuilds:
 - **TLS and `permessage-deflate` are disabled** in the native binding; terminate
   TLS before the application.
 
-## Native binding regression gate
-
-The runtime is `@swarmmachina/swm-uws@0.5.0`. The regression gate runs
-the same `swm-core` HTTP and WebSocket paths against the dev-only
-`uWebSockets.js@20.69.0` reference, changing only the native binding.
-
-```bash
-pnpm test:e2e:bindings
-pnpm bench:bindings
-pnpm bench:bindings:deep
-```
-
-`bench:bindings` is the CI gate; `bench:bindings:deep` is the longer diagnostic
-run. Both use balanced AB/BA ordering and write JSON under `benchmark/profiles/`.
-Parameters can be overridden with `BINDING_BENCH_*` or `DEEP_BINDING_*`.
-
-To advance the runtime binding and its upstream reference together, run:
-
-```bash
-pnpm deps:update:bindings 0.5.0 v20.69.0
-pnpm test:e2e:bindings
-```
-
-The updater changes both pins and the lockfile; do not edit them independently.
-
-`SWM_UWS_NATIVE_FAST_PATHS=0` disables native fast paths. A comma-separated list
-selects individual paths; `all` also enables experimental paths.
-
 ## Quick Start
 
 ### Basic HTTP Server
@@ -1836,6 +1808,34 @@ This compares explicit unlimited (`maxBodyBudget: null`) with
 `256 * 1024 * 1024` bytes on a prefetched body workload, and
 `requestTimeoutMs: 0` with `30000` on an async-handler workload. Reports are
 written to `benchmark/profiles/body-safety/`.
+
+## Native binding regression gate
+
+The runtime is `@swarmmachina/swm-uws@0.5.4`. The regression gate runs
+the same `swm-core` HTTP and WebSocket paths against the dev-only
+`uWebSockets.js@20.69.0` reference, changing only the native binding.
+
+```bash
+pnpm test:e2e:bindings
+pnpm bench:bindings
+pnpm bench:bindings:deep
+```
+
+`bench:bindings` is the CI gate; `bench:bindings:deep` is the longer diagnostic
+run. Both use balanced AB/BA ordering and write JSON under `benchmark/profiles/`.
+Parameters can be overridden with `BINDING_BENCH_*` or `DEEP_BINDING_*`.
+
+To advance the runtime binding and its upstream reference together, run:
+
+```bash
+pnpm deps:update:bindings 0.5.4 v20.69.0
+pnpm test:e2e:bindings
+```
+
+The updater changes both pins and the lockfile; do not edit them independently.
+
+`SWM_UWS_NATIVE_FAST_PATHS=0` disables native fast paths. A comma-separated list
+selects individual paths; `all` also enables experimental paths.
 
 ## Regression profiling (CI)
 
