@@ -1,7 +1,10 @@
-import Server, { cors, prepareHeaders, serveStatic } from '@swarmmachina/swm-core'
+import Server, { cors, defineConfig, prepareHeaders, serveStatic } from '@swarmmachina/swm-core'
 import type {
   CommonServerOptions,
   CorsOptions,
+  EffectiveHttpConfig,
+  EffectiveServerConfig,
+  EffectiveWSConfig,
   Handler,
   HttpBaseOptions,
   HttpBody,
@@ -68,6 +71,9 @@ type CorePublicTypes = [
   HttpOptions,
   CommonServerOptions,
   ServerOptions,
+  EffectiveHttpConfig,
+  EffectiveWSConfig,
+  EffectiveServerConfig,
   HttpContext,
   WSSendStatus,
   RawWebSocket,
@@ -101,6 +107,9 @@ type BindingPublicTypes = [
 const upgradeResult: UpgradeResult = { userId: 'reader' }
 const rejectedUpgrade: UpgradeResult = null
 const wsOptions: WSOptions = {
+  maxPayloadLength: 32 * 1024,
+  maxBackpressure: 64 * 1024,
+  closeOnBackpressureLimit: true,
   onUpgrade: async (meta) => ({ token: meta.getHeader('authorization') }),
   selectProtocol: (requested, userData) => {
     void userData
@@ -109,16 +118,36 @@ const wsOptions: WSOptions = {
   }
 }
 
-const server: ServerType = new Server({ http: { prefetch: true, onRequest: () => 'ok' } })
+const configuredOptions = defineConfig({
+  http: {
+    prefetch: true,
+    maxBodySize: 16 * 1024 * 1024,
+    maxBodyBudget: 256 * 1024 * 1024,
+    onRequest: () => 'ok'
+  }
+})
+const server: ServerType = new Server(configuredOptions)
+const unlimitedServer: ServerType = new Server({
+  http: { maxBodyBudget: null, onRequest: () => 'ok' }
+})
+
+const effectiveConfig: Readonly<EffectiveServerConfig> = server.effectiveConfig
+const effectiveHttp: Readonly<EffectiveHttpConfig> | null = effectiveConfig.http
+const effectiveWs: Readonly<EffectiveWSConfig> | null = effectiveConfig.ws
+
 // @ts-expect-error prefetch belongs to the HTTP application options
 new Server({ prefetch: true, http: { onRequest: () => 'ok' } })
 const app: AppInstance = createApp()
 
 void server
+void unlimitedServer
+void effectiveHttp
+void effectiveWs
 void app
 void cors
 void serveStatic
 void prepareHeaders
+void defineConfig
 void uWS
 void App
 void version

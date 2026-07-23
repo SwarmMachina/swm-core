@@ -110,6 +110,11 @@ database before it asks for the body:
 const server = new Server({
   http: {
     prefetch: true,
+
+    // Body-size values are expressed in bytes. The omitted maxBodyBudget uses
+    // the finite 256 MiB process-wide default in both lazy and prefetch modes.
+    maxBodySize: 16 * 1024 * 1024, // 16 MiB per request
+
     onRequest: async (ctx) => {
       if (ctx.method() !== 'post') {
         return null
@@ -164,8 +169,10 @@ const server = new Server({
 Prefetch starts collecting raw bytes before `before` and `handler` run. It does
 not eagerly decode text or parse JSON. The trade-off is additional work for
 requests that never use their body and memory proportional to concurrent
-request bodies. `http.maxBodySize` bounds one request; the optional
-`http.maxBodyBudget` bounds all bodies being collected concurrently.
+request bodies. `http.maxBodySize` bounds one request; `http.maxBodyBudget`
+bounds aggregate retained and in-flight body storage. When the budget is
+omitted, `swm-core` applies the same finite 256 MiB safety-net in both lazy and
+prefetch modes. Use `null` only as an intentional opt-out.
 
 When keeping the default lazy mode, start the reader manually before the first
 `await`. The body is then collected while the user is checked, but it is not
@@ -181,7 +188,7 @@ http: {
     }
 
     // Register the body reader synchronously, before the first await.
-    const dataPromise = ctx.text(1024 * 1024) // 1 MB limit, in bytes
+    const dataPromise = ctx.text(1024 * 1024) // 1 MiB limit, expressed in bytes
 
     // The body can fail while the database call is still pending. Attach a
     // rejection handler immediately; awaiting the original promise below still
@@ -333,6 +340,9 @@ const server = new Server({
     }
   },
   ws: {
+    maxPayloadLength: 1024 * 32, // 32 KiB per incoming message, in bytes
+    maxBackpressure: 1024 * 64, // 64 KiB per slow WebSocket, in bytes
+    closeOnBackpressureLimit: false,
     idleTimeoutSec: 30,
     onUpgrade: (meta) => ({ ip: meta.ip() }),
     onOpen: (ctx) => {
@@ -391,44 +401,168 @@ a fixed `404` without allocating an `HttpContext`.
 
 **HTTP Options (`http` object):**
 
-| Option             | Type       | Default     | Description                                                |
-| ------------------ | ---------- | ----------- | ---------------------------------------------------------- |
-| `maxBodySize`      | `Number`   | `1`         | Max HTTP request body size in MB (1-64).                   |
-| `maxBodyBudget`    | `Number`   | `0`         | Aggregate body collection budget in MB; `0` disables it.   |
-| `requestTimeoutMs` | `Number`   | `0`         | Async handler timeout in ms (100-300000); `0` disables it. |
-| `prefetch`         | `Boolean`  | `false`     | Collect request bodies before user handlers run.           |
-| `onRequest`        | `Function` | default 404 | Universal request handler `(ctx) => any`                   |
-| `routes`           | `Array`    | default 404 | Declarative route definitions                              |
-| `onError`          | `Function` | `() => {}`  | Request error handler `(ctx, error) => void`               |
+| Option             | Type            | Default     | Description                                                          |
+| ------------------ | --------------- | ----------- | -------------------------------------------------------------------- |
+| `maxBodySize`      | `Number`        | `1048576`   | Maximum HTTP request body size in bytes (1 MiB default, 64 MiB max). |
+| `maxBodyBudget`    | `Number`/`null` | `268435456` | Aggregate retained/in-flight body-memory budget in bytes (256 MiB).  |
+| `requestTimeoutMs` | `Number`        | `0`         | Async handler timeout in ms (100-300000); `0` disables it.           |
+| `prefetch`         | `Boolean`       | `false`     | Collect request bodies before user handlers run.                     |
+| `onRequest`        | `Function`      | default 404 | Universal request handler `(ctx) => any`                             |
+| `routes`           | `Array`         | default 404 | Declarative route definitions                                        |
+| `onError`          | `Function`      | `() => {}`  | Request error handler `(ctx, error) => void`                         |
 
 `http.onRequest` and `http.routes` are mutually exclusive. `http: {}` enables
 HTTP with a deterministic default `404` response.
 
-`http.maxBodySize` and `ws.maxBodySize` are independent. Changing one does not
-change the limit for the other protocol.
+`http.maxBodySize` and `ws.maxPayloadLength` are independent. Changing one does
+not change the limit for the other protocol.
 
-`maxBodyBudget` and `requestTimeoutMs` are HTTP-level, opt-in settings. Only
-`prefetch` can be overridden per route. A production configuration can enable
-all three explicitly:
+#### JavaScript configuration typing
+
+IDE types load automatically from the package root import. For a configuration
+declared separately, use `defineConfig()` to retain completion without JSDoc:
+
+```javascript
+import Server, { defineConfig } from '@swarmmachina/swm-core'
+
+const options = defineConfig({
+  http: { maxBodyBudget: 256 * 1024 * 1024 }
+})
+
+const server = new Server(options)
+```
+
+`defineConfig()` returns the same object; constructor validation is unchanged.
+Global declarations and a `compilerOptions.types` entry are not required.
+Avoid deep imports from `@swarmmachina/swm-core/src/*`.
+
+### HTTP body memory limits
+
+All numeric HTTP body-size and budget values are byte counts. Human-readable
+strings such as `"16MB"` or `"16 MiB"` are rejected. The default
+`http.maxBodySize` is `1024 * 1024` bytes (1 MiB) and the supported maximum is
+`64 * 1024 * 1024` bytes (64 MiB).
+
+The memory controls are distinct:
+
+1. A valid `Content-Length` above the request limit is rejected before body
+   allocation.
+2. `maxBodySize` (or the first body accessor's byte limit) bounds one request.
+3. `maxBodyBudget` bounds aggregate accounted body memory across concurrent
+   requests.
+
+Without prefetch, body collection starts only when application code calls
+`ctx.body()`, `ctx.buffer()`, `ctx.text()`, or `ctx.json()`. Prefetch starts it
+before user handlers. Both modes share the same default aggregate budget:
+`256 * 1024 * 1024` bytes (256 MiB). A finite default avoids making lazy mode an
+implicit unlimited escape hatch while still admitting four simultaneous
+worst-case 64 MiB bodies, or up to 256 reservations at the default 1 MiB
+per-request limit.
+
+An explicit finite value always wins. Explicit `0` means zero capacity: empty
+bodies work, but positive reservations fail with `503`. Explicit `null` is the
+intentional unlimited sentinel and should be reserved for a separately bounded
+environment.
+
+Why 256 MiB:
+
+- the supported per-request ceiling remains 64 MiB, so the default admits four
+  simultaneous worst-case reservations instead of only one;
+- at the default 1 MiB request limit it admits up to 256 full-size
+  reservations;
+- accounting stays finite in lazy mode as well as prefetch mode;
+- reserve, resize, and release remain O(1); the budget does not scan active
+  requests or sample RSS.
+
+The 64 MiB `maxBodySize` maximum is deliberate. Body accessors materialize a
+contiguous `Buffer`; uploads that legitimately exceed 64 MiB should use a
+streaming endpoint or object-storage upload flow instead of increasing the
+heap-facing body limit.
+
+The default is a library safety net, not a universal container-size
+recommendation. Choose an explicit value from the memory available after
+subtracting baseline RSS, V8 heap, outbound response/WebSocket capacity,
+native/kernel buffers, and operational headroom:
+
+```text
+body budget <= process memory limit
+               - measured baseline/high-water RSS
+               - non-body concurrency allowance
+               - required safety headroom
+
+known-length admission ~= floor(body budget / declared Content-Length)
+unknown-length admission = floor(body budget / effective collection limit)
+```
+
+If `maxBodyBudget` is smaller than `maxBodySize`, known-length bodies below the
+budget can still proceed. An unknown-length body reserves its full collection
+limit up front, so it will receive `503` when that limit cannot fit. Prefer a
+valid `Content-Length` for large requests when safe admission density matters.
+
+Example starting points—capacity-test them under the real workload:
+
+| Deployment shape                     | Suggested starting budget | Rationale                                                    |
+| ------------------------------------ | ------------------------- | ------------------------------------------------------------ |
+| Small 512 MiB container              | `64–128 MiB`              | Preserve room for V8, native buffers, and application state. |
+| General 1–2 GiB service              | Default `256 MiB`         | Four maximum-size bodies or many default-size API requests.  |
+| Dedicated upload/API worker          | Explicit `512 MiB+`       | Only after measuring RSS high-water and concurrency.         |
+| Externally hard-bounded test process | `null`                    | Disables this protection; not a normal production default.   |
+
+Use an explicit production budget after capacity planning:
 
 ```javascript
 const server = new Server({
   http: {
     prefetch: true,
-    maxBodySize: 8,
-    maxBodyBudget: 256,
+
+    // Body-size values are expressed in bytes.
+    maxBodySize: 16 * 1024 * 1024, // 16 MiB per request
+
+    // Prefetch may collect bodies before ctx.body() is called. Keep a global
+    // budget so concurrent connections cannot each reserve the full
+    // per-request limit independently.
+    maxBodyBudget: 512 * 1024 * 1024, // 512 MiB across accounted bodies
+
     requestTimeoutMs: 30_000,
     onRequest
   }
 })
 ```
 
-The body budget covers lazy and prefetched bodies. It reserves the declared
-`Content-Length`, or the reader limit when the length is unknown
-(`http.maxBodySize` for prefetch). A non-zero budget must be at least
-`maxBodySize`. Budget exhaustion returns `503`; a body over its request limit
-returns `413`. Reservations are released when requests end, abort, fail, or time
-out.
+The automatic-default form is:
+
+```javascript
+const server = new Server({
+  http: {
+    prefetch: true,
+
+    // Expressed in bytes. Because no global budget is supplied, swm-core
+    // applies its finite 256 MiB default in both lazy and prefetch modes.
+    // Set it explicitly when capacity planning calls for another value.
+    maxBodySize: 16 * 1024 * 1024, // 16 MiB per request
+    onRequest
+  }
+})
+```
+
+Known `Content-Length` bodies reserve their declared size. Unknown-length bodies
+reserve the collection limit up front. After materialization, excess reservation
+is reconciled to the exact retained allocation (including a grow buffer's
+backing capacity), and remains charged until context cleanup. Failure, abort,
+timeout, or reset releases the generation-owned reservation exactly once. Thus:
+
+```text
+accounted body memory <= effective global body budget
+```
+
+This is not an RSS cap. Allocator overhead and retained arenas, native and kernel
+socket buffers, temporary/body-conversion copies, V8 heap, response bodies, GC
+delay, and unrelated application memory can make process RSS higher. A budget
+exhaustion returns `503`; a request over its limit returns `413`.
+
+The normalized values are available read-only as
+`server.effectiveConfig.http.maxBodySize` and
+`server.effectiveConfig.http.maxBodyBudget`.
 
 `requestTimeoutMs` applies only to asynchronous `before`/handler chains; sync
 handlers have no timer. A timeout releases the body reservation, returns `408`,
@@ -449,24 +583,72 @@ passed to `http.onError`.
 
 **WebSocket Options (`ws` object):**
 
-| Option             | Type       | Default                                  | Description                                                                                                                                                                                                                                                              |
-| ------------------ | ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `maxBodySize`      | `Number`   | `1`                                      | Max WebSocket message payload size in MB (1-64).                                                                                                                                                                                                                         |
-| `idleTimeoutSec`   | `Number`   | `15`                                     | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
-| `upgradeTimeoutMs` | `Number`   | `10000`                                  | Deadline for an asynchronous `onUpgrade` decision (100-300000 ms).                                                                                                                                                                                                       |
-| `onOpen`           | `Function` | `(ctx) => {}`                            | Called when client connects.                                                                                                                                                                                                                                             |
-| `onMessage`        | `Function` | `(ctx, message, isBinary) => {}`         | Called when message received.                                                                                                                                                                                                                                            |
-| `onDropped`        | `Function` | `(ctx, message, isBinary) => {}`         | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
-| `onClose`          | `Function` | `(ctx, code, message) => {}`             | Called when client disconnects.                                                                                                                                                                                                                                          |
-| `onDrain`          | `Function` | `(ctx) => {}`                            | Called when socket is writable again.                                                                                                                                                                                                                                    |
-| `onError`          | `Function` | `(ctx, error) => {}`                     | Called on WebSocket error.                                                                                                                                                                                                                                               |
-| `onUpgrade`        | `Function` | `(meta) => ({})`                         | Authorize the upgrade. Return `null` to reject with `403`, or a flat object to accept; that object becomes `ctx.data`. Async handlers can safely use `meta` after an `await`.                                                                                            |
-| `selectProtocol`   | `Function` | `undefined`                              | Optional synchronous `(requested, userData) => string \| undefined` subprotocol selector. The returned token must be present in the client-requested list.                                                                                                               |
-| `onSubscription`   | `Function` | `(ctx, topic, newCount, oldCount) => {}` | Called on topic subscription change.                                                                                                                                                                                                                                     |
-| `connectionKey`    | `Function` | `undefined`                              | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
+| Option                     | Type       | Default                                  | Description                                                                                                                                                                                                                                                              |
+| -------------------------- | ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxPayloadLength`         | `Number`   | `1048576`                                | Maximum bytes in one incoming WebSocket message (1 MiB default, 64 MiB max).                                                                                                                                                                                             |
+| `maxBackpressure`          | `Number`   | `65536`                                  | Maximum permitted outgoing backpressure in bytes per WebSocket.                                                                                                                                                                                                          |
+| `closeOnBackpressureLimit` | `Boolean`  | `false`                                  | Close a slow WebSocket when an outgoing message is dropped at the backpressure limit.                                                                                                                                                                                    |
+| `idleTimeoutSec`           | `Number`   | `15`                                     | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
+| `upgradeTimeoutMs`         | `Number`   | `10000`                                  | Deadline for an asynchronous `onUpgrade` decision in milliseconds (0-300000). `0` schedules a zero-delay timeout; it does not disable the deadline.                                                                                                                      |
+| `onOpen`                   | `Function` | `(ctx) => {}`                            | Called when client connects.                                                                                                                                                                                                                                             |
+| `onMessage`                | `Function` | `(ctx, message, isBinary) => {}`         | Called when message received.                                                                                                                                                                                                                                            |
+| `onDropped`                | `Function` | `(ctx, message, isBinary) => {}`         | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
+| `onClose`                  | `Function` | `(ctx, code, message) => {}`             | Called when client disconnects.                                                                                                                                                                                                                                          |
+| `onDrain`                  | `Function` | `(ctx) => {}`                            | Called when socket is writable again.                                                                                                                                                                                                                                    |
+| `onError`                  | `Function` | `(ctx, error) => {}`                     | Called on WebSocket error.                                                                                                                                                                                                                                               |
+| `onUpgrade`                | `Function` | `(meta) => ({})`                         | Authorize the upgrade. Return `null` to reject with `403`, or a flat object to accept; that object becomes `ctx.data`. Async handlers can safely use `meta` after an `await`.                                                                                            |
+| `selectProtocol`           | `Function` | `undefined`                              | Optional synchronous `(requested, userData) => string \| undefined` subprotocol selector. The returned token must be present in the client-requested list.                                                                                                               |
+| `onSubscription`           | `Function` | `(ctx, topic, newCount, oldCount) => {}` | Called on topic subscription change.                                                                                                                                                                                                                                     |
+| `connectionKey`            | `Function` | `undefined`                              | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
 
 `ws: {}` enables WebSocket with permissive upgrades and no-op lifecycle
 callbacks. Use `ws: null` (or omit `ws` when `http` is configured) to disable it.
+
+### WebSocket payload and backpressure limits
+
+WebSocket input uses `maxPayloadLength`, not HTTP `maxBodySize`. All values
+below are byte counts:
+
+```javascript
+const server = new Server({
+  http: null,
+  ws: {
+    // Incoming WebSocket messages use maxPayloadLength, not HTTP maxBodySize.
+    // All size values below are expressed in bytes.
+    maxPayloadLength: 1024 * 32, // 32 KiB per incoming message
+
+    // Outgoing backpressure is limited independently for each WebSocket.
+    maxBackpressure: 1024 * 64, // 64 KiB per slow connection
+    closeOnBackpressureLimit: true
+  }
+})
+```
+
+`maxPayloadLength` is inbound and applies to each reconstructed text or binary
+message, including fragmented messages. The installed `swm-uws` transport has
+per-message compression disabled, so compressed-message semantics do not apply
+to that backend. An oversized message closes the connection before
+`onMessage` sees it.
+
+`maxBackpressure` is outbound and per socket. `send()`/`sendTo()` can report
+backpressure or a dropped message, `onDropped` observes drops, and `onDrain`
+reports recovery. With `closeOnBackpressureLimit: false`, a slow socket stays
+open and messages above the limit are dropped; `true` removes slow consumers
+more aggressively. Choose the policy according to whether message loss or
+reconnection is preferable for the application.
+
+These controls are independent from HTTP body accounting. There is no
+process-wide WebSocket budget:
+
+```text
+allowed WebSocket backpressure can approach
+concurrent slow WebSockets × maxBackpressure
+```
+
+Allocator overhead, compression state in other compatible bindings, kernel
+socket buffers, application queues, publish fan-out, and GC can increase actual
+memory use. The effective values are available through
+`server.effectiveConfig.ws`.
 
 `selectProtocol` runs synchronously after `onUpgrade` accepts. Return one of the
 requested tokens; returning `undefined` (or omitting the selector) negotiates no
@@ -647,13 +829,34 @@ const url = ctx.url()
 
 ##### `ctx.ip()`
 
-Get client IP address.
+Get network source metadata. A valid PROXY Protocol source address is preferred;
+otherwise the TCP peer address is returned. IPv4-mapped IPv6 is normalized and
+the value is cached only for the current context generation. `X-Forwarded-For`
+is not automatically trusted or parsed.
 
 ```javascript
 const ip = ctx.ip()
 ```
 
 **Returns:** `string`
+
+`ctx.ip()` is not authenticated identity. Accept PROXY Protocol only on a
+listener reachable exclusively through a trusted ingress or load balancer;
+otherwise a public client can spoof the source address in its PROXY header.
+Authorization, rate limiting, and audit attribution need an explicit proxy
+trust policy.
+
+```text
+Recommended:
+Internet -> trusted ingress/load balancer -> private PROXY-enabled swm-core listener
+```
+
+```text
+Unsafe:
+Internet -> public listener accepting arbitrary PROXY headers
+```
+
+The same trust boundary applies to `ws.onUpgrade(meta).ip()`.
 
 ##### `ctx.query(name)`
 
@@ -720,7 +923,7 @@ Read request body as Buffer.
 
 ```javascript
 const buffer = await ctx.body()
-const buffer = await ctx.body(5 * 1024 * 1024) // 5MB limit
+const buffer = await ctx.body(5 * 1024 * 1024) // 5 MiB, expressed in bytes
 ```
 
 **Returns:** `Promise<Buffer>`
@@ -729,6 +932,11 @@ In `prefetch` mode, `http.maxBodySize` is the hard collection limit. A smaller
 per-call `maxSize` is still enforced when the accessor resolves; a larger value
 cannot raise the server limit. If `http.maxBodyBudget` is enabled, the same
 aggregate budget also applies to manually started lazy readers.
+
+Every `maxSize` argument is a non-negative safe integer byte count. The first
+body accessor (or prefetch) fixes the collection limit; later calls reuse one
+collector. A smaller later value checks the same materialized bytes, while a
+larger value does not restart or expand an in-flight or failed collection.
 
 ##### `ctx.buffer([maxSize])`
 
@@ -1183,7 +1391,7 @@ import fs from 'fs/promises'
 const server = new Server({
   port: 3000,
   http: {
-    maxBodySize: 10, // 10 MB
+    maxBodySize: 10 * 1024 * 1024, // 10 MiB, expressed in bytes
     onRequest: async (ctx) => {
       if (ctx.url() === '/upload' && ctx.method() === 'post') {
         const filename = ctx.query('filename') || 'upload.bin'
@@ -1624,7 +1832,8 @@ BODY_SAFETY_SAMPLE_MS=250 \
 pnpm bench:body-safety
 ```
 
-This compares `maxBodyBudget: 0` with `256` on a prefetched body workload, and
+This compares explicit unlimited (`maxBodyBudget: null`) with
+`256 * 1024 * 1024` bytes on a prefetched body workload, and
 `requestTimeoutMs: 0` with `30000` on an async-handler workload. Reports are
 written to `benchmark/profiles/body-safety/`.
 

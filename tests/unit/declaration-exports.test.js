@@ -44,3 +44,9 @@ test('declaration value exports exactly match runtime exports', () => {
     Object.keys(runtime).sort()
   )
 })
+
+test('defineConfig preserves object identity and defers validation to Server', () => {
+  const options = { http: { onRequest: () => 'ok' } }
+
+  assert.equal(runtime.defineConfig(options), options)
+})

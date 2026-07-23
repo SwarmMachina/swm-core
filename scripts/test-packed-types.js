@@ -8,6 +8,61 @@ import { bindingRoot, makeTempDir, pack, root } from './package-test-helpers.js'
 
 const temp = makeTempDir('swm-packed-types-')
 
+/**
+ * Verifies the same completion and hover path used by editors backed by the
+ * TypeScript Language Service, including VS Code.
+ * @param {string} consumer
+ * @param {object} compilerOptions
+ */
+function assertJavaScriptIdeTypes(consumer, compilerOptions) {
+  const file = join(consumer, 'ide-consumer.js')
+  const source = [
+    "import { defineConfig } from '@swarmmachina/swm-core'",
+    '',
+    'defineConfig({',
+    '  http: { maxB }',
+    '})',
+    ''
+  ].join('\n')
+
+  writeFileSync(file, source)
+
+  const host = {
+    getScriptFileNames: () => [file],
+    getScriptVersion: () => '0',
+    getScriptSnapshot: (path) => {
+      const text = ts.sys.readFile(path)
+
+      return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text)
+    },
+    getCurrentDirectory: () => consumer,
+    getCompilationSettings: () => compilerOptions,
+    getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
+    fileExists: ts.sys.fileExists,
+    readFile: ts.sys.readFile,
+    readDirectory: ts.sys.readDirectory,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+    realpath: ts.sys.realpath
+  }
+  const service = ts.createLanguageService(host)
+  const position = source.indexOf('maxB') + 'maxB'.length
+  const completions = service.getCompletionsAtPosition(file, position, {})
+  const names = new Set(completions?.entries.map((entry) => entry.name))
+
+  assert.ok(names.has('maxBodySize'), 'JavaScript IDE completion is missing maxBodySize')
+  assert.ok(names.has('maxBodyBudget'), 'JavaScript IDE completion is missing maxBodyBudget')
+
+  const details = service.getCompletionEntryDetails(file, position, 'maxBodyBudget', {}, undefined, {}, undefined)
+  const documentation = ts.displayPartsToString(details?.documentation)
+  const defaultTagText = details?.tags?.find((tag) => tag.name === 'defaultValue')?.text
+  const defaultValue =
+    typeof defaultTagText === 'string' ? defaultTagText : defaultTagText?.map((part) => part.text).join('')
+
+  assert.match(documentation, /Aggregate retained and in-flight HTTP body budget/)
+  assert.match(defaultValue ?? '', /268_435_456.*256 MiB/)
+}
+
 try {
   const artifacts = join(temp, 'artifacts')
   const consumer = join(temp, 'consumer')
@@ -49,6 +104,14 @@ try {
     types: ['node'],
     typeRoots: [join(root, 'node_modules/@types')]
   }
+
+  assertJavaScriptIdeTypes(consumer, {
+    ...shared,
+    checkJs: false,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext
+  })
+
   const modes = [
     { name: 'nodenext', module: 'NodeNext', moduleResolution: 'NodeNext' },
     { name: 'bundler', module: 'ESNext', moduleResolution: 'Bundler' }
@@ -90,7 +153,7 @@ try {
     }
   }
 
-  console.log('packed consumer types: NodeNext + Bundler + JS/JSDoc ok')
+  console.log('packed consumer types: NodeNext + Bundler + JS/JSDoc + Language Service IntelliSense ok')
 } finally {
   rmSync(temp, { recursive: true, force: true })
 }

@@ -1,6 +1,9 @@
 // @ts-check
 
+import { defineConfig } from '@swarmmachina/swm-core'
+
 /** @typedef {import('@swarmmachina/swm-core').ServerOptions} ServerOptions */
+/** @typedef {import('@swarmmachina/swm-core').EffectiveServerConfig} EffectiveServerConfig */
 /** @typedef {import('@swarmmachina/swm-core').HttpContext} HttpContext */
 /** @typedef {import('@swarmmachina/swm-core').WSContext} WSContext */
 /** @typedef {import('@swarmmachina/swm-uws').HttpRequest} HttpRequest */
@@ -13,9 +16,10 @@
  * @param {HttpRequest} req
  * @param {HttpResponse} res
  * @param {ServerOptions} options
+ * @param {EffectiveServerConfig} effectiveConfig
  * @param {WebSocketBehavior} behavior
  */
-export function verifyJsConsumer(ctx, ws, req, res, options, behavior) {
+export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, behavior) {
   ctx.ip()
   ctx.method()
   ctx.header('x-test')
@@ -31,5 +35,13 @@ export function verifyJsConsumer(ctx, ws, req, res, options, behavior) {
   res.getProxiedRemoteAddress()
   res.collectBody(1024, () => {})
   void options
+  void effectiveConfig.http?.maxBodyBudget
   void behavior
 }
+
+export const jsOptions = defineConfig({
+  http: {
+    maxBodyBudget: 256 * 1024 * 1024,
+    onRequest: (ctx) => ({ method: ctx.method() })
+  }
+})
