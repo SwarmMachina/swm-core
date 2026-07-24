@@ -536,12 +536,10 @@ The normalized values are available read-only as
 `server.effectiveConfig.http.maxBodySize` and
 `server.effectiveConfig.http.maxBodyBudget`.
 
-`requestTimeoutMs` defaults to 30 seconds and applies only to asynchronous
-`before`/handler chains; sync handlers have no timer. A timeout releases the
-body reservation, returns `408`, and closes the connection. Starting a reply or
-stream cancels the timer. It does not cancel user Promises; late results are
-ignored. Use `AbortController` where the underlying client supports
-cancellation. Budget and timeout errors are also passed to `http.onError`.
+`requestTimeoutMs` defaults to 30 seconds for asynchronous `before`/handler
+chains. A timeout releases body reservations, returns `408`, closes the
+connection, and ignores late results. It does not cancel application work; use
+`AbortController` when the downstream operation supports cancellation.
 
 **Route Definition (for `routes` array):**
 
@@ -573,10 +571,8 @@ cancellation. Budget and timeout errors are also passed to `http.onError`.
 | `onSubscription`           | `Function` | `(ctx, topic, newCount, oldCount) => {}` | Called on topic subscription change.                                                                                                                                                                                                                                     |
 | `connectionKey`            | `Function` | `undefined`                              | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
 
-Enabling WebSocket requires an explicit `ws.onUpgrade` policy. Construction
-fails when it is omitted. For an intentionally anonymous endpoint, make that
-choice visible with `onUpgrade: () => ({})`. Use `ws: null` (or omit `ws` when
-`http` is configured) to disable WebSocket.
+`ws.onUpgrade` is required. Use `onUpgrade: () => ({})` only for intentionally
+anonymous endpoints; use `ws: null` to disable WebSocket.
 
 ### WebSocket payload and backpressure limits
 
@@ -619,38 +615,10 @@ allowed WebSocket backpressure can approach
 concurrent slow WebSockets × maxBackpressure
 ```
 
-Allocator overhead, compression state in other compatible bindings, kernel
-socket buffers, application queues, publish fan-out, and GC can increase actual
-memory use. The effective values are available through
-`server.effectiveConfig.ws`.
-
-For production, bound this at the trusted ingress as two separate controls:
-
-1. a concurrent WebSocket connection limit per application instance;
-2. an upgrade rate limit per source and, after authentication, per identity.
-
-Size the connection limit from measured per-connection RSS and a reserved
-memory allowance. The backpressure-only upper bound is:
-
-```text
-budgetedBytesPerConnection =
-  measuredSteadyStateBytes + maxBackpressure + applicationHeadroom
-
-maxConnections <=
-  floor(webSocketMemoryAllowance / budgetedBytesPerConnection)
-```
-
-`maxBackpressure` only bounds the native outbound queue; kernel buffers,
-application state, and fan-out still require measured headroom. Monitor
-`server.activeWs`, process RSS, dropped messages, and forced slow-consumer
-closes. A container memory limit or RSS watchdog is a final circuit breaker,
-not a replacement for admission control.
-
-An application-level limiter can reject in `onUpgrade`, but a shared ingress or
-external limiter is preferable when several workers or replicas serve the same
-endpoint. A future core `maxConnections` option could cap one process, while a
-true byte-accurate global WebSocket budget requires transport-level accounting
-of native and publish queues.
+In production, enforce connection and upgrade-rate limits at the trusted
+ingress. Size the per-instance limit from load-tested RSS; monitor
+`server.activeWs`, RSS, dropped messages, and slow-consumer closes. Container
+memory limits are a final backstop, not admission control.
 
 `selectProtocol` runs synchronously after `onUpgrade` accepts. Return one of the
 requested tokens; returning `undefined` (or omitting the selector) negotiates no
