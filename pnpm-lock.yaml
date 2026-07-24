@@ -8,8 +8,8 @@ importers:
   .:
     dependencies:
       '@swarmmachina/swm-uws':
-        specifier: 0.5.4
-        version: 0.5.4
+        specifier: 0.5.6
+        version: 0.5.6
     devDependencies:
       '@swarmmachina/benchkit':
         specifier: 0.2.0
@@ -172,9 +172,9 @@ packages:
       { integrity: sha512-ypo/NF7zEtzsAWEuXVtFWV8z73Vcs0jjOyvvH49c8rVd2Y/uaWoVkPuoF7h1G95/tHInEiNcTVwGx8X8HEefLw== }
     engines: { node: '>=20.19.0' }
 
-  '@swarmmachina/swm-uws@0.5.4':
+  '@swarmmachina/swm-uws@0.5.6':
     resolution:
-      { integrity: sha512-xFL8FVvdTkF7xCf/H99JdK2fXQ9ED5lLiiDlgnWcLcNXRyO7dDDmOdQ0yZCB6fmCNLsNT3UXBNKsKQC7lW7AoQ== }
+      { integrity: sha512-CRryP7H5AcBmwwKvUEv3v9nkStz2HCeMZ+leu4mlcKdi/DNmOp6NUsx+qalzsVX9KxqoOKbKArNPPZKf162WEg== }
     engines: { node: 22.x || 24.x }
 
   '@types/esrecurse@4.3.1':
@@ -1278,7 +1278,7 @@ snapshots:
       - supports-color
       - vue-eslint-parser
 
-  '@swarmmachina/swm-uws@0.5.4': {}
+  '@swarmmachina/swm-uws@0.5.6': {}
 
   '@types/esrecurse@4.3.1': {}
 

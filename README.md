@@ -1817,7 +1817,7 @@ written to `benchmark/profiles/body-safety/`.
 
 ## Native binding regression gate
 
-The runtime is `@swarmmachina/swm-uws@0.5.4`. The regression gate runs
+The runtime is `@swarmmachina/swm-uws@0.5.6`. The regression gate runs
 the same `swm-core` HTTP and WebSocket paths against the dev-only
 `uWebSockets.js@20.69.0` reference, changing only the native binding.
 
