@@ -10,6 +10,7 @@ export async function startEchoServer(port = 9001) {
     http: null,
     ws: {
       maxPayloadLength: 64 * 1024 * 1024,
+      onUpgrade: () => ({}),
       onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
     }
   })

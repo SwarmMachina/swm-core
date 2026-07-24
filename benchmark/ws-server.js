@@ -35,6 +35,7 @@ async function runCore(port) {
     port,
     http: null,
     ws: {
+      onUpgrade: () => ({}),
       onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
     }
   })

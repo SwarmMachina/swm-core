@@ -1,5 +1,5 @@
 import Server from '../../src/index.js'
-import { getFreePort } from '../../helpers/ports.js'
+import { getFreePort } from '@swarmmachina/benchkit'
 
 /**
  * @param {object} opt
@@ -48,7 +48,13 @@ export async function startHttpServer({
 export async function startWsServer({ ws, onRequest, routes, maxPayloadLength } = {}) {
   const port = await getFreePort()
   const http = onRequest !== undefined || routes !== undefined ? { onRequest, routes } : null
-  const wsOptions = ws && maxPayloadLength !== undefined ? { maxPayloadLength, ...ws } : ws
+  const wsOptions = ws
+    ? {
+        onUpgrade: () => ({}),
+        ...(maxPayloadLength !== undefined ? { maxPayloadLength } : null),
+        ...ws
+      }
+    : ws
   const server = new Server({
     port,
     http,

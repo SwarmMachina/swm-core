@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { getFreePort } from '@swarmmachina/benchkit'
 
-import { getFreePort } from '../../../helpers/ports.js'
 import Server from '../../../src/index.js'
 import { createMockRes } from '../../helpers/mock-http.js'
 

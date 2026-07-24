@@ -1,6 +1,6 @@
 import { test, afterEach } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { getFreePort } from '../../../helpers/ports.js'
+import { getFreePort } from '@swarmmachina/benchkit'
 import Server, { cors } from '../../../src/index.js'
 import { reqText } from '../../helpers/http-client.js'
 

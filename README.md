@@ -314,7 +314,7 @@ const server = new Server({
   ws: {
     maxPayloadLength: 1024 * 32, // 32 KiB per incoming message, in bytes
     maxBackpressure: 1024 * 64, // 64 KiB per slow WebSocket, in bytes
-    closeOnBackpressureLimit: false,
+    closeOnBackpressureLimit: true,
     idleTimeoutSec: 30,
     onUpgrade: (meta) => ({ ip: meta.ip() }),
     onOpen: (ctx) => {
@@ -377,7 +377,7 @@ a fixed `404` without allocating an `HttpContext`.
 | ------------------ | --------------- | ----------- | -------------------------------------------------------------------- |
 | `maxBodySize`      | `Number`        | `1048576`   | Maximum HTTP request body size in bytes (1 MiB default, 64 MiB max). |
 | `maxBodyBudget`    | `Number`/`null` | `268435456` | Aggregate retained/in-flight body-memory budget in bytes (256 MiB).  |
-| `requestTimeoutMs` | `Number`        | `0`         | Async handler timeout in ms (100-300000); `0` disables it.           |
+| `requestTimeoutMs` | `Number`        | `30000`     | Async handler timeout in ms (100-300000); explicit `0` disables it.  |
 | `prefetch`         | `Boolean`       | `false`     | Collect request bodies before user handlers run.                     |
 | `onRequest`        | `Function`      | default 404 | Universal request handler `(ctx) => any`                             |
 | `routes`           | `Array`         | default 404 | Declarative route definitions                                        |
@@ -536,12 +536,12 @@ The normalized values are available read-only as
 `server.effectiveConfig.http.maxBodySize` and
 `server.effectiveConfig.http.maxBodyBudget`.
 
-`requestTimeoutMs` applies only to asynchronous `before`/handler chains; sync
-handlers have no timer. A timeout releases the body reservation, returns `408`,
-and closes the connection. Starting a reply or stream cancels the timer. It does
-not cancel user Promises; late results are ignored. Use `AbortController` where
-the underlying client supports cancellation. Budget and timeout errors are also
-passed to `http.onError`.
+`requestTimeoutMs` defaults to 30 seconds and applies only to asynchronous
+`before`/handler chains; sync handlers have no timer. A timeout releases the
+body reservation, returns `408`, and closes the connection. Starting a reply or
+stream cancels the timer. It does not cancel user Promises; late results are
+ignored. Use `AbortController` where the underlying client supports
+cancellation. Budget and timeout errors are also passed to `http.onError`.
 
 **Route Definition (for `routes` array):**
 
@@ -559,7 +559,7 @@ passed to `http.onError`.
 | -------------------------- | ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `maxPayloadLength`         | `Number`   | `1048576`                                | Maximum bytes in one incoming WebSocket message (1 MiB default, 64 MiB max).                                                                                                                                                                                             |
 | `maxBackpressure`          | `Number`   | `65536`                                  | Maximum permitted outgoing backpressure in bytes per WebSocket.                                                                                                                                                                                                          |
-| `closeOnBackpressureLimit` | `Boolean`  | `false`                                  | Close a slow WebSocket when an outgoing message is dropped at the backpressure limit.                                                                                                                                                                                    |
+| `closeOnBackpressureLimit` | `Boolean`  | `true`                                   | Close a slow WebSocket when an outgoing message is dropped at the backpressure limit.                                                                                                                                                                                    |
 | `idleTimeoutSec`           | `Number`   | `15`                                     | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
 | `upgradeTimeoutMs`         | `Number`   | `10000`                                  | Deadline for an asynchronous `onUpgrade` decision in milliseconds (0-300000). `0` schedules a zero-delay timeout; it does not disable the deadline.                                                                                                                      |
 | `onOpen`                   | `Function` | `(ctx) => {}`                            | Called when client connects.                                                                                                                                                                                                                                             |
@@ -568,13 +568,15 @@ passed to `http.onError`.
 | `onClose`                  | `Function` | `(ctx, code, message) => {}`             | Called when client disconnects.                                                                                                                                                                                                                                          |
 | `onDrain`                  | `Function` | `(ctx) => {}`                            | Called when socket is writable again.                                                                                                                                                                                                                                    |
 | `onError`                  | `Function` | `(ctx, error) => {}`                     | Called on WebSocket error.                                                                                                                                                                                                                                               |
-| `onUpgrade`                | `Function` | `(meta) => ({})`                         | Authorize the upgrade. Return `null` to reject with `403`, or a flat object to accept; that object becomes `ctx.data`. Async handlers can safely use `meta` after an `await`.                                                                                            |
+| `onUpgrade`                | `Function` | **required**                             | Authorize the upgrade. Return `null` to reject with `403`, or a flat object to accept; that object becomes `ctx.data`. Async handlers can safely use `meta` after an `await`.                                                                                            |
 | `selectProtocol`           | `Function` | `undefined`                              | Optional synchronous `(requested, userData) => string \| undefined` subprotocol selector. The returned token must be present in the client-requested list.                                                                                                               |
 | `onSubscription`           | `Function` | `(ctx, topic, newCount, oldCount) => {}` | Called on topic subscription change.                                                                                                                                                                                                                                     |
 | `connectionKey`            | `Function` | `undefined`                              | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
 
-`ws: {}` enables WebSocket with permissive upgrades and no-op lifecycle
-callbacks. Use `ws: null` (or omit `ws` when `http` is configured) to disable it.
+Enabling WebSocket requires an explicit `ws.onUpgrade` policy. Construction
+fails when it is omitted. For an intentionally anonymous endpoint, make that
+choice visible with `onUpgrade: () => ({})`. Use `ws: null` (or omit `ws` when
+`http` is configured) to disable WebSocket.
 
 ### WebSocket payload and backpressure limits
 
@@ -604,10 +606,10 @@ to that backend. An oversized message closes the connection before
 
 `maxBackpressure` is outbound and per socket. `send()`/`sendTo()` can report
 backpressure or a dropped message, `onDropped` observes drops, and `onDrain`
-reports recovery. With `closeOnBackpressureLimit: false`, a slow socket stays
-open and messages above the limit are dropped; `true` removes slow consumers
-more aggressively. Choose the policy according to whether message loss or
-reconnection is preferable for the application.
+reports recovery. The default `closeOnBackpressureLimit: true` removes slow
+consumers after a dropped message. Set it to `false` only when keeping the
+connection is more important than reconnection; messages above the limit are
+then dropped while the slow socket stays open.
 
 These controls are independent from HTTP body accounting. There is no
 process-wide WebSocket budget:
@@ -621,6 +623,34 @@ Allocator overhead, compression state in other compatible bindings, kernel
 socket buffers, application queues, publish fan-out, and GC can increase actual
 memory use. The effective values are available through
 `server.effectiveConfig.ws`.
+
+For production, bound this at the trusted ingress as two separate controls:
+
+1. a concurrent WebSocket connection limit per application instance;
+2. an upgrade rate limit per source and, after authentication, per identity.
+
+Size the connection limit from measured per-connection RSS and a reserved
+memory allowance. The backpressure-only upper bound is:
+
+```text
+budgetedBytesPerConnection =
+  measuredSteadyStateBytes + maxBackpressure + applicationHeadroom
+
+maxConnections <=
+  floor(webSocketMemoryAllowance / budgetedBytesPerConnection)
+```
+
+`maxBackpressure` only bounds the native outbound queue; kernel buffers,
+application state, and fan-out still require measured headroom. Monitor
+`server.activeWs`, process RSS, dropped messages, and forced slow-consumer
+closes. A container memory limit or RSS watchdog is a final circuit breaker,
+not a replacement for admission control.
+
+An application-level limiter can reject in `onUpgrade`, but a shared ingress or
+external limiter is preferable when several workers or replicas serve the same
+endpoint. A future core `maxConnections` option could cap one process, while a
+true byte-accurate global WebSocket budget requires transport-level accounting
+of native and publish queues.
 
 `selectProtocol` runs synchronously after `onUpgrade` accepts. Return one of the
 requested tokens; returning `undefined` (or omitting the selector) negotiates no

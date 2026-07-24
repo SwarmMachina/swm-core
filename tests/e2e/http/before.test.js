@@ -1,7 +1,7 @@
 import { test, afterEach } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { performance } from 'node:perf_hooks'
-import { getFreePort } from '../../../helpers/ports.js'
+import { getFreePort } from '@swarmmachina/benchkit'
 import Server from '../../../src/index.js'
 import { reqText } from '../../helpers/http-client.js'
 

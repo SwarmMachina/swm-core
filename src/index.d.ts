@@ -181,7 +181,7 @@ export interface WSOptions {
    * When `false`, the message is dropped and the connection stays open. When
    * `true`, the slow connection is closed after the drop.
    *
-   * @defaultValue `false`
+   * @defaultValue `true`
    */
   closeOnBackpressureLimit?: boolean
 
@@ -261,9 +261,11 @@ export interface WSOptions {
    * exposed as {@link WSContext.data}. Async handlers receive an owned metadata
    * snapshot and are bounded by {@link WSOptions.upgradeTimeoutMs}.
    *
-   * @defaultValue A function that returns an empty object.
+   * This callback is required so enabling WebSocket can never implicitly allow
+   * unauthenticated upgrades. Return an empty object only when anonymous
+   * access is an intentional application policy.
    */
-  onUpgrade?: (meta: UpgradeMeta) => UpgradeResult | Promise<UpgradeResult>
+  onUpgrade: (meta: UpgradeMeta) => UpgradeResult | Promise<UpgradeResult>
 
   /**
    * Selects one subprotocol offered by the client.
@@ -342,7 +344,7 @@ export interface HttpBaseOptions {
    * application's Promise; use an `AbortController` for cancellable downstream
    * work.
    *
-   * @defaultValue `0` (disabled)
+   * @defaultValue `30_000`
    * @remarks Non-zero values must be from `100` through `300_000`.
    */
   requestTimeoutMs?: number

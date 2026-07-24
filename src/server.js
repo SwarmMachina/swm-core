@@ -1,7 +1,7 @@
 import { load as loadTransport } from './backends/uws.js'
 import BodyBudget from './body-budget.js'
 import HttpRuntime from './server/http-runtime.js'
-import { ALLOW_WS_UPGRADE, NOOP, normalizeHttpOptions, normalizeWsOptions } from './server/options.js'
+import { NOOP, normalizeHttpOptions, normalizeWsOptions } from './server/options.js'
 import WebSocketRuntime from './server/ws-runtime.js'
 
 export default class Server {
@@ -91,7 +91,7 @@ export default class Server {
     this.onWsDrain = ws?.onDrain ?? NOOP
     this.onWsDropped = ws?.onDropped ?? NOOP
     this.onWsSubscription = ws?.onSubscription ?? NOOP
-    this.onWsUpgrade = ws?.onUpgrade ?? ALLOW_WS_UPGRADE
+    this.onWsUpgrade = ws?.onUpgrade ?? null
     this.wsProtocolSelector = ws?.selectProtocol ?? null
     this.wsConnectionKey = null
     this.wsIdleTimeoutSec = 15

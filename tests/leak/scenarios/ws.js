@@ -4,6 +4,7 @@ import { WebSocket } from 'ws'
 import { makeMarker } from '../helpers/leak-harness.js'
 
 const HELPER_TIMEOUT_MS = 5000
+const ALLOW_ANONYMOUS_UPGRADE = () => ({})
 
 /**
  * @typedef {object} WsLeakScenario
@@ -162,6 +163,7 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
+            onUpgrade: ALLOW_ANONYMOUS_UPGRADE,
             onOpen: (ctx) => {
               collect(ctx)
             },
@@ -192,6 +194,7 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
+            onUpgrade: ALLOW_ANONYMOUS_UPGRADE,
             onOpen: (ctx) => {
               collect(ctx)
             },
@@ -234,6 +237,7 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
+            onUpgrade: ALLOW_ANONYMOUS_UPGRADE,
             onOpen: (ctx) => {
               collect(ctx)
             },
@@ -281,6 +285,7 @@ export function makeWsScenarios() {
       serverOptions(collect) {
         return {
           ws: {
+            onUpgrade: ALLOW_ANONYMOUS_UPGRADE,
             onOpen: (ctx) => {
               collect(ctx)
             },

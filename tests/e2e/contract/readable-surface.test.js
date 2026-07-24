@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict'
 import { createConnection } from 'node:net'
 import test from 'node:test'
+import { getFreePort } from '@swarmmachina/benchkit'
 
 import Server from '../../../src/index.js'
-import { getFreePort } from '../../../helpers/ports.js'
 
 const READABLE_SURFACE = {
   HttpContext: [

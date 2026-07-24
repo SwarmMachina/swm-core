@@ -1,7 +1,6 @@
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'del', 'patch', 'options', 'head', 'any'])
 
 export const NOOP = () => {}
-export const ALLOW_WS_UPGRADE = () => ({})
 
 /** @typedef {import('../ws-context.js').default} WSCtx */
 /** @typedef {import('../http-context.js').default} HttpCtx */
@@ -12,7 +11,7 @@ export const DEFAULT_HTTP_BODY_BUDGET_BYTES = 256 * 1024 * 1024
 export const DEFAULT_WS_MAX_PAYLOAD_LENGTH_BYTES = 1024 * 1024
 export const DEFAULT_WS_MAX_BACKPRESSURE_BYTES = 64 * 1024
 const MAX_UWS_UNSIGNED_SIZE = 0xffff_ffff
-const DEFAULT_REQUEST_TIMEOUT_MS = 0
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_WS_UPGRADE_TIMEOUT_MS = 10_000
 
 /**
@@ -25,7 +24,7 @@ const DEFAULT_WS_UPGRADE_TIMEOUT_MS = 10_000
  * @property {(ctx: WSCtx) => unknown} [onOpen]
  * @property {(ctx: WSCtx) => unknown} [onDrain]
  * @property {(ctx: WSCtx, msg: ArrayBuffer, isBinary: boolean) => unknown} [onDropped]
- * @property {(meta: object) => (object|null|Promise<object|null>)} [onUpgrade]
+ * @property {(meta: object) => (object|null|Promise<object|null>)} onUpgrade
  * @property {(requested: string[], userData: object) => (string|undefined)} [selectProtocol]
  * @property {(ctx: WSCtx|null, err: Error) => unknown} [onError]
  * @property {(ctx: WSCtx, code: number, reason: ArrayBuffer) => unknown} [onClose]
@@ -280,6 +279,10 @@ export function normalizeWsOptions(ws) {
     'ws'
   )
 
+  if (ws.onUpgrade === undefined) {
+    throw new TypeError('ws.onUpgrade is required; explicitly authorize or reject every WebSocket upgrade')
+  }
+
   const upgradeTimeoutMs = ws.upgradeTimeoutMs === undefined ? DEFAULT_WS_UPGRADE_TIMEOUT_MS : ws.upgradeTimeoutMs
 
   if (!Number.isSafeInteger(upgradeTimeoutMs) || upgradeTimeoutMs < 0 || upgradeTimeoutMs > 300_000) {
@@ -292,7 +295,7 @@ export function normalizeWsOptions(ws) {
     throw new TypeError('ws.idleTimeoutSec must be >= 5')
   }
 
-  const closeOnBackpressureLimit = ws.closeOnBackpressureLimit ?? false
+  const closeOnBackpressureLimit = ws.closeOnBackpressureLimit ?? true
 
   if (typeof closeOnBackpressureLimit !== 'boolean') {
     throw new TypeError('ws.closeOnBackpressureLimit must be a boolean')

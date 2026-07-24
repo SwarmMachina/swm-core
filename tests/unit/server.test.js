@@ -18,10 +18,16 @@ import { STATUS_TEXT } from '../../src/constants.js'
 // loader hook.
 const makeServer = ({ onRequest, routes, httpError, http, ...opt } = {}) => {
   const hasHttpOptions = onRequest !== undefined || routes !== undefined || httpError !== undefined
+  // Most tests target behavior unrelated to admission policy. Keep anonymous
+  // access explicit in the test fixture while production construction remains
+  // fail-fast when onUpgrade is omitted.
+  const ws =
+    opt.ws && typeof opt.ws === 'object' && !Array.isArray(opt.ws) ? { onUpgrade: () => ({}), ...opt.ws } : opt.ws
 
   return new Server({
     ...opt,
-    http: http ?? (hasHttpOptions ? { onRequest, routes, onError: httpError } : undefined)
+    http: http ?? (hasHttpOptions ? { onRequest, routes, onError: httpError } : undefined),
+    ws
   })
 }
 
@@ -46,7 +52,7 @@ describe('Server', () => {
       strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
       strictEqual(server.httpBodyBudget.limitBytes, 256 * 1024 * 1024)
       strictEqual(server.effectiveConfig.http.maxBodyBudget, 256 * 1024 * 1024)
-      strictEqual(server.httpRequestTimeoutMs, 0)
+      strictEqual(server.httpRequestTimeoutMs, 30_000)
       strictEqual(server.http.prefetch, false)
       strictEqual(server.ws, null)
       strictEqual(server.wsIdleTimeoutSec, 15)
@@ -230,7 +236,14 @@ describe('Server', () => {
       strictEqual(server.ws, null)
     })
 
-    test('should treat an empty ws object as enabled', () => {
+    test('should require explicit WebSocket upgrade authorization', () => {
+      throws(() => new Server({ http: null, ws: {} }), {
+        name: 'TypeError',
+        message: 'ws.onUpgrade is required; explicitly authorize or reject every WebSocket upgrade'
+      })
+    })
+
+    test('should enable WebSocket with an explicit authorizer', () => {
       const server = makeServer({ http: null, ws: {} })
 
       strictEqual(server.http, null)
@@ -415,7 +428,7 @@ describe('Server', () => {
 
       strictEqual(server.wsMaxPayloadBytes, 1024 * 1024)
       strictEqual(server.wsMaxBackpressureBytes, 64 * 1024)
-      strictEqual(server.wsCloseOnBackpressureLimit, false)
+      strictEqual(server.wsCloseOnBackpressureLimit, true)
     })
 
     test('should reject invalid WebSocket byte counts without coercion', () => {
@@ -1013,6 +1026,7 @@ describe('Server', () => {
 
       strictEqual(wsCall.config.idleTimeout, 15)
       strictEqual(wsCall.config.upgradeTimeout, 10_000)
+      strictEqual(wsCall.config.closeOnBackpressureLimit, true)
     })
 
     test('should pass custom ws.upgradeTimeoutMs to the transport', async () => {
