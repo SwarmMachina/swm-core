@@ -1,8 +1,8 @@
 import { parseArgs } from '@swarmmachina/benchkit/orchestration'
-import { createTargetRuntime } from '@swarmmachina/benchkit/target'
+import { TargetRuntime } from '@swarmmachina/benchkit/target'
 import { TESTS } from './tests.js'
 
-const RUNTIME = createTargetRuntime({ metrics: true })
+const RUNTIME = new TargetRuntime({ metrics: true })
 const { fw, host, port } = parseArgs(
   process.argv,
   { fw: 'plain', host: '127.0.0.1', port: 3000 },

@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks'
-import { createLatencyRecorder } from '@swarmmachina/benchkit/measurement'
+import { LatencyRecorder } from '@swarmmachina/benchkit/measurement'
 import { WebSocket } from 'ws'
 
 // Closed-loop echo load: each connection keeps exactly one message in flight
@@ -21,7 +21,7 @@ export default async function wsLoad({ url, connections, durationSec, payloadByt
   let messages = 0
   let errors = 0
 
-  const latency = createLatencyRecorder()
+  const latency = new LatencyRecorder()
   const runConnection = () =>
     new Promise((resolve) => {
       const sock = new WebSocket(url, { perMessageDeflate: false })

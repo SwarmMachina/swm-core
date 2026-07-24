@@ -5,7 +5,8 @@ import { parseArgs } from '@swarmmachina/benchkit/orchestration'
 import { formatYmdHms } from '@swarmmachina/benchkit/reporting'
 import { median } from '@swarmmachina/benchkit/statistics'
 import runLoad from './helpers/run-load.js'
-import { TARGET_ARG_HANDLERS, createTargetController, targetDefaults, targetUrl } from './helpers/target-session.js'
+import { TargetController } from './helpers/target-controller.js'
+import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 'plain' = native route, handler only; 'before' = same route plus a synchronous no-op hook.
@@ -131,7 +132,7 @@ async function runOne({
  */
 async function main() {
   const args = parseBeforeArgs(process.argv)
-  const targetController = createTargetController(args, path.dirname(__dirname))
+  const targetController = new TargetController(args, path.dirname(__dirname))
   const runStamp = formatYmdHms()
   const per = Object.fromEntries(VARIANTS.map((v) => [v, []]))
 

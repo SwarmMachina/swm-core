@@ -161,6 +161,12 @@ packages:
       { integrity: sha512-TeheYy0ILzBEI/CO55CP6zJCSdSWeRtGnHy8U8dWSUH4I68iqTsy7HkMktR4xakThc9jotkPQUXT4ITdbV7cHA== }
     engines: { node: '>=18' }
 
+  '@swarmmachina/benchkit@0.2.0':
+    resolution:
+      { integrity: sha512-dqCWeh/wMc0pC2wmdOjzqFVYRJg6snDrLWMEVfkNkxzhqLw7805Q+ox512Vy+gdfV8U8ibbqS4q4rsG4mP1Ltg== }
+    engines: { node: ^22.13.0 || 24.x }
+    hasBin: true
+
   '@swarmmachina/standards@1.1.2':
     resolution:
       { integrity: sha512-ypo/NF7zEtzsAWEuXVtFWV8z73Vcs0jjOyvvH49c8rVd2Y/uaWoVkPuoF7h1G95/tHInEiNcTVwGx8X8HEefLw== }
@@ -1252,6 +1258,8 @@ snapshots:
   '@pinojs/redact@0.4.0': {}
 
   '@sindresorhus/base62@1.0.0': {}
+
+  '@swarmmachina/benchkit@0.2.0': {}
 
   '@swarmmachina/standards@1.1.2(vue-eslint-parser@10.4.0(eslint@10.7.0))':
     dependencies:

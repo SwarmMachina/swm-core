@@ -8,7 +8,8 @@ import { formatYmdHms, msToHuman } from '@swarmmachina/benchkit/reporting'
 import { median } from '@swarmmachina/benchkit/statistics'
 import { getTest } from './tests.js'
 import runLoad from './helpers/run-load.js'
-import { TARGET_ARG_HANDLERS, createTargetController, targetDefaults, targetUrl } from './helpers/target-session.js'
+import { TargetController } from './helpers/target-controller.js'
+import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const BASE_ORDER = ['core', 'micro', 'fastify', 'express']
@@ -165,7 +166,7 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
 async function main() {
   const args = parseBenchArgs(process.argv)
   const test = getTest(args.testName)
-  const targetController = createTargetController(args, path.dirname(__dirname))
+  const targetController = new TargetController(args, path.dirname(__dirname))
 
   if (args.order !== 'random' && args.order !== 'balanced') {
     throw new Error(`Unknown --order=${args.order} (expected: random, balanced)`)

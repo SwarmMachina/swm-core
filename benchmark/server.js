@@ -1,9 +1,9 @@
 import http from 'node:http'
 import { parseArgs } from '@swarmmachina/benchkit/orchestration'
-import { createTargetRuntime } from '@swarmmachina/benchkit/target'
+import { TargetRuntime } from '@swarmmachina/benchkit/target'
 import { TESTS } from './tests.js'
 
-const RUNTIME = createTargetRuntime({ metrics: true })
+const RUNTIME = new TargetRuntime({ metrics: true })
 const { fw, host, port, testName } = parseArgs(
   process.argv,
   { fw: 'core', host: '127.0.0.1', port: 3000, testName: 'base-sync' },

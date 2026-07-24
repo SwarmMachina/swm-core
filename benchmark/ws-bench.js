@@ -8,7 +8,8 @@ import { formatYmdHms, msToHuman } from '@swarmmachina/benchkit/reporting'
 import { median } from '@swarmmachina/benchkit/statistics'
 import wsLoad from './helpers/ws-load.js'
 import wsLoadOpen from './helpers/ws-load-open.js'
-import { TARGET_ARG_HANDLERS, createTargetController, targetDefaults, targetUrl } from './helpers/target-session.js'
+import { TargetController } from './helpers/target-controller.js'
+import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const KNOWN_FRAMEWORKS = new Set(['core', 'core-swm-uws', 'core-uwebsockets', 'raw-swm-uws', 'raw-uwebsockets', 'ws'])
@@ -178,7 +179,7 @@ async function runOne({
  */
 async function main() {
   const args = parseWsBenchArgs(process.argv)
-  const targetController = createTargetController(args, path.dirname(__dirname))
+  const targetController = new TargetController(args, path.dirname(__dirname))
 
   for (const fw of args.frameworks) {
     if (!KNOWN_FRAMEWORKS.has(fw)) {
