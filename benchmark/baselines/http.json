@@ -164,7 +164,7 @@
     "profileRequired": true,
     "minTotalTicks": 100,
     "maxGcPct": 10,
-    "maxUnaccountedPct": 60,
-    "note": "Sanity check only. Unaccounted% is high (~46%) and stable for a network server under load."
+    "maxUnaccountedPct": 65,
+    "note": "Sanity check only. Calibrated on 2026-07-24 from 12 headers-prepared profiles with benchkit 0.2.0 and swm-uws 0.5.6: 56.5-61.1% unaccounted (60.05% median)."
   }
 }
