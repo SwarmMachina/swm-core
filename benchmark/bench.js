@@ -1,16 +1,14 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { timed } from '@swarmmachina/benchkit/measurement'
+import { parseArgs, shuffle } from '@swarmmachina/benchkit/orchestration'
+import { processV8Profile } from '@swarmmachina/benchkit/profiling'
+import { formatYmdHms, msToHuman } from '@swarmmachina/benchkit/reporting'
+import { median } from '@swarmmachina/benchkit/statistics'
 import { getTest } from './tests.js'
 import runLoad from './helpers/run-load.js'
-import shuffle from './helpers/shuffle.js'
-import { formatYmdHms, msToHuman } from './helpers/format.js'
-import timed from './helpers/timed-fn.js'
-import median from './helpers/median.js'
-import parseArgs from './helpers/parse-args.js'
-import waitForMessage from './helpers/wait-for-message.js'
-import { startServer, stopServer } from './helpers/server-proc.js'
-import { processV8Profile } from './helpers/v8-prof-run.js'
+import { TARGET_ARG_HANDLERS, createTargetController, targetDefaults, targetUrl } from './helpers/target-session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const BASE_ORDER = ['core', 'micro', 'fastify', 'express']
@@ -34,7 +32,8 @@ function parseBenchArgs(argv) {
       connections: null,
       pipelining: null,
       order: 'random',
-      jsonOut: null
+      jsonOut: null,
+      ...targetDefaults()
     },
     {
       '--test': (out, v) => {
@@ -72,7 +71,8 @@ function parseBenchArgs(argv) {
       },
       '--json-out': (out, v) => {
         out.jsonOut = String(v)
-      }
+      },
+      ...TARGET_ARG_HANDLERS
     }
   )
 }
@@ -86,13 +86,14 @@ function parseBenchArgs(argv) {
  * @param {number} params.sampleMs
  * @param {boolean} params.v8prof
  * @param {string} params.runStamp
+ * @param {object} params.targetController
  * @returns {object}
  */
-async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStamp }) {
+async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStamp, targetController }) {
   console.log(`\n[bench] ${fw}: start (run=${runIndex + 1}, test=${test.name})`)
 
   const tAll0 = performance.now()
-  const { proc, port, profileDir } = await startServer({
+  const { session, profileDir } = await targetController.start({
     benchDir: __dirname,
     serverName: 'server.js',
     fw,
@@ -101,7 +102,7 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
     v8prof,
     runStamp
   })
-  const url = `http://127.0.0.1:${port}${test.path}`
+  const url = targetUrl('http', session, test.path)
   const baseOpts = {
     method: test.method,
     url,
@@ -116,24 +117,25 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
   }
 
   let warmupMs = 0
+  let runTimed
+  let metrics
 
-  if (warmupSec > 0) {
-    const w = await timed(() =>
-      runLoad(`${fw}-${test.name}-warmup`, { ...baseOpts, duration: warmupSec }, { profile: false, track: false })
-    )
+  try {
+    if (warmupSec > 0) {
+      const w = await timed(() =>
+        runLoad(`${fw}-${test.name}-warmup`, { ...baseOpts, duration: warmupSec }, { profile: false, track: false })
+      )
 
-    warmupMs = w.ms
-    console.log(`[bench] ${fw}: warmup done in ${msToHuman(warmupMs)}`)
+      warmupMs = w.ms
+      console.log(`[bench] ${fw}: warmup done in ${msToHuman(warmupMs)}`)
+    }
+
+    await session.startMetrics({ sampleMs })
+    runTimed = await timed(() => runLoad(`${fw}-${test.name}`, baseOpts, { profile: false, track: false }))
+    metrics = await session.stopMetrics()
+  } finally {
+    await session.stop()
   }
-
-  proc.send?.({ type: 'metrics:start', sampleMs })
-
-  const runTimed = await timed(() => runLoad(`${fw}-${test.name}`, baseOpts, { profile: false, track: false }))
-
-  proc.send?.({ type: 'metrics:stop' })
-  const metricsMsg = await waitForMessage(proc, (m) => m && m.type === 'metrics', 15_000)
-
-  await stopServer(proc)
 
   const prof = v8prof ? await processV8Profile(profileDir).catch(() => null) : null
   const r = runTimed.result.result
@@ -145,7 +147,7 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
     latencyP99: r.latency?.p99 ?? null,
     latencyAvg: r.latency?.average ?? null,
     errors: r.errors || 0,
-    metrics: metricsMsg?.data || null,
+    metrics,
     v8prof: prof
   }
 
@@ -163,6 +165,7 @@ async function runOne({ fw, test, warmupSec, runIndex, sampleMs, v8prof, runStam
 async function main() {
   const args = parseBenchArgs(process.argv)
   const test = getTest(args.testName)
+  const targetController = createTargetController(args, path.dirname(__dirname))
 
   if (args.order !== 'random' && args.order !== 'balanced') {
     throw new Error(`Unknown --order=${args.order} (expected: random, balanced)`)
@@ -207,7 +210,8 @@ async function main() {
         runIndex: i,
         sampleMs: args.sampleMs,
         v8prof: args.v8prof,
-        runStamp
+        runStamp,
+        targetController
       })
 
       perFw[fw].push(res)
@@ -315,6 +319,7 @@ async function main() {
       order: args.order,
       frameworks: args.frameworks
     },
+    ...targetController.metadata,
     runs: runRows,
     median: medians
   }

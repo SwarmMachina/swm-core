@@ -1,10 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import cpuGuard from '../helpers/cpu-guard.js'
-import metricGuard from '../helpers/metric-guard.js'
-import parseV8Profile from '../helpers/v8-prof-parser.js'
-import runChild from '../helpers/run-child.js'
-import { processV8Profile } from '../helpers/v8-prof-run.js'
+import { runChild } from '@swarmmachina/benchkit/orchestration'
+import { parseV8Profile, processV8Profile } from '@swarmmachina/benchkit/profiling'
+import { cpuGuard, metricGuard } from '@swarmmachina/benchkit/regression'
 
 /**
  * @param {string} file

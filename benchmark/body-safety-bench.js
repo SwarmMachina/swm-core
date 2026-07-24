@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import median from './helpers/median.js'
-import runChild from './helpers/run-child.js'
+import { runChild } from '@swarmmachina/benchkit/orchestration'
+import { median } from '@swarmmachina/benchkit/statistics'
 
 const BENCH_DIR = path.dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = path.join(BENCH_DIR, 'profiles', 'body-safety')

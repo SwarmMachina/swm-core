@@ -1,10 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import copyCpuProfiles from '../helpers/copy-cpu-profiles.js'
-import cpuGuard from '../helpers/cpu-guard.js'
-import median from '../helpers/median.js'
-import metricGuard from '../helpers/metric-guard.js'
-import runChild from '../helpers/run-child.js'
+import { runChild } from '@swarmmachina/benchkit/orchestration'
+import { copyCpuProfiles } from '@swarmmachina/benchkit/profiling'
+import { cpuGuard, metricGuard } from '@swarmmachina/benchkit/regression'
+import { median } from '@swarmmachina/benchkit/statistics'
 
 /**
  * @param {Array<number|null|undefined>} values

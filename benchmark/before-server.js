@@ -1,38 +1,20 @@
+import { parseArgs } from '@swarmmachina/benchkit/orchestration'
+import { createTargetRuntime } from '@swarmmachina/benchkit/target'
 import { TESTS } from './tests.js'
-import Metrics from './helpers/metrics.js'
-import parseArgs from './helpers/parse-args.js'
 
-const METRICS = new Metrics()
-
-if (process.send) {
-  process.on('message', (msg) => {
-    if (!msg || typeof msg !== 'object') {
-      return
-    }
-
-    if (msg.type === 'metrics:start') {
-      METRICS.start({ sampleMs: msg.sampleMs })
-
-      return
-    }
-
-    if (msg.type === 'metrics:stop') {
-      const data = METRICS.stop()
-
-      process.send?.({ type: 'metrics', data })
-    }
-  })
-}
-
-const { fw, port } = parseArgs(
+const RUNTIME = createTargetRuntime({ metrics: true })
+const { fw, host, port } = parseArgs(
   process.argv,
-  { fw: 'plain', port: 3000 },
+  { fw: 'plain', host: '127.0.0.1', port: 3000 },
   {
     '--fw': (out, v) => {
       out.fw = String(v)
     },
     '--port': (out, v) => {
       out.port = Number(v)
+    },
+    '--host': (out, v) => {
+      out.host = String(v)
     }
   }
 )
@@ -56,19 +38,11 @@ async function main() {
     route.before = noop
   }
 
-  const server = new Server({ port, http: { routes: [route], onError: console.error } })
+  const server = new Server({ host, port, http: { routes: [route], onError: console.error } })
 
   await server.listen()
-
-  if (process.send) {
-    process.send({ type: 'ready', port: server.port })
-  }
-
-  const shutdown = async () => server.shutdown()
-
-  process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-
-  process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+  RUNTIME.registerShutdown(() => server.shutdown())
+  RUNTIME.ready({ port: server.port })
 }
 
 main().catch((e) => {

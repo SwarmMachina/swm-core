@@ -86,13 +86,12 @@
     "release": "pnpm release:gate && pnpm release:artifact && node release-artifact/publish-release-artifact.js"
   },
   "devDependencies": {
+    "@swarmmachina/benchkit": "0.2.0",
     "@swarmmachina/standards": "^1.1.2",
     "@types/node": "24.10.1",
-    "autocannon": "^8.0.0",
     "eslint": "10.7.0",
     "express": "^5.2.1",
     "fastify": "^5.8.5",
-    "hdr-histogram-percentiles-obj": "3.0.0",
     "micro": "^10.0.1",
     "prettier": "3.8.3",
     "typescript": "5.9.3",

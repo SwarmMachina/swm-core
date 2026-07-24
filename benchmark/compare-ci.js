@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import median from './helpers/median.js'
-import runChild from './helpers/run-child.js'
-import { appendStepSummary, fmt, mdTable } from './helpers/step-summary.js'
+import { runChild } from '@swarmmachina/benchkit/orchestration'
+import { appendStepSummary, fmt, mdTable } from '@swarmmachina/benchkit/reporting'
+import { median } from '@swarmmachina/benchkit/statistics'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_TESTS = ['base-sync', 'base-async', 'headers', 'headers-prepared', 'post-base']

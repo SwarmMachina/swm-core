@@ -1,37 +1,19 @@
-import Metrics from './helpers/metrics.js'
-import parseArgs from './helpers/parse-args.js'
+import { parseArgs } from '@swarmmachina/benchkit/orchestration'
+import { createTargetRuntime } from '@swarmmachina/benchkit/target'
 
-const METRICS = new Metrics()
-
-if (process.send) {
-  process.on('message', (msg) => {
-    if (!msg || typeof msg !== 'object') {
-      return
-    }
-
-    if (msg.type === 'metrics:start') {
-      METRICS.start({ sampleMs: msg.sampleMs })
-
-      return
-    }
-
-    if (msg.type === 'metrics:stop') {
-      const data = METRICS.stop()
-
-      process.send?.({ type: 'metrics', data })
-    }
-  })
-}
-
-const { fw, port } = parseArgs(
+const RUNTIME = createTargetRuntime({ metrics: true })
+const { fw, host, port } = parseArgs(
   process.argv,
-  { fw: 'core', port: 3000 },
+  { fw: 'core', host: '127.0.0.1', port: 3000 },
   {
     '--fw': (out, v) => {
       out.fw = String(v)
     },
     '--port': (out, v) => {
       out.port = Number(v)
+    },
+    '--host': (out, v) => {
+      out.host = String(v)
     }
   }
 )
@@ -40,9 +22,7 @@ const { fw, port } = parseArgs(
  * @param {number} port
  */
 function sendReady(port) {
-  if (process.send) {
-    process.send({ type: 'ready', port })
-  }
+  RUNTIME.ready({ port })
 }
 
 /**
@@ -51,6 +31,7 @@ function sendReady(port) {
 async function runCore(port) {
   const { default: Server } = await import('../src/index.js')
   const server = new Server({
+    host,
     port,
     http: null,
     ws: {
@@ -59,13 +40,8 @@ async function runCore(port) {
   })
 
   await server.listen()
+  RUNTIME.registerShutdown(() => server.shutdown())
   sendReady(server.port)
-
-  const shutdown = async () => server.shutdown()
-
-  process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-
-  process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
 }
 
 /**
@@ -83,7 +59,7 @@ async function runRawBinding(port) {
 
   let socket = null
 
-  app.listen(port, (token) => {
+  app.listen(host, port, (token) => {
     if (!token) {
       throw new Error(`Raw binding failed to listen on port ${port}`)
     }
@@ -101,14 +77,7 @@ async function runRawBinding(port) {
     app.close?.()
   }
 
-  process.on('SIGTERM', () => {
-    shutdown()
-    process.exit(0)
-  })
-  process.on('SIGINT', () => {
-    shutdown()
-    process.exit(0)
-  })
+  RUNTIME.registerShutdown(shutdown)
 }
 
 /**
@@ -129,7 +98,7 @@ async function main() {
 
   if (fw === 'ws') {
     const { WebSocketServer } = await import('ws')
-    const wss = new WebSocketServer({ port, perMessageDeflate: false })
+    const wss = new WebSocketServer({ host, port, perMessageDeflate: false })
 
     wss.on('connection', (socket) => {
       socket.on('message', (data, isBinary) => socket.send(data, { binary: isBinary }))
@@ -139,9 +108,7 @@ async function main() {
 
     const shutdown = () => new Promise((resolve) => wss.close(() => resolve()))
 
-    process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-
-    process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+    RUNTIME.registerShutdown(shutdown)
 
     return
   }

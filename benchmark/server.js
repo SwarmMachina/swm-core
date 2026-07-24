@@ -1,39 +1,21 @@
 import http from 'node:http'
+import { parseArgs } from '@swarmmachina/benchkit/orchestration'
+import { createTargetRuntime } from '@swarmmachina/benchkit/target'
 import { TESTS } from './tests.js'
-import Metrics from './helpers/metrics.js'
-import parseArgs from './helpers/parse-args.js'
 
-const METRICS = new Metrics()
-
-if (process.send) {
-  process.on('message', (msg) => {
-    if (!msg || typeof msg !== 'object') {
-      return
-    }
-
-    if (msg.type === 'metrics:start') {
-      METRICS.start({ sampleMs: msg.sampleMs })
-
-      return
-    }
-
-    if (msg.type === 'metrics:stop') {
-      const data = METRICS.stop()
-
-      process.send?.({ type: 'metrics', data })
-    }
-  })
-}
-
-const { fw, port, testName } = parseArgs(
+const RUNTIME = createTargetRuntime({ metrics: true })
+const { fw, host, port, testName } = parseArgs(
   process.argv,
-  { fw: 'core', port: 3000, testName: 'base-sync' },
+  { fw: 'core', host: '127.0.0.1', port: 3000, testName: 'base-sync' },
   {
     '--fw': (out, v) => {
       out.fw = String(v)
     },
     '--port': (out, v) => {
       out.port = Number(v)
+    },
+    '--host': (out, v) => {
+      out.host = String(v)
     },
     '--test': (out, v) => {
       out.testName = String(v)
@@ -68,9 +50,7 @@ function sendCoreHeadersBench(ctx) {
  * @param {number} port
  */
 function sendReady(port) {
-  if (process.send) {
-    process.send({ type: 'ready', port })
-  }
+  RUNTIME.ready({ port })
 }
 
 /**
@@ -128,6 +108,7 @@ async function runCore(port, options = {}) {
     return 'Not Found'
   }
   const server = new Server({
+    host,
     port,
     http: {
       onRequest,
@@ -140,13 +121,8 @@ async function runCore(port, options = {}) {
   })
 
   await server.listen()
+  RUNTIME.registerShutdown(() => server.shutdown())
   sendReady(server.port)
-
-  const shutdown = async () => server.shutdown()
-
-  process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-
-  process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
 }
 
 /**
@@ -204,7 +180,7 @@ async function runRawBinding(port) {
 
   let socket = null
 
-  app.listen(port, (token) => {
+  app.listen(host, port, (token) => {
     if (!token) {
       throw new Error(`Raw binding failed to listen on port ${port}`)
     }
@@ -222,14 +198,7 @@ async function runRawBinding(port) {
     app.close?.()
   }
 
-  process.on('SIGTERM', () => {
-    shutdown()
-    process.exit(0)
-  })
-  process.on('SIGINT', () => {
-    shutdown()
-    process.exit(0)
-  })
+  RUNTIME.registerShutdown(shutdown)
 }
 
 /**
@@ -295,11 +264,10 @@ async function main() {
     app.post('/base', (req, res) => res.status(200).json(req.body))
     app.use((req, res) => res.status(404).send('Not Found'))
 
-    const srv = app.listen(port, () => sendReady(srv.address().port))
+    const srv = app.listen(port, host, () => sendReady(srv.address().port))
     const shutdown = () => new Promise((resolve) => srv.close(resolve))
 
-    process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-    process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+    RUNTIME.registerShutdown(shutdown)
 
     return
   }
@@ -327,13 +295,11 @@ async function main() {
 
     fastify.setNotFoundHandler((req, reply) => reply.code(404).send('Not Found'))
 
-    await fastify.listen({ port })
-    sendReady(fastify.server.address().port)
-
     const shutdown = () => fastify.close()
 
-    process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-    process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+    await fastify.listen({ host, port })
+    RUNTIME.registerShutdown(shutdown)
+    sendReady(fastify.server.address().port)
 
     return
   }
@@ -369,12 +335,11 @@ async function main() {
     }
     const server = new http.Server(serve(router))
 
-    server.listen(port, () => sendReady(server.address().port))
+    server.listen(port, host, () => sendReady(server.address().port))
 
     const shutdown = () => new Promise((resolve) => server.close(resolve))
 
-    process.on('SIGTERM', () => shutdown().finally(() => process.exit(0)))
-    process.on('SIGINT', () => shutdown().finally(() => process.exit(0)))
+    RUNTIME.registerShutdown(shutdown)
 
     return
   }

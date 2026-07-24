@@ -1775,6 +1775,12 @@ pnpm test
 pnpm test:coverage
 ```
 
+Benchmark measurement, statistics, profiling, orchestration and regression
+primitives are provided by
+[`@swarmmachina/benchkit`](https://github.com/SwarmMachina/benchkit).
+The local `benchmark/helpers/` directory contains only swm-core-specific HTTP
+and WebSocket load adapters.
+
 Body-prefetch performance comparison (balanced lazy/prefetch order, including
 p95/p99, ELU and memory):
 

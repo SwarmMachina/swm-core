@@ -1,16 +1,14 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { formatYmdHms, msToHuman } from './helpers/format.js'
-import median from './helpers/median.js'
-import parseArgs from './helpers/parse-args.js'
-import shuffle from './helpers/shuffle.js'
-import timed from './helpers/timed-fn.js'
-import waitForMessage from './helpers/wait-for-message.js'
+import { timed } from '@swarmmachina/benchkit/measurement'
+import { parseArgs, shuffle } from '@swarmmachina/benchkit/orchestration'
+import { processV8Profile } from '@swarmmachina/benchkit/profiling'
+import { formatYmdHms, msToHuman } from '@swarmmachina/benchkit/reporting'
+import { median } from '@swarmmachina/benchkit/statistics'
 import wsLoad from './helpers/ws-load.js'
 import wsLoadOpen from './helpers/ws-load-open.js'
-import { startServer, stopServer } from './helpers/server-proc.js'
-import { processV8Profile } from './helpers/v8-prof-run.js'
+import { TARGET_ARG_HANDLERS, createTargetController, targetDefaults, targetUrl } from './helpers/target-session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const KNOWN_FRAMEWORKS = new Set(['core', 'core-swm-uws', 'core-uwebsockets', 'raw-swm-uws', 'raw-uwebsockets', 'ws'])
@@ -34,7 +32,8 @@ function parseWsBenchArgs(argv) {
       depth: 16,
       order: 'random',
       v8prof: false,
-      jsonOut: null
+      jsonOut: null,
+      ...targetDefaults()
     },
     {
       '--fw': (out, v) => {
@@ -75,7 +74,8 @@ function parseWsBenchArgs(argv) {
       },
       '--json-out': (out, v) => {
         out.jsonOut = String(v)
-      }
+      },
+      ...TARGET_ARG_HANDLERS
     }
   )
 }
@@ -93,6 +93,7 @@ function parseWsBenchArgs(argv) {
  * @param {number} params.sampleMs
  * @param {boolean} params.v8prof
  * @param {string} params.runStamp
+ * @param {object} params.targetController
  * @returns {Promise<object>}
  */
 async function runOne({
@@ -106,7 +107,8 @@ async function runOne({
   runIndex,
   sampleMs,
   v8prof,
-  runStamp
+  runStamp,
+  targetController
 }) {
   console.log(`\n[ws-bench] ${fw}: start (run=${runIndex + 1})`)
 
@@ -115,7 +117,7 @@ async function runOne({
     mode === 'open'
       ? wsLoadOpen({ url, connections, durationSec: durationSecArg, payloadBytes: msgSize, depth })
       : wsLoad({ url, connections, durationSec: durationSecArg, payloadBytes: msgSize })
-  const { proc, port, profileDir } = await startServer({
+  const { session, profileDir } = await targetController.start({
     benchDir: __dirname,
     serverName: 'ws-server.js',
     fw,
@@ -124,26 +126,27 @@ async function runOne({
     v8prof,
     runStamp
   })
-  const url = `ws://127.0.0.1:${port}/`
+  const url = targetUrl('ws', session, '/')
 
-  if (warmupSec > 0) {
-    const w = await timed(() => runLoad(warmupSec))
+  let runTimed
+  let m
 
-    console.log(`[ws-bench] ${fw}: warmup done in ${msToHuman(w.ms)}`)
+  try {
+    if (warmupSec > 0) {
+      const w = await timed(() => runLoad(warmupSec))
+
+      console.log(`[ws-bench] ${fw}: warmup done in ${msToHuman(w.ms)}`)
+    }
+
+    await session.startMetrics({ sampleMs })
+    runTimed = await timed(() => runLoad(durationSec))
+    m = await session.stopMetrics()
+  } finally {
+    await session.stop()
   }
-
-  proc.send?.({ type: 'metrics:start', sampleMs })
-
-  const runTimed = await timed(() => runLoad(durationSec))
-
-  proc.send?.({ type: 'metrics:stop' })
-  const metricsMsg = await waitForMessage(proc, (m) => m && m.type === 'metrics', 15_000)
-
-  await stopServer(proc)
 
   const prof = v8prof ? await processV8Profile(profileDir).catch(() => null) : null
   const res = runTimed.result
-  const m = metricsMsg?.data || null
   const totalMs = performance.now() - tAll0
   const row = {
     fw,
@@ -175,6 +178,7 @@ async function runOne({
  */
 async function main() {
   const args = parseWsBenchArgs(process.argv)
+  const targetController = createTargetController(args, path.dirname(__dirname))
 
   for (const fw of args.frameworks) {
     if (!KNOWN_FRAMEWORKS.has(fw)) {
@@ -222,7 +226,8 @@ async function main() {
         runIndex: i,
         sampleMs: args.sampleMs,
         v8prof: args.v8prof,
-        runStamp
+        runStamp,
+        targetController
       })
 
       perFw[fw].push(row)
@@ -289,6 +294,7 @@ async function main() {
       v8prof: args.v8prof,
       frameworks: args.frameworks
     },
+    ...targetController.metadata,
     runs: runRows,
     median: medians
   }

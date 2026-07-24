@@ -1,12 +1,11 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { timed } from '@swarmmachina/benchkit/measurement'
+import { parseArgs } from '@swarmmachina/benchkit/orchestration'
+import { formatYmdHms } from '@swarmmachina/benchkit/reporting'
+import { median } from '@swarmmachina/benchkit/statistics'
 import runLoad from './helpers/run-load.js'
-import { formatYmdHms } from './helpers/format.js'
-import timed from './helpers/timed-fn.js'
-import median from './helpers/median.js'
-import parseArgs from './helpers/parse-args.js'
-import waitForMessage from './helpers/wait-for-message.js'
-import { startServer, stopServer } from './helpers/server-proc.js'
+import { TARGET_ARG_HANDLERS, createTargetController, targetDefaults, targetUrl } from './helpers/target-session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 'plain' = native route, handler only; 'before' = same route plus a synchronous no-op hook.
@@ -19,7 +18,15 @@ const VARIANTS = ['plain', 'before']
 function parseBeforeArgs(argv) {
   return parseArgs(
     argv,
-    { runs: 4, warmup: 3, duration: 6, connections: 100, pipelining: 10, sampleMs: 250 },
+    {
+      runs: 4,
+      warmup: 3,
+      duration: 6,
+      connections: 100,
+      pipelining: 10,
+      sampleMs: 250,
+      ...targetDefaults()
+    },
     {
       '--runs': (out, v) => {
         out.runs = Number(v)
@@ -38,7 +45,8 @@ function parseBeforeArgs(argv) {
       },
       '--sample-ms': (out, v) => {
         out.sampleMs = Number(v)
-      }
+      },
+      ...TARGET_ARG_HANDLERS
     }
   )
 }
@@ -53,10 +61,21 @@ function parseBeforeArgs(argv) {
  * @param {number} params.runIndex
  * @param {number} params.sampleMs
  * @param {string} params.runStamp
+ * @param {object} params.targetController
  * @returns {Promise<object>}
  */
-async function runOne({ variant, warmupSec, durationSec, connections, pipelining, runIndex, sampleMs, runStamp }) {
-  const { proc, port } = await startServer({
+async function runOne({
+  variant,
+  warmupSec,
+  durationSec,
+  connections,
+  pipelining,
+  runIndex,
+  sampleMs,
+  runStamp,
+  targetController
+}) {
+  const { session } = await targetController.start({
     benchDir: __dirname,
     serverName: 'before-server.js',
     fw: variant,
@@ -65,7 +84,7 @@ async function runOne({ variant, warmupSec, durationSec, connections, pipelining
     v8prof: false,
     runStamp
   })
-  const url = `http://127.0.0.1:${port}/`
+  const url = targetUrl('http', session, '/')
   const baseOpts = {
     method: 'GET',
     url,
@@ -76,21 +95,22 @@ async function runOne({ variant, warmupSec, durationSec, connections, pipelining
     safe: false
   }
 
-  if (warmupSec > 0) {
-    await runLoad(`${variant}-warmup`, { ...baseOpts, duration: warmupSec }, { track: false })
+  let runTimed
+  let m
+
+  try {
+    if (warmupSec > 0) {
+      await runLoad(`${variant}-warmup`, { ...baseOpts, duration: warmupSec }, { track: false })
+    }
+
+    await session.startMetrics({ sampleMs })
+    runTimed = await timed(() => runLoad(variant, baseOpts, { track: false }))
+    m = await session.stopMetrics()
+  } finally {
+    await session.stop()
   }
 
-  proc.send?.({ type: 'metrics:start', sampleMs })
-
-  const runTimed = await timed(() => runLoad(variant, baseOpts, { track: false }))
-
-  proc.send?.({ type: 'metrics:stop' })
-  const metricsMsg = await waitForMessage(proc, (m) => m && m.type === 'metrics', 15_000)
-
-  await stopServer(proc)
-
   const r = runTimed.result.result
-  const m = metricsMsg?.data || null
 
   return {
     variant,
@@ -111,6 +131,7 @@ async function runOne({ variant, warmupSec, durationSec, connections, pipelining
  */
 async function main() {
   const args = parseBeforeArgs(process.argv)
+  const targetController = createTargetController(args, path.dirname(__dirname))
   const runStamp = formatYmdHms()
   const per = Object.fromEntries(VARIANTS.map((v) => [v, []]))
 
@@ -133,7 +154,8 @@ async function main() {
         pipelining: args.pipelining,
         runIndex: i,
         sampleMs: args.sampleMs,
-        runStamp
+        runStamp,
+        targetController
       })
 
       per[variant].push(row)

@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks'
+import { createLatencyRecorder } from '@swarmmachina/benchkit/measurement'
 import { WebSocket } from 'ws'
-import createLatencyRecorder from './latency-recorder.js'
 
 // Open-loop echo load: each connection keeps up to `depth` messages in flight
 // (pipelining). On every echo received it sends a replacement to refill the

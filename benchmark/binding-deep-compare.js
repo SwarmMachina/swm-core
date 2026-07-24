@@ -2,9 +2,9 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import median from './helpers/median.js'
-import runChild from './helpers/run-child.js'
-import { appendStepSummary, fmt, mdTable, round } from './helpers/step-summary.js'
+import { runChild } from '@swarmmachina/benchkit/orchestration'
+import { appendStepSummary, fmt, mdTable, round } from '@swarmmachina/benchkit/reporting'
+import { median } from '@swarmmachina/benchkit/statistics'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')

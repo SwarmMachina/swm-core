@@ -1,40 +1,81 @@
-import autocannon from 'autocannon'
-import histogramPercentiles from 'hdr-histogram-percentiles-obj'
 import os from 'node:os'
-
-// Autocannon omits p95 from its default histogram projection. Add it once so
-// benchmark JSON contains the percentile without approximating between p90 and
-// p97.5. The underlying HDR histogram remains the source of truth.
-if (!histogramPercentiles.percentiles.includes(95)) {
-  const index = histogramPercentiles.percentiles.findIndex((value) => value > 95)
-
-  histogramPercentiles.percentiles.splice(index, 0, 95)
-}
+import { runHttp1Load } from '@swarmmachina/benchkit/load/http1'
 
 /**
+ * Keep the benchmark callers independent of the load-generator implementation.
+ * The returned `result` exposes the Autocannon fields that the existing reports
+ * consume while `benchkitResult` retains the complete native result.
  * @param {string} name
- * @param {object} opts - autocannon options
- * @param {object} [o]
- * @param {boolean} [o.track]
- * @param {boolean} [o.verbose]
- * @returns {Promise<object>} autocannon result
+ * @param {object} opts
+ * @param {object} [output]
+ * @param {boolean} [output.track]
+ * @param {boolean} [output.verbose]
+ * @returns {Promise<{result: object, benchkitResult: object}>}
  */
-export default function runLoad(name, opts, { track = false, verbose = false }) {
-  return new Promise((resolve, reject) => {
-    const instance = autocannon({ ...opts, title: name, workers: Math.min(4, os.cpus().length) }, (err, result) => {
-      if (err) {
-        return reject(err)
-      }
-
-      resolve({ result })
-    })
-
-    if (track || verbose) {
-      autocannon.track(instance, {
-        renderProgressBar: true,
-        renderResultsTable: Boolean(verbose),
-        renderLatencyTable: false
-      })
-    }
+export default async function runLoad(name, opts, { track = false, verbose = false } = {}) {
+  const connections = opts.connections ?? 10
+  const pipelining = opts.pipelining ?? 1
+  const workers = Math.min(4, os.availableParallelism(), connections)
+  const durationMs = (opts.duration ?? 10) * 1000
+  const startedAt = performance.now()
+  const benchkitResult = await runHttp1Load({
+    name,
+    url: opts.url,
+    method: opts.method,
+    headers: opts.headers,
+    body: opts.body,
+    connections,
+    pipelining,
+    workers,
+    durationMs,
+    timeoutMs: opts.timeout === undefined ? undefined : opts.timeout * 1000,
+    socketPath: opts.socketPath,
+    tls: opts.tlsOptions
   })
+  const elapsedMs = performance.now() - startedAt
+  const latency = benchkitResult.latencyMs
+  const errors = benchkitResult.errors
+  const requestRate = benchkitResult.requests.averagePerSecond
+  const result = {
+    title: name,
+    url: benchkitResult.parameters.url,
+    connections,
+    pipelining,
+    workers,
+    duration: benchkitResult.durationMs / 1000,
+    start: new Date(benchkitResult.startedAt),
+    finish: new Date(benchkitResult.finishedAt),
+    errors: errors.total,
+    timeouts: errors.timeout,
+    non2xx: benchkitResult.non2xx,
+    statusCodeStats: Object.fromEntries(
+      Object.entries(benchkitResult.statusCodes).map(([statusCode, count]) => [statusCode, { count }])
+    ),
+    latency: {
+      average: latency.averageMs,
+      p50: latency.p50Ms,
+      p95: latency.p95Ms,
+      p97_5: latency.p97_5Ms,
+      p99: latency.p99Ms,
+      totalCount: latency.count
+    },
+    requests: {
+      average: requestRate,
+      sent: benchkitResult.requests.sent,
+      total: benchkitResult.requests.completed
+    },
+    throughput: {
+      average: benchkitResult.requests.bytesRead / (benchkitResult.durationMs / 1000),
+      total: benchkitResult.requests.bytesRead
+    }
+  }
+
+  if (track || verbose) {
+    console.log(
+      `[load] ${name}: ${Math.round(requestRate)} req/s, ` +
+        `p99=${latency.p99Ms?.toFixed(2) ?? 'n/a'}ms, errors=${errors.total}, elapsed=${(elapsedMs / 1000).toFixed(2)}s`
+    )
+  }
+
+  return { result, benchkitResult }
 }

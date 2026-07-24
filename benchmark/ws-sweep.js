@@ -2,8 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import parseArgs from './helpers/parse-args.js'
-import runChild from './helpers/run-child.js'
+import { parseArgs, runChild } from '@swarmmachina/benchkit/orchestration'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 

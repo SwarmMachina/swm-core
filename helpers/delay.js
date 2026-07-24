@@ -1,7 +1,1 @@
-/**
- * @param {number} ms
- * @returns {Promise}
- */
-export default function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+export { setTimeout as default } from 'node:timers/promises'
