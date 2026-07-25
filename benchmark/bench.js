@@ -12,7 +12,7 @@ import { TargetController } from './helpers/target-controller.js'
 import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const BASE_ORDER = ['core', 'micro', 'fastify', 'express']
+const BASE_ORDER = ['core', 'hyperexpress', 'micro', 'fastify', 'express']
 const WANTED = new Set(BASE_ORDER)
 
 /**

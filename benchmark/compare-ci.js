@@ -7,8 +7,8 @@ import { median } from '@swarmmachina/benchkit/statistics'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const HTTP_TESTS = ['base-sync', 'base-async', 'headers', 'headers-prepared', 'post-base']
-const HTTP_FRAMEWORKS = 'core,core-uwebsockets,micro,fastify,express'
-const HTTP_ORDER = ['core', 'core-uwebsockets', 'micro', 'fastify', 'express']
+const HTTP_FRAMEWORKS = 'core,core-uwebsockets,hyperexpress,micro,fastify,express'
+const HTTP_ORDER = ['core', 'core-uwebsockets', 'hyperexpress', 'micro', 'fastify', 'express']
 const WS_FRAMEWORKS = 'core,core-uwebsockets,ws'
 const WS_ORDER = ['core', 'core-uwebsockets', 'ws']
 

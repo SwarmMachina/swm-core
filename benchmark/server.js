@@ -304,6 +304,41 @@ async function main() {
     return
   }
 
+  if (fw === 'hyperexpress') {
+    const { default: HyperExpress } = await import('hyper-express')
+    const server = new HyperExpress.Server()
+
+    server.get('/base-sync', (req, res) => res.status(200).json(BASE_SYNC_TEST.payload))
+    server.get('/base-async', async (req, res) => {
+      await Promise.resolve()
+      res.status(200).json(BASE_ASYNC_TEST.payload)
+    })
+    server.get('/headers', (req, res) => {
+      res.header('content-type', HEADERS_TEST.responseHeaders['content-type'])
+      res.header('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
+      res.header('x-trace-id', HEADERS_TEST.responseHeaders['x-trace-id'])
+      res.header('x-response-id', HEADERS_TEST.responseHeaders['x-response-id'])
+      res.header('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][0])
+      res.header('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
+      res.status(200).send(HEADERS_TEST.responseText)
+    })
+    server.get('/headers-prepared', (req, res) => {
+      for (const [name, value] of Object.entries(HEADERS_TEST.responseHeaders)) {
+        res.header(name, value)
+      }
+
+      res.status(200).send(HEADERS_TEST.responseText)
+    })
+    server.post('/base', async (req, res) => res.status(200).json(await req.json()))
+    server.set_not_found_handler((req, res) => res.status(404).send('Not Found'))
+
+    await server.listen(port, host)
+    RUNTIME.registerShutdown(() => server.shutdown())
+    sendReady(server.port)
+
+    return
+  }
+
   if (fw === 'micro') {
     const { serve, json } = await import('micro')
     const router = (req, res) => {
