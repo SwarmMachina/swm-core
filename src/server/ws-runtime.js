@@ -1,7 +1,7 @@
 import WSContext from '../ws-context.js'
 import ContextPool from '../context-pool.js'
 import { isPromise, validateWsClose } from './utils.js'
-import WebSocketUpgradeRuntime from './ws-upgrade.js'
+import WebSocketUpgradeRuntime, { WS_CONTEXT_DATA } from './ws-upgrade.js'
 
 export default class WebSocketRuntime {
   #server
@@ -48,7 +48,7 @@ export default class WebSocketRuntime {
 
     this.#lifecycle.activeWs++
 
-    const ctx = this.contextPool.acquire().reset(this.#server, ws, ws.getUserData())
+    const ctx = this.contextPool.acquire().reset(this.#server, ws, ws[WS_CONTEXT_DATA])
 
     this.#wsContexts.set(ws, ctx)
 

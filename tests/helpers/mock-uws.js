@@ -1,3 +1,5 @@
+import { WS_CONTEXT_DATA } from '../../src/server/ws-upgrade.js'
+
 export const mockCalls = {
   app: [],
   listen: [],
@@ -129,10 +131,12 @@ export function createMockWebSocket(userData = {}) {
   let endCallCount = 0
   let closeCallCount = 0
 
-  return {
+  const ws = {
     calls,
     getUserData() {
-      return userData
+      calls.push({ method: 'getUserData' })
+
+      return ws
     },
     end(code, reason) {
       endCallCount++
@@ -164,6 +168,10 @@ export function createMockWebSocket(userData = {}) {
       return true
     }
   }
+
+  Object.assign(ws, userData, { [WS_CONTEXT_DATA]: userData })
+
+  return ws
 }
 
 /**

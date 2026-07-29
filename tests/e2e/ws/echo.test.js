@@ -91,6 +91,31 @@ test('ws upgrade selects only the subprotocol returned by selectProtocol', async
   sock.close()
 })
 
+test('ws context keeps the exact object returned by onUpgrade', async () => {
+  const dataFromOnUpgrade = Object.freeze({ userId: 123 })
+
+  let openedData
+
+  handle = await startWsServer({
+    ws: {
+      onUpgrade: () => dataFromOnUpgrade,
+      onOpen: (ctx) => {
+        openedData = ctx.data
+      }
+    }
+  })
+
+  const sock = new WebSocket(handle.wsBaseUrl, { perMessageDeflate: false })
+
+  await new Promise((resolve, reject) => {
+    sock.on('open', resolve)
+    sock.on('error', reject)
+  })
+
+  assert.strictEqual(openedData, dataFromOnUpgrade)
+  sock.close()
+})
+
 test('async ws upgrade reads owned metadata after await', async () => {
   let openedData
 

@@ -145,7 +145,7 @@ export interface UpgradeMeta {
  * The result of a WebSocket upgrade decision.
  *
  * `null` denies the upgrade with HTTP 403. An object accepts the upgrade and
- * becomes {@link WSContext.data} for the lifetime of that connection.
+ * is exposed by identity as {@link WSContext.data} for that connection.
  */
 export type UpgradeResult = object | null
 
@@ -257,9 +257,9 @@ export interface WSOptions {
   /**
    * Authorizes an HTTP-to-WebSocket upgrade.
    *
-   * Return `null` to deny with 403, or return an object to accept. The object is
-   * exposed as {@link WSContext.data}. Async handlers receive an owned metadata
-   * snapshot and are bounded by {@link WSOptions.upgradeTimeoutMs}.
+   * Return `null` to deny with 403, or return an object to accept. The exact
+   * object is exposed as {@link WSContext.data}. Async handlers receive an owned
+   * metadata snapshot and are bounded by {@link WSOptions.upgradeTimeoutMs}.
    *
    * This callback is required so enabling WebSocket can never implicitly allow
    * unauthenticated upgrades. Return an empty object only when anonymous
@@ -641,7 +641,7 @@ export type WSSendStatus = 0 | 1 | 2
  * Its identity is stable for one connection and becomes invalid after close.
  */
 export interface RawWebSocket {
-  /** Returns the object produced by `ws.onUpgrade`. */
+  /** Returns the binding-native view of upgrade data. */
   getUserData(): any
 
   /** Returns currently buffered outbound bytes. */
@@ -688,7 +688,7 @@ export type UWebSocket = RawWebSocket
  * connection. It becomes invalid after `onClose` settles.
  */
 export interface WSContext {
-  /** User data returned by {@link WSOptions.onUpgrade}. */
+  /** Exact object returned by {@link WSOptions.onUpgrade}. */
   data: any
 
   /** Raw handle valid for this connection's lifetime. */

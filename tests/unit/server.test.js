@@ -1129,6 +1129,22 @@ describe('Server', () => {
   })
 
   describe('WebSocket context lifecycle', () => {
+    test('should preserve upgrade data identity without calling getUserData', () => {
+      const dataFromOnUpgrade = { userId: 123 }
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {}
+      })
+      const ws = createMockWebSocket(dataFromOnUpgrade)
+      const ctx = server.getWsContext(ws)
+
+      strictEqual(ctx.data, dataFromOnUpgrade)
+      strictEqual(
+        ws.calls.some((call) => call.method === 'getUserData'),
+        false
+      )
+    })
+
     test('should create and cache WS context', () => {
       const server = makeServer({
         onRequest: () => {},
@@ -1847,7 +1863,7 @@ describe('Server', () => {
       const upgradeCall = res.calls.find((c) => c.method === 'upgrade')
 
       strictEqual(upgradeCall !== undefined, true)
-      strictEqual(upgradeCall.userData, userData)
+      strictEqual(upgradeCall.userData.a, userData.a)
       strictEqual(upgradeCall.secKey, 'key123')
       strictEqual(upgradeCall.protocol, 'protocol123')
       strictEqual(upgradeCall.extensions, 'extensions123')
@@ -1984,7 +2000,7 @@ describe('Server', () => {
         [{ method: 'snapshot', paramCount: 1 }]
       )
       strictEqual(upgradeCall !== undefined, true)
-      strictEqual(upgradeCall.userData, userData)
+      strictEqual(upgradeCall.userData.role, userData.role)
       strictEqual(upgradeCall.secKey, 'sync-key')
       strictEqual(upgradeCall.protocol, 'sync-protocol')
       strictEqual(upgradeCall.extensions, 'sync-extensions')

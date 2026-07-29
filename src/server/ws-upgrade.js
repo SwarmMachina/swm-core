@@ -4,6 +4,8 @@ import { isPromise, parseWsProtocols, validateWsProtocolSelection } from './util
 
 const UPGRADE_PARAMETER_COUNT = 1
 
+export const WS_CONTEXT_DATA = Symbol('swm-core.ws-context-data')
+
 /**
  * @param {import('@swarmmachina/swm-uws').HttpRequest} req
  * @param {import('@swarmmachina/swm-uws').HttpResponse} res
@@ -58,6 +60,7 @@ export default class WebSocketUpgradeRuntime {
    */
   #acceptUpgrade(res, userData, secWebSocketKey, requestedProtocol, secWebSocketExtensions, context) {
     let protocol
+    let upgradeData
 
     try {
       const selector = this.#server.wsProtocolSelector
@@ -70,6 +73,8 @@ export default class WebSocketUpgradeRuntime {
       } else {
         protocol = ''
       }
+
+      upgradeData = { ...userData, [WS_CONTEXT_DATA]: userData }
     } catch (err) {
       res.cork(() => {
         res.writeStatus(STATUS_TEXT[403])
@@ -81,7 +86,7 @@ export default class WebSocketUpgradeRuntime {
     }
 
     res.cork(() => {
-      res.upgrade(userData, secWebSocketKey, protocol, secWebSocketExtensions, context)
+      res.upgrade(upgradeData, secWebSocketKey, protocol, secWebSocketExtensions, context)
     })
   }
 
