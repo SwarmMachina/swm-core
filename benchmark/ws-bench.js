@@ -12,7 +12,15 @@ import { TargetController } from './helpers/target-controller.js'
 import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const KNOWN_FRAMEWORKS = new Set(['core', 'core-swm-uws', 'core-uwebsockets', 'raw-swm-uws', 'raw-uwebsockets', 'ws'])
+const KNOWN_FRAMEWORKS = new Set([
+  'core',
+  'core-swm-uws',
+  'core-uwebsockets',
+  'raw-swm-uws',
+  'raw-uwebsockets',
+  'hyperexpress',
+  'ws'
+])
 
 /**
  * @param {string[]} argv

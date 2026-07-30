@@ -6,13 +6,15 @@ import { appendStepSummary, fmt, mdTable, round } from '@swarmmachina/benchkit/r
 import runBodyParserSuite from './suites/body-parser.js'
 import runHttpSuite from './suites/http.js'
 import runWsSuite from './suites/ws.js'
+import runWsUpgradeSuite from './suites/ws-upgrade.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.dirname(__dirname)
 const SUITES = {
   http: runHttpSuite,
   'body-parser': runBodyParserSuite,
-  ws: runWsSuite
+  ws: runWsSuite,
+  'ws-upgrade': runWsUpgradeSuite
 }
 
 /**

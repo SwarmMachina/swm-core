@@ -2,9 +2,9 @@ import { parseArgs } from '@swarmmachina/benchkit/orchestration'
 import { TargetRuntime } from '@swarmmachina/benchkit/target'
 
 const RUNTIME = new TargetRuntime({ metrics: true })
-const { fw, host, port } = parseArgs(
+const { fw, host, port, test } = parseArgs(
   process.argv,
-  { fw: 'core', host: '127.0.0.1', port: 3000 },
+  { fw: 'core', host: '127.0.0.1', port: 3000, test: 'ws-echo' },
   {
     '--fw': (out, v) => {
       out.fw = String(v)
@@ -14,6 +14,9 @@ const { fw, host, port } = parseArgs(
     },
     '--host': (out, v) => {
       out.host = String(v)
+    },
+    '--test': (out, v) => {
+      out.test = String(v)
     }
   }
 )
@@ -30,12 +33,13 @@ function sendReady(port) {
  */
 async function runCore(port) {
   const { default: Server } = await import('../src/index.js')
+  const onUpgrade = test === 'ws-upgrade' ? (meta) => (meta.url() === '/async' ? Promise.resolve({}) : {}) : () => ({})
   const server = new Server({
     host,
     port,
     http: null,
     ws: {
-      onUpgrade: () => ({}),
+      onUpgrade,
       onMessage: (ctx, message, isBinary) => ctx.send(message, isBinary)
     }
   })
@@ -110,6 +114,38 @@ async function main() {
     const shutdown = () => new Promise((resolve) => wss.close(() => resolve()))
 
     RUNTIME.registerShutdown(shutdown)
+
+    return
+  }
+
+  if (fw === 'hyperexpress') {
+    const { default: HyperExpress } = await import('hyper-express')
+    const server = new HyperExpress.Server()
+
+    server.ws(
+      '/*',
+      {
+        compression: HyperExpress.compressors.DISABLED,
+        message_type: 'ArrayBuffer',
+        max_payload_length: 1024 * 1024,
+        max_backpressure: 64 * 1024,
+        close_on_backpressure_limit: true
+      },
+      (socket) => {
+        socket.on('message', (message, isBinary) => socket.send(message, isBinary))
+      }
+    )
+    server.upgrade('/*', (request, response) => {
+      if (test === 'ws-upgrade' && request.path === '/async') {
+        return Promise.resolve().then(() => response.upgrade({}))
+      }
+
+      return response.upgrade({})
+    })
+
+    await server.listen(port, host)
+    RUNTIME.registerShutdown(() => server.shutdown())
+    sendReady(server.port)
 
     return
   }
