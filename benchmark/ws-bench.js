@@ -34,6 +34,7 @@ function parseWsBenchArgs(argv) {
       warmup: 2,
       duration: 6,
       connections: 50,
+      workers: 4,
       sampleMs: 250,
       msgSize: 64,
       mode: 'closed',
@@ -61,6 +62,9 @@ function parseWsBenchArgs(argv) {
       },
       '--connections': (out, v) => {
         out.connections = Number(v)
+      },
+      '--workers': (out, v) => {
+        out.workers = Number(v)
       },
       '--sample-ms': (out, v) => {
         out.sampleMs = Number(v)
@@ -94,6 +98,7 @@ function parseWsBenchArgs(argv) {
  * @param {number} params.warmupSec
  * @param {number} params.durationSec
  * @param {number} params.connections
+ * @param {number} params.workers
  * @param {number} params.msgSize
  * @param {'open'|'closed'} params.mode
  * @param {number} params.depth
@@ -109,6 +114,7 @@ async function runOne({
   warmupSec,
   durationSec,
   connections,
+  workers,
   msgSize,
   mode,
   depth,
@@ -139,6 +145,7 @@ async function runOne({
       url,
       message,
       connections,
+      workers,
       maxInFlight,
       durationMs: durationSecArg * 1000,
       timeoutMs: 5000
@@ -224,7 +231,7 @@ async function main() {
   const modeLabel = args.mode === 'open' ? `open(depth=${args.depth})` : 'closed'
 
   console.log(
-    `Run ws-echo: frameworks:${args.frameworks.join(',')}, mode:${modeLabel}, connections:${args.connections}, duration:${args.duration}, msgSize:${args.msgSize}`
+    `Run ws-echo: frameworks:${args.frameworks.join(',')}, mode:${modeLabel}, connections:${args.connections}, workers:${args.workers}, duration:${args.duration}, msgSize:${args.msgSize}`
   )
 
   for (let i = 0; i < args.runs; i++) {
@@ -244,6 +251,7 @@ async function main() {
         warmupSec: args.warmup,
         durationSec: args.duration,
         connections: args.connections,
+        workers: args.workers,
         msgSize: args.msgSize,
         mode: args.mode,
         depth: args.depth,
@@ -274,6 +282,7 @@ async function main() {
         rss: r.rssMB != null ? `${r.rssMB.toFixed(0)}MB` : 'n/a',
         heap: r.heapMB != null ? `${r.heapMB.toFixed(0)}MB` : 'n/a',
         ELU: r.eluPct != null ? `${r.eluPct.toFixed(1)}%` : 'n/a',
+        loadWorkers: r.loadWorkers,
         loadELU: r.loadEluPct != null ? `${r.loadEluPct.toFixed(1)}%` : 'n/a',
         loadRSS: r.loadRssMB != null ? `${r.loadRssMB.toFixed(0)}MB` : 'n/a',
         errors: r.errors
@@ -315,6 +324,7 @@ async function main() {
     test: {
       name: 'ws-echo',
       connections: args.connections,
+      workers: args.workers,
       duration: args.duration,
       msgSize: args.msgSize,
       maxInFlight: args.mode === 'open' ? args.depth : 1
@@ -322,6 +332,7 @@ async function main() {
     options: {
       runs: args.runs,
       warmup: args.warmup,
+      workers: args.workers,
       sampleMs: args.sampleMs,
       mode: args.mode,
       depth: args.depth,

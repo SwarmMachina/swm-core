@@ -1779,7 +1779,9 @@ primitives are provided by
 Persistent WebSocket echo load is generated directly by Benchkit. The local
 `benchmark/helpers/` directory contains only the swm-core-specific HTTP
 compatibility adapter, target lifecycle helpers and WebSocket upgrade churn
-generator.
+generator. Use `--workers` with the WebSocket echo and payload benchmarks to
+fix the number of Benchkit load-generator worker threads; reports include that
+count together with generator ELU and RSS.
 
 Body-prefetch performance comparison (balanced lazy/prefetch order, including
 p95/p99, ELU and memory):

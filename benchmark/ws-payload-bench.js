@@ -21,6 +21,7 @@ function parsePayloadArgs(argv) {
       warmup: 2,
       duration: 6,
       connections: 50,
+      workers: 4,
       depth: 16,
       v8prof: true,
       outDir: null
@@ -49,6 +50,9 @@ function parsePayloadArgs(argv) {
       },
       '--connections': (out, value) => {
         out.connections = Number(value)
+      },
+      '--workers': (out, value) => {
+        out.workers = Number(value)
       },
       '--depth': (out, value) => {
         out.depth = Number(value)
@@ -89,6 +93,8 @@ async function main() {
       String(args.duration),
       '--connections',
       String(args.connections),
+      '--workers',
+      String(args.workers),
       '--msg-size',
       String(size),
       '--mode',
@@ -112,6 +118,7 @@ async function main() {
         framework,
         bytes: size,
         depth: effectiveDepth,
+        loadWorkers: runRows[0]?.loadWorkers ?? null,
         msgPerSec: value?.msgPerSec ?? null,
         throughputMiBPerSec: value ? (value.msgPerSec * size) / (1024 * 1024) : null,
         latencyP95Ms: value?.latP95Ms ?? null,
