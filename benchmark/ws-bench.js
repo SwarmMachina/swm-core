@@ -1,13 +1,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runWebSocketLoad } from '@swarmmachina/benchkit/load/websocket'
 import { timed } from '@swarmmachina/benchkit/measurement'
 import { parseArgs, shuffle } from '@swarmmachina/benchkit/orchestration'
 import { processV8Profile } from '@swarmmachina/benchkit/profiling'
 import { formatYmdHms, msToHuman } from '@swarmmachina/benchkit/reporting'
 import { median } from '@swarmmachina/benchkit/statistics'
-import wsLoad from './helpers/ws-load.js'
-import wsLoadOpen from './helpers/ws-load-open.js'
 import { TargetController } from './helpers/target-controller.js'
 import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
 
@@ -103,7 +102,7 @@ function parseWsBenchArgs(argv) {
  * @param {boolean} params.v8prof
  * @param {string} params.runStamp
  * @param {object} params.targetController
- * @returns {Promise<object>}
+ * @returns {Promise<{row: object, profileDir: string|null}>}
  */
 async function runOne({
   fw,
@@ -122,10 +121,6 @@ async function runOne({
   console.log(`\n[ws-bench] ${fw}: start (run=${runIndex + 1})`)
 
   const tAll0 = performance.now()
-  const runLoad = (durationSecArg) =>
-    mode === 'open'
-      ? wsLoadOpen({ url, connections, durationSec: durationSecArg, payloadBytes: msgSize, depth })
-      : wsLoad({ url, connections, durationSec: durationSecArg, payloadBytes: msgSize })
   const { session, profileDir } = await targetController.start({
     benchDir: __dirname,
     serverName: 'ws-server.js',
@@ -136,6 +131,18 @@ async function runOne({
     runStamp
   })
   const url = targetUrl('ws', session, '/')
+  const maxInFlight = mode === 'open' ? depth : 1
+  const message = new Uint8Array(Math.max(1, msgSize)).fill(0x61)
+  const runLoad = (durationSecArg) =>
+    runWebSocketLoad({
+      name: `${fw} ws-echo`,
+      url,
+      message,
+      connections,
+      maxInFlight,
+      durationMs: durationSecArg * 1000,
+      timeoutMs: 5000
+    })
 
   let runTimed
   let m
@@ -154,24 +161,31 @@ async function runOne({
     await session.stop()
   }
 
-  const prof = v8prof ? await processV8Profile(profileDir).catch(() => null) : null
   const res = runTimed.result
   const totalMs = performance.now() - tAll0
   const row = {
     fw,
-    msgPerSec: res.msgPerSec,
-    latAvgMs: res.latencyAvgMs,
-    latP95Ms: res.latencyP95Ms,
-    latP97_5Ms: res.latencyP97_5Ms,
-    latP99Ms: res.latencyP99Ms,
-    errors: res.errors,
+    msgPerSec: res.messages.averagePerSecond,
+    latAvgMs: res.latencyMs.averageMs,
+    latP95Ms: res.latencyMs.p95Ms,
+    latP97_5Ms: res.latencyMs.p97_5Ms,
+    latP99Ms: res.latencyMs.p99Ms,
+    errors: res.errors.total,
     eluPct: m?.eluPct ?? null,
     eldP99ms: m?.eventLoopDelayMs?.p99 ?? null,
     rssMB: m?.memMB?.rssPeak ?? null,
     heapMB: m?.memMB?.heapUsedPeak ?? null,
     externalMB: m?.memMB?.externalPeak ?? null,
     arrayBuffersMB: m?.memMB?.arrayBuffersPeak ?? null,
-    v8prof: prof
+    loadWorkers: res.parameters.workers,
+    loadEluPct: res.loadGenerator.maxWorkerEluPct,
+    loadRssMB: res.loadGenerator.processMemory.rss.peakBytes / (1024 * 1024),
+    loadCpuCorePct: res.loadGenerator.cpuCorePct,
+    loadSaturated: res.loadGenerator.saturated,
+    loadBackpressureEvents: res.transport.backpressureEvents,
+    loadInFlightAtStop: res.transport.inFlightAtStop,
+    loadDropped: res.transport.rateDropped,
+    v8prof: null
   }
 
   console.log(
@@ -179,7 +193,7 @@ async function runOne({
       `msg/s=${Math.round(row.msgPerSec)} p99=${row.latP99Ms != null ? row.latP99Ms.toFixed(2) : 'n/a'}ms errors=${row.errors}`
   )
 
-  return row
+  return { row, profileDir: v8prof ? profileDir : null }
 }
 
 /**
@@ -206,6 +220,7 @@ async function main() {
   const runStamp = formatYmdHms()
   const perFw = Object.fromEntries(args.frameworks.map((fw) => [fw, []]))
   const runRows = []
+  const pendingProfiles = []
   const modeLabel = args.mode === 'open' ? `open(depth=${args.depth})` : 'closed'
 
   console.log(
@@ -224,7 +239,7 @@ async function main() {
     console.log(`\n== run ${i + 1}/${args.runs}: ${order.join(', ')} ==`)
 
     for (const fw of order) {
-      const row = await runOne({
+      const { row, profileDir } = await runOne({
         fw,
         warmupSec: args.warmup,
         durationSec: args.duration,
@@ -241,6 +256,10 @@ async function main() {
 
       perFw[fw].push(row)
       rows.push(row)
+
+      if (profileDir) {
+        pendingProfiles.push({ row, profileDir })
+      }
     }
 
     const ordered = args.frameworks.map((fw) => rows.find((r) => r.fw === fw)).filter(Boolean)
@@ -255,11 +274,17 @@ async function main() {
         rss: r.rssMB != null ? `${r.rssMB.toFixed(0)}MB` : 'n/a',
         heap: r.heapMB != null ? `${r.heapMB.toFixed(0)}MB` : 'n/a',
         ELU: r.eluPct != null ? `${r.eluPct.toFixed(1)}%` : 'n/a',
+        loadELU: r.loadEluPct != null ? `${r.loadEluPct.toFixed(1)}%` : 'n/a',
+        loadRSS: r.loadRssMB != null ? `${r.loadRssMB.toFixed(0)}MB` : 'n/a',
         errors: r.errors
       }))
     )
 
     runRows.push({ run: i + 1, rows: ordered })
+  }
+
+  for (const profile of pendingProfiles) {
+    profile.row.v8prof = await processV8Profile(profile.profileDir).catch(() => null)
   }
 
   console.log('\n== median ==')
@@ -291,7 +316,8 @@ async function main() {
       name: 'ws-echo',
       connections: args.connections,
       duration: args.duration,
-      msgSize: args.msgSize
+      msgSize: args.msgSize,
+      maxInFlight: args.mode === 'open' ? args.depth : 1
     },
     options: {
       runs: args.runs,

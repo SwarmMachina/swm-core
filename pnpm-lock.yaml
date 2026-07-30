@@ -12,8 +12,8 @@ importers:
         version: 0.5.7
     devDependencies:
       '@swarmmachina/benchkit':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: 0.3.0
+        version: 0.3.0
       '@swarmmachina/standards':
         specifier: ^1.1.2
         version: 1.1.2(vue-eslint-parser@10.4.0(eslint@10.7.0))
@@ -164,9 +164,9 @@ packages:
       { integrity: sha512-TeheYy0ILzBEI/CO55CP6zJCSdSWeRtGnHy8U8dWSUH4I68iqTsy7HkMktR4xakThc9jotkPQUXT4ITdbV7cHA== }
     engines: { node: '>=18' }
 
-  '@swarmmachina/benchkit@0.2.0':
+  '@swarmmachina/benchkit@0.3.0':
     resolution:
-      { integrity: sha512-dqCWeh/wMc0pC2wmdOjzqFVYRJg6snDrLWMEVfkNkxzhqLw7805Q+ox512Vy+gdfV8U8ibbqS4q4rsG4mP1Ltg== }
+      { integrity: sha512-Ufy9Yfq1fjctKtUinN9VMEWF1qcpjF+WgWU1pq8q11tHxIU1Q1sbT7ggIhPQ4sToCNsuk3eAqzenEV5u7208tg== }
     engines: { node: ^22.13.0 || 24.x }
     hasBin: true
 
@@ -1315,7 +1315,7 @@ snapshots:
 
   '@sindresorhus/base62@1.0.0': {}
 
-  '@swarmmachina/benchkit@0.2.0': {}
+  '@swarmmachina/benchkit@0.3.0': {}
 
   '@swarmmachina/standards@1.1.2(vue-eslint-parser@10.4.0(eslint@10.7.0))':
     dependencies:

@@ -1776,8 +1776,10 @@ pnpm test:coverage
 Benchmark measurement, statistics, profiling, orchestration and regression
 primitives are provided by
 [`@swarmmachina/benchkit`](https://github.com/SwarmMachina/benchkit).
-The local `benchmark/helpers/` directory contains only swm-core-specific HTTP
-and WebSocket load adapters.
+Persistent WebSocket echo load is generated directly by Benchkit. The local
+`benchmark/helpers/` directory contains only the swm-core-specific HTTP
+compatibility adapter, target lifecycle helpers and WebSocket upgrade churn
+generator.
 
 Body-prefetch performance comparison (balanced lazy/prefetch order, including
 p95/p99, ELU and memory):

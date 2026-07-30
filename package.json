@@ -89,7 +89,7 @@
     "release": "pnpm release:gate && pnpm release:artifact && node release-artifact/publish-release-artifact.js"
   },
   "devDependencies": {
-    "@swarmmachina/benchkit": "0.2.0",
+    "@swarmmachina/benchkit": "0.3.0",
     "@swarmmachina/standards": "^1.1.2",
     "@types/node": "24.10.1",
     "eslint": "10.7.0",
