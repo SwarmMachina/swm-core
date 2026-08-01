@@ -1,9 +1,10 @@
 # @swarmmachina/swm-core
 
+[![CI](https://github.com/SwarmMachina/swm-core/actions/workflows/ci.yml/badge.svg)](https://github.com/SwarmMachina/swm-core/actions/workflows/ci.yml)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Node.js Version](https://img.shields.io/badge/node-22.x%20%7C%2024.x-brightgreen)](https://nodejs.org/)
-[![dependencies](https://img.shields.io/badge/dependencies-1-brightgreen.svg)](#)
-[![stability](https://img.shields.io/badge/stability-experimental-yellow.svg)](#)
+[![Node.js](https://img.shields.io/badge/node-22%20%7C%2024-brightgreen.svg)](https://nodejs.org/)
+[![runtime dependencies](https://img.shields.io/badge/runtime_dependencies-1-brightgreen.svg)](#runtime-requirements)
+[![stability](https://img.shields.io/badge/stability-experimental-orange.svg)](#stability)
 
 A high-performance HTTP/WebSocket server built on the
 [`@swarmmachina/swm-uws`](https://www.npmjs.com/package/@swarmmachina/swm-uws)
@@ -11,13 +12,13 @@ native binding.
 
 ## Features
 
-- **Native uWS transport** - HTTP/WebSocket transport through `swm-uws`
-- **HTTP + WebSocket** - Both protocols in a single server instance
-- **Context pooling** - Minimizes garbage collection overhead
-- **Graceful shutdown** - Cleanly closes active connections
-- **Streaming support** - Efficient handling of large payloads
-- **Auto Content-Type detection** - Automatically sets headers based on response type
-- **Modern ES modules** - Native ESM support (Node.js 22 and 24)
+- **Native uWS transport** - HTTP/WebSocket transport through `swm-uws`.
+- **HTTP + WebSocket** - Both protocols in a single server instance.
+- **Context pooling** - Minimizes garbage collection overhead.
+- **Graceful shutdown** - Cleanly closes active connections.
+- **Streaming support** - Efficient handling of large payloads.
+- **Auto Content-Type detection** - Automatically sets headers based on response type.
+- **Modern ES modules** - Native ESM support for Node.js 22 and 24.
 
 ## Installation
 
@@ -1569,21 +1570,31 @@ connections individually.
 ### Graceful Shutdown
 
 ```javascript
-const server = new Server({
-  /* ... */
-})
+const server = new Server({/* ... */})
 await server.listen()
 
-// Handle shutdown signals
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully...')
-  server.shutdown(10000) // 10 second timeout
-})
+let shutdownPromise
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully...')
-  server.shutdown(10000)
-})
+function shutdown(signal) {
+  if (shutdownPromise !== undefined) return shutdownPromise
+
+  shutdownPromise = (async () => {
+    console.log(`${signal} received, shutting down gracefully...`)
+    await server.shutdown(10_000)
+  })()
+
+  return shutdownPromise
+}
+
+function handleSignal(signal) {
+  void shutdown(signal).catch((error) => {
+    console.error('graceful shutdown failed', error)
+    process.exitCode = 1
+  })
+}
+
+process.once('SIGTERM', () => handleSignal('SIGTERM'))
+process.once('SIGINT', () => handleSignal('SIGINT'))
 ```
 
 ### Route before hooks
@@ -1867,7 +1878,9 @@ CI packs once, verifies the tarball and checksum, then publishes that exact
 artifact with npm provenance. A retry succeeds only when the existing npm
 package has the same integrity. Manual dispatch runs all gates without publishing.
 
-Local release: `pnpm release`.
+For a local authenticated release, first ensure `release-artifact/` is empty,
+then run `pnpm release`. The directory is intentionally fail-closed so stale
+tarballs cannot be mixed with a new manifest.
 
 Rollback by moving `latest` to a known-good version and deprecating the bad one.
 Never reuse a published version or release tag.
@@ -1894,6 +1907,12 @@ sudo cpupower frequency-set -g performance
 
 After changing hardware, recalibrate `benchmark/baselines/*.json` from several
 green runs (`min` ≈ low × 0.9; `max` ≈ high × 1.15).
+
+## Stability
+
+The package is currently experimental. Public APIs and runtime behavior may
+change before a stable release; changes should be documented and covered by
+tests.
 
 ## Contributing
 
