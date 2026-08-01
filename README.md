@@ -1878,9 +1878,11 @@ CI packs once, verifies the tarball and checksum, then publishes that exact
 artifact with npm provenance. A retry succeeds only when the existing npm
 package has the same integrity. Manual dispatch runs all gates without publishing.
 
-For a local authenticated release, first ensure `release-artifact/` is empty,
-then run `pnpm release`. The directory is intentionally fail-closed so stale
-tarballs cannot be mixed with a new manifest.
+For a local release rehearsal, first ensure `release-artifact/` is empty, then
+run `pnpm release:gate` followed by `pnpm release:artifact`. The directory is
+intentionally fail-closed so stale tarballs cannot be mixed with a new manifest.
+Actual provenance publication belongs to the supported cloud-hosted tag
+workflow, not a local terminal.
 
 Rollback by moving `latest` to a known-good version and deprecating the bad one.
 Never reuse a published version or release tag.
