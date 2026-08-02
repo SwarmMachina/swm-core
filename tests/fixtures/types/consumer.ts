@@ -135,6 +135,39 @@ const effectiveConfig: Readonly<EffectiveServerConfig> = server.effectiveConfig
 const effectiveHttp: Readonly<EffectiveHttpConfig> | null = effectiveConfig.http
 const effectiveWs: Readonly<EffectiveWSConfig> | null = effectiveConfig.ws
 
+export function verifyHttpContextReaders(ctx: HttpContext): void {
+  const ip: string = ctx.getIP()
+  const method: string = ctx.getMethod()
+  const url: string = ctx.getUrl()
+  const fullQuery: string = ctx.getQuery()
+  const queryValue: string | undefined = ctx.getQuery('page')
+  const parameter: string | undefined = ctx.getParameter('id')
+  const header: string = ctx.getHeader('x-test')
+  const headers: Record<string, string> = ctx.getHeaders()
+  const contentLength: number | null = ctx.getContentLength()
+
+  void ip
+  void method
+  void url
+  void fullQuery
+  void queryValue
+  void parameter
+  void header
+  void headers
+  void contentLength
+
+  ctx.ip()
+  ctx.method()
+  ctx.url()
+  ctx.fullQuery()
+  ctx.query('page')
+  ctx.param('id')
+  ctx.header('x-test')
+  ctx.contentLength()
+  ctx.setStatus(201)
+  ctx.status(201)
+}
+
 // @ts-expect-error prefetch belongs to the HTTP application options
 new Server({ prefetch: true, http: { onRequest: () => 'ok' } })
 const app: AppInstance = createApp()

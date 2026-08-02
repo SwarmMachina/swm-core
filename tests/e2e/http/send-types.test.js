@@ -83,14 +83,14 @@ test('send types: return Buffer => 200 application/octet-stream', async () => {
   assert.deepStrictEqual(buf, Buffer.from([1, 2, 3]))
 })
 
-test('send types: ctx.status(201).sendText("ok") => 201', async () => {
+test('send types: ctx.setStatus(201).sendText("ok") => 201', async () => {
   server = await startHttpServer({
     routes: [
       {
         method: 'get',
         path: '/status',
         handler: (ctx) => {
-          ctx.status(201).sendText('ok')
+          ctx.setStatus(201).sendText('ok')
         }
       }
     ]

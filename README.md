@@ -69,7 +69,7 @@ already available:
 onRequest: (ctx) => ({ ok: true })
 
 // Use async only when the handler actually awaits asynchronous work.
-onRequest: async (ctx) => ({ user: await loadUser(ctx.param('id')) })
+onRequest: async (ctx) => ({ user: await loadUser(ctx.getParameter('id')) })
 ```
 
 ### Async Work Before Using the Request Body
@@ -89,15 +89,15 @@ const server = new Server({
     maxBodySize: 16 * 1024 * 1024, // 16 MiB per request
 
     onRequest: async (ctx) => {
-      if (ctx.method() !== 'post') {
+      if (ctx.getMethod() !== 'post') {
         return null
       }
 
-      const token = ctx.header('authorization')
+      const token = ctx.getHeader('authorization')
       const user = await findUserByToken(token)
 
       if (!user) {
-        ctx.status(401)
+        ctx.setStatus(401)
         return { error: 'Unauthorized' }
       }
 
@@ -123,10 +123,10 @@ const server = new Server({
         path: '/users',
         prefetch: true,
         before: async (ctx) => {
-          const user = await findUserByToken(ctx.header('authorization'))
+          const user = await findUserByToken(ctx.getHeader('authorization'))
 
           if (!user) {
-            ctx.status(401).send({ error: 'Unauthorized' })
+            ctx.setStatus(401).send({ error: 'Unauthorized' })
             return
           }
 
@@ -154,9 +154,9 @@ parsed or used until the check succeeds:
 ```javascript
 http: {
   onRequest: async (ctx) => {
-    console.log(`http ${ctx.method()} ${ctx.url()}`)
+    console.log(`http ${ctx.getMethod()} ${ctx.getUrl()}`)
 
-    if (ctx.method() !== 'post') {
+    if (ctx.getMethod() !== 'post') {
       return null // 204 No Content
     }
 
@@ -168,7 +168,7 @@ http: {
     // propagates the error when the user is allowed.
     void dataPromise.catch(() => {})
 
-    const token = ctx.header('authorization')
+    const token = ctx.getHeader('authorization')
     const isBlocked = await checkUserInDatabase(token)
 
     if (isBlocked) {
@@ -178,7 +178,7 @@ http: {
     const data = JSON.parse(await dataPromise)
     console.log({ data })
 
-    ctx.status(404)
+    ctx.setStatus(404)
     return { status: false }
   }
 }
@@ -201,21 +201,21 @@ const server = new Server({
   http: {
     onRequest: async (ctx) => {
       // Simple routing
-      if (ctx.url() === '/' && ctx.method() === 'get') {
+      if (ctx.getUrl() === '/' && ctx.getMethod() === 'get') {
         return { message: 'Welcome to the API' }
       }
 
-      if (ctx.url() === '/users' && ctx.method() === 'get') {
+      if (ctx.getUrl() === '/users' && ctx.getMethod() === 'get') {
         return { users: await getUsers() }
       }
 
-      if (ctx.url() === '/users' && ctx.method() === 'post') {
+      if (ctx.getUrl() === '/users' && ctx.getMethod() === 'post') {
         const data = await ctx.json()
         return await createUser(data)
       }
 
       // 404 Not Found
-      ctx.status(404)
+      ctx.setStatus(404)
       return { error: 'Not found' }
     },
     onError: (ctx, error) => {
@@ -253,7 +253,7 @@ const server = new Server({
         method: 'get',
         path: '/users/:id',
         handler: (ctx) => {
-          const id = ctx.param('id') // or ctx.param(0)
+          const id = ctx.getParameter('id') // or ctx.getParameter(0)
           return getUserById(id)
         }
       },
@@ -269,7 +269,7 @@ const server = new Server({
         method: 'put',
         path: '/users/:id',
         handler: async (ctx) => {
-          const id = ctx.param('id')
+          const id = ctx.getParameter('id')
           const data = await ctx.json()
           return await updateUser(id, data)
         }
@@ -278,7 +278,7 @@ const server = new Server({
         method: 'delete',
         path: '/users/:id',
         handler: (ctx) => {
-          const id = ctx.param('id')
+          const id = ctx.getParameter('id')
           return deleteUser(id)
         }
       }
@@ -769,6 +769,24 @@ console.log(server.connectionCount)
 
 The `ctx` object passed to `http.onRequest` and route handlers:
 
+Request metadata has a transport-style `get*` surface. The original concise
+readers remain supported and share the same per-request cache:
+
+| Transport-style reader      | Concise alias     |
+| --------------------------- | ----------------- |
+| `getIP()`                   | `ip()`            |
+| `getMethod()`               | `method()`        |
+| `getUrl()`                  | `url()`           |
+| `getQuery()`                | `fullQuery()`     |
+| `getQuery(name)`            | `query(name)`     |
+| `getParameter(indexOrName)` | `param(...)`      |
+| `getHeader(name)`           | `header(name)`    |
+| `getHeaders()`              | —                 |
+| `getContentLength()`        | `contentLength()` |
+
+`ctx.getHeader()` reads an incoming request header; `ctx.setHeader()` stages
+an outgoing response header.
+
 #### Properties
 
 | Property      | Type      | Description                    |
@@ -778,27 +796,27 @@ The `ctx` object passed to `http.onRequest` and route handlers:
 
 #### Methods
 
-##### `ctx.method()`
+##### `ctx.getMethod()` / `ctx.method()`
 
 Get request lowercased method.
 
 ```javascript
-const method = ctx.method()
+const method = ctx.getMethod()
 ```
 
 **Returns:** `string`
 
-##### `ctx.url()`
+##### `ctx.getUrl()` / `ctx.url()`
 
 Get request url.
 
 ```javascript
-const url = ctx.url()
+const url = ctx.getUrl()
 ```
 
 **Returns:** `string`
 
-##### `ctx.ip()`
+##### `ctx.getIP()` / `ctx.ip()`
 
 Get network source metadata. A valid PROXY Protocol source address is preferred;
 otherwise the TCP peer address is returned. IPv4-mapped IPv6 is normalized and
@@ -806,12 +824,12 @@ the value is cached only for the current context generation. `X-Forwarded-For`
 is not automatically trusted or parsed.
 
 ```javascript
-const ip = ctx.ip()
+const ip = ctx.getIP()
 ```
 
 **Returns:** `string`
 
-`ctx.ip()` is not authenticated identity. Accept PROXY Protocol only on a
+`ctx.getIP()` is not authenticated identity. Accept PROXY Protocol only on a
 listener reachable exclusively through a trusted ingress or load balancer;
 otherwise a public client can spoof the source address in its PROXY header.
 Authorization, rate limiting, and audit attribution need an explicit proxy
@@ -829,61 +847,76 @@ Internet -> public listener accepting arbitrary PROXY headers
 
 The same trust boundary applies to `ws.onUpgrade(meta).ip()`.
 
-##### `ctx.query(name)`
+##### `ctx.getQuery(name)` / `ctx.query(name)`
 
 Get query parameter value.
 
 ```javascript
-const page = ctx.query('page') // ?page=1
+const page = ctx.getQuery('page') // ?page=1
 ```
 
 **Returns:** `string | undefined` - `undefined` when the parameter is absent
 
-##### `ctx.fullQuery()`
+##### `ctx.getQuery()` / `ctx.fullQuery()`
 
 Get full raw query string.
 
 ```javascript
-const q = ctx.fullQuery() // page=1&limit=20
+const q = ctx.getQuery() // page=1&limit=20
 ```
 
 **Returns:** `string`
 
-##### `ctx.param(indexOrName)`
+##### `ctx.getParameter(indexOrName)` / `ctx.param(indexOrName)`
 
 Get URL parameter by index or name (for pattern matching in the `routes` API).
 
 ```javascript
 // By index
-const id = ctx.param(0) // First parameter
+const id = ctx.getParameter(0) // First parameter
 
 // By name (routes API only)
-const id = ctx.param('id') // /users/:id
+const id = ctx.getParameter('id') // /users/:id
 
 // Multiple parameters
-const userId = ctx.param('userId') // /users/:userId/posts/:postId
-const postId = ctx.param('postId')
+const userId = ctx.getParameter('userId') // /users/:userId/posts/:postId
+const postId = ctx.getParameter('postId')
 ```
 
 **Returns:** `string | undefined` - `undefined` when the parameter is absent
 
-##### `ctx.header(name)`
+##### `ctx.getHeader(name)` / `ctx.header(name)`
 
 Get request header value.
 
 ```javascript
-const auth = ctx.header('authorization')
+const auth = ctx.getHeader('authorization')
 ```
+
+Header names are case-insensitive. A missing header returns an empty string.
 
 **Returns:** `string`
 
-##### `ctx.contentLength()`
+##### `ctx.getHeaders()`
+
+Get a shallow copy of all incoming request headers. Names are lowercase and
+the returned object has a `null` prototype. Mutating it does not affect the
+context's internal request cache.
+
+```javascript
+const headers = ctx.getHeaders()
+const auth = headers.authorization
+```
+
+**Returns:** `Record<string, string>`
+
+##### `ctx.getContentLength()` / `ctx.contentLength()`
 
 Get a valid non-negative `Content-Length` value. Returns `null` when the header
 is absent or invalid.
 
 ```javascript
-const length = ctx.contentLength()
+const length = ctx.getContentLength()
 ```
 
 **Returns:** `number | null`
@@ -939,12 +972,12 @@ const text = await ctx.text()
 
 **Returns:** `Promise<string>`
 
-##### `ctx.status(code)`
+##### `ctx.setStatus(code)` / `ctx.status(code)`
 
 Set response status code. Returns context for chaining.
 
 ```javascript
-ctx.status(201).send({ created: true })
+ctx.setStatus(201).send({ created: true })
 ```
 
 **Returns:** `HttpContext`
@@ -954,7 +987,7 @@ ctx.status(201).send({ created: true })
 Set or replace a staged response header. Header names are case-insensitive. Repeated `setHeader()` calls replace previously staged values for the same header. Null or undefined values are silently ignored.
 
 ```javascript
-ctx.setHeader('x-header-any', 'string-value').status(201).send({ created: true })
+ctx.setHeader('x-header-any', 'string-value').setStatus(201).send({ created: true })
 ```
 
 **Returns:** `HttpContext`
@@ -1306,45 +1339,45 @@ const server = new Server({
     onRequest: async (ctx) => {
       try {
         // GET /users
-        if (ctx.url() === '/users' && ctx.method() === 'get') {
+        if (ctx.getUrl() === '/users' && ctx.getMethod() === 'get') {
           return Array.from(users.values())
         }
 
         // GET /users/:id
-        if (ctx.url().startsWith('/users/') && ctx.method() === 'get') {
-          const id = ctx.url().split('/')[2]
+        if (ctx.getUrl().startsWith('/users/') && ctx.getMethod() === 'get') {
+          const id = ctx.getUrl().split('/')[2]
           const user = users.get(id)
 
           if (!user) {
-            return ctx.status(404).send({ error: 'User not found' })
+            return ctx.setStatus(404).send({ error: 'User not found' })
           }
 
           return user
         }
 
         // POST /users
-        if (ctx.url() === '/users' && ctx.method() === 'post') {
+        if (ctx.getUrl() === '/users' && ctx.getMethod() === 'post') {
           const data = await ctx.json()
 
           if (!data.name || !data.email) {
-            return ctx.status(400).send({ error: 'Missing required fields' })
+            return ctx.setStatus(400).send({ error: 'Missing required fields' })
           }
 
           const user = { id: Date.now().toString(), ...data }
           users.set(user.id, user)
 
-          return ctx.status(201).send(user)
+          return ctx.setStatus(201).send(user)
         }
 
         // 404
-        return ctx.status(404).send({ error: 'Not found' })
+        return ctx.setStatus(404).send({ error: 'Not found' })
       } catch (error) {
         console.error('Route error:', error)
-        return ctx.status(500).send({ error: 'Internal server error' })
+        return ctx.setStatus(500).send({ error: 'Internal server error' })
       }
     },
     onError: (ctx, error) => {
-      console.error(`HTTP Error [${ctx.method()} ${ctx.url()}]:`, error)
+      console.error(`HTTP Error [${ctx.getMethod()} ${ctx.getUrl()}]:`, error)
     }
   }
 })
@@ -1364,20 +1397,20 @@ const server = new Server({
   http: {
     maxBodySize: 10 * 1024 * 1024, // 10 MiB, expressed in bytes
     onRequest: async (ctx) => {
-      if (ctx.url() === '/upload' && ctx.method() === 'post') {
-        const filename = ctx.query('filename') || 'upload.bin'
+      if (ctx.getUrl() === '/upload' && ctx.getMethod() === 'post') {
+        const filename = ctx.getQuery('filename') || 'upload.bin'
         const body = await ctx.body()
 
         await fs.writeFile(`./uploads/${filename}`, body)
 
-        return ctx.status(201).send({
+        return ctx.setStatus(201).send({
           success: true,
           filename,
           size: body.length
         })
       }
 
-      return ctx.status(404).send({ error: 'Not found' })
+      return ctx.setStatus(404).send({ error: 'Not found' })
     }
   }
 })
@@ -1395,11 +1428,11 @@ const server = new Server({
   port: 3000,
   http: {
     onRequest: async (ctx) => {
-      if (ctx.url() === '/download' && ctx.method() === 'get') {
-        const filename = ctx.query('file')
+      if (ctx.getUrl() === '/download' && ctx.getMethod() === 'get') {
+        const filename = ctx.getQuery('file')
 
         if (!filename) {
-          return ctx.status(400).send({ error: 'Missing file parameter' })
+          return ctx.setStatus(400).send({ error: 'Missing file parameter' })
         }
 
         const stream = fs.createReadStream(`./files/${filename}`)
@@ -1412,7 +1445,7 @@ const server = new Server({
         return
       }
 
-      return ctx.status(404).send({ error: 'Not found' })
+      return ctx.setStatus(404).send({ error: 'Not found' })
     }
   }
 })
@@ -1570,7 +1603,9 @@ connections individually.
 ### Graceful Shutdown
 
 ```javascript
-const server = new Server({/* ... */})
+const server = new Server({
+  /* ... */
+})
 await server.listen()
 
 let shutdownPromise
@@ -1604,8 +1639,8 @@ A route may declare `before` — one function or an array — run before its
 
 ```javascript
 const requireAuth = (ctx) => {
-  if (ctx.header('authorization') !== 'Bearer secret') {
-    ctx.status(401).send('Unauthorized') // replying short-circuits the chain
+  if (ctx.getHeader('authorization') !== 'Bearer secret') {
+    ctx.setStatus(401).send('Unauthorized') // replying short-circuits the chain
   }
 }
 
@@ -1751,7 +1786,7 @@ traversal `403`, non-`GET`/`HEAD` `405`.
 const server = new Server({
   http: {
     onRequest: async (ctx) => {
-      if (ctx.url() === '/stream') {
+      if (ctx.getUrl() === '/stream') {
         ctx.startStreaming(200, { 'content-type': 'text/plain' })
 
         for (let i = 0; i < 1000; i++) {

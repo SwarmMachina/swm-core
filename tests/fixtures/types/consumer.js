@@ -20,9 +20,25 @@ import { defineConfig } from '@swarmmachina/swm-core'
  * @param {WebSocketBehavior} behavior
  */
 export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, behavior) {
+  ctx.getIP()
   ctx.ip()
+  ctx.getMethod()
+  ctx.getUrl()
+  ctx.getQuery()
+  ctx.getQuery('page')
+  ctx.getParameter('id')
+  ctx.getHeader('x-test')
+  ctx.getHeaders()
+  ctx.getContentLength()
   ctx.method()
+  ctx.url()
+  ctx.fullQuery()
+  ctx.query('page')
+  ctx.param('id')
   ctx.header('x-test')
+  ctx.contentLength()
+  ctx.setStatus(201)
+  ctx.status(201)
   void ctx.json()
   ws.send('hello')
   ws.subscribe('topic')
@@ -42,6 +58,6 @@ export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, be
 export const jsOptions = defineConfig({
   http: {
     maxBodyBudget: 256 * 1024 * 1024,
-    onRequest: (ctx) => ({ method: ctx.method() })
+    onRequest: (ctx) => ({ method: ctx.getMethod() })
   }
 })

@@ -14,6 +14,14 @@ const READABLE_SURFACE = {
     'buffer',
     'contentLength',
     'fullQuery',
+    'getContentLength',
+    'getHeader',
+    'getHeaders',
+    'getIP',
+    'getMethod',
+    'getParameter',
+    'getQuery',
+    'getUrl',
     'getWriteOffset',
     'header',
     'ip',
@@ -48,7 +56,25 @@ const READABLE_SURFACE = {
   ]
 }
 const CORE_READ_METHODS = {
-  HttpContext: ['contentLength', 'fullQuery', 'getWriteOffset', 'header', 'ip', 'method', 'param', 'query', 'url'],
+  HttpContext: [
+    'contentLength',
+    'fullQuery',
+    'getContentLength',
+    'getHeader',
+    'getHeaders',
+    'getIP',
+    'getMethod',
+    'getParameter',
+    'getQuery',
+    'getUrl',
+    'getWriteOffset',
+    'header',
+    'ip',
+    'method',
+    'param',
+    'query',
+    'url'
+  ],
   WSContext: ['decode'],
   Server: ['activeHttp', 'activeWs', 'connectionCount', 'getConnection', 'getSubscribersCount', 'hasConnection']
 }
@@ -240,6 +266,14 @@ test(
         'aborted',
         'contentLength',
         'fullQuery',
+        'getContentLength',
+        'getHeader',
+        'getHeaders',
+        'getIP',
+        'getMethod',
+        'getParameter',
+        'getQuery',
+        'getUrl',
         'getWriteOffset',
         'header',
         'ip',
@@ -250,21 +284,39 @@ test(
         'url'
       )
 
+      assert.equal(ctx.ip(), ctx.getIP())
+      assert.equal(ctx.method(), ctx.getMethod())
+      assert.equal(ctx.url(), ctx.getUrl())
+      assert.equal(ctx.fullQuery(), ctx.getQuery())
+      assert.equal(ctx.query('one'), ctx.getQuery('one'))
+      assert.equal(ctx.param(0), ctx.getParameter(0))
+      assert.equal(ctx.header('x-contract'), ctx.getHeader('x-contract'))
+      assert.equal(ctx.contentLength(), ctx.getContentLength())
+
+      const headers = ctx.getHeaders()
+      const headerFromSnapshot = headers['x-contract']
+
+      assert.equal(Object.getPrototypeOf(headers), null)
+      assert.equal(Object.hasOwn(headers, 'x-missing'), false)
+      headers['x-contract'] = 'mutated'
+      assert.equal(ctx.getHeader('x-contract'), 'Value')
+
       return {
-        ip: ctx.ip(),
+        ip: ctx.getIP(),
         proxiedPort: ctx.res.getProxiedRemotePort(),
         peerPort: ctx.res.getRemotePort(),
-        method: ctx.method(),
-        url: ctx.url(),
-        fullQuery: ctx.fullQuery(),
-        one: ctx.query('one'),
-        empty: ctx.query('empty'),
-        missing: ctx.query('missing'),
-        paramIndex: ctx.param(0),
-        paramName: ctx.param('name'),
-        header: ctx.header('x-contract'),
-        missingHeader: ctx.header('x-missing'),
-        contentLength: ctx.contentLength(),
+        method: ctx.getMethod(),
+        url: ctx.getUrl(),
+        fullQuery: ctx.getQuery(),
+        one: ctx.getQuery('one'),
+        empty: ctx.getQuery('empty'),
+        missing: ctx.getQuery('missing'),
+        paramIndex: ctx.getParameter(0),
+        paramName: ctx.getParameter('name'),
+        header: ctx.getHeader('x-contract'),
+        headerFromSnapshot,
+        missingHeader: ctx.getHeader('x-missing'),
+        contentLength: ctx.getContentLength(),
         writeOffset: ctx.getWriteOffset(),
         replied: ctx.replied,
         aborted: ctx.aborted
@@ -450,6 +502,7 @@ test(
         assert.equal(sync.paramIndex, 'alice')
         assert.equal(sync.paramName, 'alice')
         assert.equal(sync.header, 'Value')
+        assert.equal(sync.headerFromSnapshot, 'Value')
         assert.equal(sync.missingHeader, '')
         assert.equal(sync.contentLength, payload.length)
         assert.equal(sync.writeOffset, 0)

@@ -425,7 +425,7 @@ export type ServerOptions = CommonServerOptions &
  * const options = defineConfig({
  *   http: {
  *     maxBodyBudget: 256 * 1024 * 1024,
- *     onRequest: (ctx) => ({ ip: ctx.ip() })
+ *     onRequest: (ctx) => ({ ip: ctx.getIP() })
  *   }
  * })
  *
@@ -507,21 +507,39 @@ export interface HttpContext {
    * @remarks Network metadata is not authenticated identity. PROXY-derived
    * values are safe only behind a trusted ingress.
    */
+  getIP(): string
+
+  /** Concise alias for {@link HttpContext.getIP}. */
   ip(): string
 
   /** Returns the lowercase HTTP request method. */
+  getMethod(): string
+
+  /** Concise alias for {@link HttpContext.getMethod}. */
   method(): string
 
   /** Returns the URL path without the query string. */
+  getUrl(): string
+
+  /** Concise alias for {@link HttpContext.getUrl}. */
   url(): string
 
   /** Returns the complete query string without a leading `?`. */
-  fullQuery(): string
+  getQuery(): string
 
   /** Returns the first value for a query key, or `undefined`. */
+  getQuery(name: string): string | undefined
+
+  /** Concise alias for the zero-argument {@link HttpContext.getQuery} overload. */
+  fullQuery(): string
+
+  /** Concise alias for the named {@link HttpContext.getQuery} overload. */
   query(name: string): string | undefined
 
   /** Returns a positional or named route parameter, or `undefined`. */
+  getParameter(indexOrName: number | string): string | undefined
+
+  /** Concise alias for {@link HttpContext.getParameter}. */
   param(indexOrName: number | string): string | undefined
 
   /**
@@ -529,6 +547,17 @@ export interface HttpContext {
    *
    * Header names are case-insensitive. Missing fields return an empty string.
    */
+  getHeader(name: string): string
+
+  /**
+   * Returns a shallow copy of all request headers.
+   *
+   * Header names are lowercase and the returned object has a `null`
+   * prototype.
+   */
+  getHeaders(): Record<string, string>
+
+  /** Concise alias for {@link HttpContext.getHeader}. */
   header(name: string): string
 
   /**
@@ -537,9 +566,15 @@ export interface HttpContext {
    * Invalid, absent, signed, fractional, or unsafe-integer values return
    * `null` and are handled as unknown-length input by body readers.
    */
+  getContentLength(): number | null
+
+  /** Concise alias for {@link HttpContext.getContentLength}. */
   contentLength(): number | null
 
   /** Sets the status code used by the next response helper. */
+  setStatus(code: number): this
+
+  /** Concise alias for {@link HttpContext.setStatus}. */
   status(code: number): this
 
   /**

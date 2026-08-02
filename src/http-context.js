@@ -5,6 +5,8 @@ import { assertHeaderValue, getPreparedHeaders } from './prepared-headers.js'
 import { getRemoteAddress } from './remote-address.js'
 import { DEFAULT_HTTP_MAX_BODY_SIZE_BYTES } from './server/options.js'
 
+const MISSING_HEADER = Symbol('missing-header')
+
 export default class HttpContext {
   #ip = ''
   #ipCached = false
@@ -337,8 +339,8 @@ export default class HttpContext {
       return
     }
 
-    this.method()
-    this.url()
+    this.getMethod()
+    this.getUrl()
     this.cacheQuery()
     this.cacheHeaders()
     this.cacheParams(paramNames)
@@ -350,7 +352,7 @@ export default class HttpContext {
     }
 
     this.req.forEach((key, value) => {
-      this.#headers[key] = value
+      this.#headers[key.toLowerCase()] = value
     })
 
     this.#headersCached = true
@@ -408,7 +410,7 @@ export default class HttpContext {
     this.#fullQueryParsed = true
   }
 
-  ip() {
+  getIP() {
     if (this.#ipCached) {
       return this.#ip
     }
@@ -419,7 +421,11 @@ export default class HttpContext {
     return this.#ip
   }
 
-  method() {
+  ip() {
+    return this.getIP()
+  }
+
+  getMethod() {
     if (!this.req) {
       return ''
     }
@@ -433,7 +439,11 @@ export default class HttpContext {
     return this.#method
   }
 
-  url() {
+  method() {
+    return this.getMethod()
+  }
+
+  getUrl() {
     if (!this.req) {
       return ''
     }
@@ -447,10 +457,19 @@ export default class HttpContext {
     return this.#url
   }
 
+  url() {
+    return this.getUrl()
+  }
+
   /**
-   * @returns {string}
+   * @param {string} [name]
+   * @returns {string|undefined}
    */
-  fullQuery() {
+  getQuery(name) {
+    if (name !== undefined) {
+      return this.#getQueryParameter(name)
+    }
+
     if (this.#fullQueryCached) {
       return this.#fullQuery
     }
@@ -468,11 +487,15 @@ export default class HttpContext {
     return this.#fullQuery
   }
 
+  fullQuery() {
+    return this.getQuery()
+  }
+
   /**
    * @param {string} name
    * @returns {string|undefined}
    */
-  query(name) {
+  #getQueryParameter(name) {
     if (Object.hasOwn(this.#query, name)) {
       return this.#query[name]
     }
@@ -500,11 +523,15 @@ export default class HttpContext {
     return value
   }
 
+  query(name) {
+    return this.getQuery(name)
+  }
+
   /**
    * @param {number|string} i
    * @returns {string|undefined}
    */
-  param(i) {
+  getParameter(i) {
     if (Object.hasOwn(this.#params, i)) {
       return this.#params[i]
     }
@@ -518,6 +545,10 @@ export default class HttpContext {
     this.#params[i] = value
 
     return value
+  }
+
+  param(i) {
+    return this.getParameter(i)
   }
 
   /**
@@ -540,30 +571,55 @@ export default class HttpContext {
    * @param {string} name
    * @returns {string}
    */
-  header(name) {
+  getHeader(name) {
     const headerName = name.toLowerCase()
 
     if (Object.hasOwn(this.#headers, headerName)) {
-      return this.#headers[headerName]
+      const value = this.#headers[headerName]
+
+      return value === MISSING_HEADER ? '' : value
     }
 
     if (this.#headersCached || !this.req) {
       return ''
     }
 
-    const value = this.req.getHeader(headerName)
+    const value = this.req.getHeader(headerName) ?? ''
 
-    this.#headers[headerName] = value
+    this.#headers[headerName] = value === '' ? MISSING_HEADER : value
 
     return value
   }
 
-  contentLength() {
+  /**
+   * @returns {Record<string, string>}
+   */
+  getHeaders() {
+    this.cacheHeaders()
+
+    const headers = Object.create(null)
+
+    for (const name in this.#headers) {
+      const value = this.#headers[name]
+
+      if (value !== MISSING_HEADER) {
+        headers[name] = value
+      }
+    }
+
+    return headers
+  }
+
+  header(name) {
+    return this.getHeader(name)
+  }
+
+  getContentLength() {
     if (this.#contentLength !== undefined) {
       return this.#contentLength
     }
 
-    const clh = this.header('content-length')
+    const clh = this.getHeader('content-length')
 
     if (clh === undefined || clh == null || clh === '') {
       this.#contentLength = null
@@ -590,14 +646,22 @@ export default class HttpContext {
     return this.#contentLength
   }
 
+  contentLength() {
+    return this.getContentLength()
+  }
+
   /**
    * @param {number} code
    * @returns {HttpContext}
    */
-  status(code) {
+  setStatus(code) {
     this.#statusOverride = code
 
     return this
+  }
+
+  status(code) {
+    return this.setStatus(code)
   }
 
   /**
