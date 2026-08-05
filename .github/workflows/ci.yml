@@ -82,7 +82,7 @@ jobs:
         run: |
           ref="${{ inputs.swm_uws_ref }}"
           if [ -z "$ref" ]; then
-            ref="v$(node -p \"require('./package.json').dependencies['@swarmmachina/swm-uws']\")"
+            ref="v$(node -p 'require("./package.json").dependencies["@swarmmachina/swm-uws"]')"
           fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
