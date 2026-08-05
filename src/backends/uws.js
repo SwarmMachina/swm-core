@@ -1,6 +1,6 @@
 let cached = null
 
-const DEFAULT_NATIVE_FAST_PATHS = new Set(['beginWrite', 'collectBody', 'requestPause'])
+const DEFAULT_NATIVE_FAST_PATHS = new Set(['beginWrite', 'collectBody', 'httpTransportConfig', 'requestPrefetch'])
 
 /**
  * @param {Record<string, boolean>} advertised
@@ -29,7 +29,7 @@ function selectCapabilities(advertised) {
 }
 
 /**
- * @returns {Promise<{App: (...args: unknown[]) => object, us_listen_socket_close: (socket: unknown) => void, capabilities: object}>}
+ * @returns {Promise<{App: (...args: unknown[]) => object, RequestPrefetchPlan?: new (options: object) => object, us_listen_socket_close: (socket: unknown) => void, capabilities: object}>}
  */
 export async function load() {
   if (!cached) {
@@ -47,7 +47,12 @@ export async function load() {
     const advertised = typeof mod.capabilities === 'function' ? mod.capabilities() : {}
     const capabilities = selectCapabilities(advertised)
 
-    cached = { App: mod.App, us_listen_socket_close: mod.us_listen_socket_close, capabilities }
+    cached = {
+      App: mod.App,
+      RequestPrefetchPlan: mod.RequestPrefetchPlan,
+      us_listen_socket_close: mod.us_listen_socket_close,
+      capabilities
+    }
   }
 
   return cached

@@ -3,9 +3,12 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { getBindingLockIntegrity, verifyBindingLockIntegrity } from './verify-release.js'
+
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const swmVersion = process.argv[2]
 const upstreamTag = process.argv[3]
+const bindingName = '@swarmmachina/swm-uws'
 
 if (!/^\d+\.\d+\.\d+$/.test(swmVersion || '') || !/^v20\.\d+\.0$/.test(upstreamTag || '')) {
   throw new Error('Usage: node scripts/update-bindings.js <swm-uws-version> <uWebSockets.js-tag>')
@@ -22,6 +25,55 @@ const previousSwmVersion = packageJson.dependencies['@swarmmachina/swm-uws']
 const previousUpstream = packageJson.devDependencies['uwebsockets.js']
 const previousUpstreamTag = /#(v20\.\d+\.0)$/.exec(previousUpstream)?.[1]
 
+/**
+ * @param {string} lockfile
+ * @param {string} version
+ * @param {string} integrity
+ * @returns {string}
+ */
+function addBindingIntegrity(lockfile, version, integrity) {
+  const header = `  '${bindingName}@${version}':`
+  const start = lockfile.indexOf(header)
+
+  if (start === -1) {
+    throw new Error(`pnpm-lock.yaml is missing ${bindingName}@${version}`)
+  }
+
+  const next = lockfile.indexOf("\n  '", start + header.length)
+  const end = next === -1 ? lockfile.length : next
+  const block = lockfile.slice(start, end)
+
+  let updatedBlock
+
+  if (/\n\s+resolution:\s*\{\s*\}/u.test(block)) {
+    updatedBlock = block.replace(/(\n\s+resolution:)\s*\{\s*\}/u, `$1 { integrity: ${integrity} }`)
+  } else if (!/\n\s+resolution:/u.test(block)) {
+    updatedBlock = `${header}\n    resolution: { integrity: ${integrity} }${block.slice(header.length)}`
+  } else {
+    throw new Error(`Cannot safely add registry integrity to ${bindingName}@${version}`)
+  }
+
+  return lockfile.slice(0, start) + updatedBlock + lockfile.slice(end)
+}
+
+/**
+ * @param {string} version
+ * @returns {string}
+ */
+function getPublishedBindingIntegrity(version) {
+  const output = execFileSync('npm', ['view', `${bindingName}@${version}`, 'dist.integrity', '--json'], {
+    cwd: root,
+    encoding: 'utf8'
+  })
+  const integrity = JSON.parse(output)
+
+  if (typeof integrity !== 'string' || !/^sha512-[A-Za-z0-9+/=]+$/u.test(integrity)) {
+    throw new Error(`Registry returned invalid integrity for ${bindingName}@${version}`)
+  }
+
+  return integrity
+}
+
 packageJson.dependencies['@swarmmachina/swm-uws'] = swmVersion
 packageJson.devDependencies['uwebsockets.js'] = `github:uNetworking/uWebSockets.js#${upstreamTag}`
 writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
@@ -35,6 +87,24 @@ try {
     cwd: root,
     stdio: 'inherit'
   })
+
+  const publishedIntegrity = getPublishedBindingIntegrity(swmVersion)
+
+  let nextLock = readFileSync(lockPath, 'utf8')
+
+  const lockedIntegrity = getBindingLockIntegrity({ manifest: packageJson, lockfile: nextLock })
+
+  if (lockedIntegrity === null) {
+    nextLock = addBindingIntegrity(nextLock, swmVersion, publishedIntegrity)
+    writeFileSync(lockPath, nextLock)
+  } else if (lockedIntegrity !== publishedIntegrity) {
+    throw new Error(
+      `Registry integrity mismatch for ${bindingName}@${swmVersion}: lock=${lockedIntegrity}, registry=${publishedIntegrity}`
+    )
+  }
+
+  verifyBindingLockIntegrity({ manifest: packageJson, lockfile: readFileSync(lockPath, 'utf8') })
+
   const [lockedProject] = JSON.parse(
     execFileSync(
       'pnpm',

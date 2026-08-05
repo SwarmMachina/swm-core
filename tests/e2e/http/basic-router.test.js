@@ -64,6 +64,7 @@ test('onRequest mode: POST /echo => 404 {ok:false}', async () => {
 
 test('onRequest mode: req access after async boundary', async () => {
   server = await startHttpServer({
+    prefetchHeaders: ['x-test'],
     onRequest: async (ctx) => {
       if (ctx.url().startsWith('/req-after-await')) {
         await new Promise((resolve) => setTimeout(resolve, 5))

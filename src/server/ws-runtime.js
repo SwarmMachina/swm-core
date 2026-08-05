@@ -152,25 +152,14 @@ export default class WebSocketRuntime {
       return
     }
 
-    let result
-    let error
-    let isAsync = false
-
     try {
-      result = server.onWsOpen(ctx)
-      isAsync = isPromise(result)
+      const result = server.onWsOpen(ctx)
+
+      if (isPromise(result)) {
+        void Promise.resolve(result).catch((err) => server.safeCall(server.onWsError, ctx, err))
+      }
     } catch (err) {
-      error = err
-    }
-
-    if (error) {
-      void server.safeCall(server.onWsError, ctx, error)
-
-      return
-    }
-
-    if (isAsync) {
-      void result.catch((err) => server.safeCall(server.onWsError, ctx, err))
+      void server.safeCall(server.onWsError, ctx, err)
     }
   }
 
@@ -183,25 +172,14 @@ export default class WebSocketRuntime {
     const server = this.#server
     const ctx = this.getWsContext(ws)
 
-    let result
-    let error
-    let isAsync = false
-
     try {
-      result = server.onWsMessage(ctx, message, isBinary)
-      isAsync = isPromise(result)
+      const result = server.onWsMessage(ctx, message, isBinary)
+
+      if (isPromise(result)) {
+        void Promise.resolve(result).catch((err) => server.safeCall(server.onWsError, ctx, err))
+      }
     } catch (err) {
-      error = err
-    }
-
-    if (error) {
-      void server.safeCall(server.onWsError, ctx, error)
-
-      return
-    }
-
-    if (isAsync) {
-      void result.catch((err) => server.safeCall(server.onWsError, ctx, err))
+      void server.safeCall(server.onWsError, ctx, err)
     }
   }
 
@@ -214,25 +192,14 @@ export default class WebSocketRuntime {
     const server = this.#server
     const ctx = this.getWsContext(ws)
 
-    let result
-    let error
-    let isAsync = false
-
     try {
-      result = server.onWsDropped(ctx, message, isBinary)
-      isAsync = isPromise(result)
+      const result = server.onWsDropped(ctx, message, isBinary)
+
+      if (isPromise(result)) {
+        void Promise.resolve(result).catch((err) => server.safeCall(server.onWsError, ctx, err))
+      }
     } catch (err) {
-      error = err
-    }
-
-    if (error) {
-      void server.safeCall(server.onWsError, ctx, error)
-
-      return
-    }
-
-    if (isAsync) {
-      void result.catch((err) => server.safeCall(server.onWsError, ctx, err))
+      void server.safeCall(server.onWsError, ctx, err)
     }
   }
 
@@ -246,25 +213,14 @@ export default class WebSocketRuntime {
     const server = this.#server
     const ctx = this.getWsContext(ws)
 
-    let result
-    let error
-    let isAsync = false
-
     try {
-      result = server.onWsSubscription(ctx, topic, newCount, oldCount)
-      isAsync = isPromise(result)
+      const result = server.onWsSubscription(ctx, topic, newCount, oldCount)
+
+      if (isPromise(result)) {
+        void Promise.resolve(result).catch((err) => server.safeCall(server.onWsError, ctx, err))
+      }
     } catch (err) {
-      error = err
-    }
-
-    if (error) {
-      void server.safeCall(server.onWsError, ctx, error)
-
-      return
-    }
-
-    if (isAsync) {
-      void result.catch((err) => server.safeCall(server.onWsError, ctx, err))
+      void server.safeCall(server.onWsError, ctx, err)
     }
   }
 
@@ -275,25 +231,14 @@ export default class WebSocketRuntime {
     const server = this.#server
     const ctx = this.getWsContext(ws)
 
-    let result
-    let error
-    let isAsync = false
-
     try {
-      result = server.onWsDrain(ctx)
-      isAsync = isPromise(result)
+      const result = server.onWsDrain(ctx)
+
+      if (isPromise(result)) {
+        void Promise.resolve(result).catch((err) => server.safeCall(server.onWsError, ctx, err))
+      }
     } catch (err) {
-      error = err
-    }
-
-    if (error) {
-      void server.safeCall(server.onWsError, ctx, error)
-
-      return
-    }
-
-    if (isAsync) {
-      void result.catch((err) => server.safeCall(server.onWsError, ctx, err))
+      void server.safeCall(server.onWsError, ctx, err)
     }
   }
 
@@ -309,26 +254,19 @@ export default class WebSocketRuntime {
     this.#unregisterConnection(ctx, ws)
 
     let result
-    let error
-    let isAsync = false
 
     try {
       result = server.onWsClose(ctx, code, message)
-      isAsync = isPromise(result)
     } catch (err) {
-      error = err
-    }
-
-    if (error) {
-      void server.safeCall(server.onWsError, ctx, error)
+      void server.safeCall(server.onWsError, ctx, err)
       this.deleteWsContext(ws)
       server.finishShutdownIfNeed()
 
       return
     }
 
-    if (isAsync) {
-      void result
+    if (isPromise(result)) {
+      void Promise.resolve(result)
         .catch((err) => server.safeCall(server.onWsError, ctx, err))
         .finally(() => {
           this.deleteWsContext(ws)
@@ -351,6 +289,8 @@ export default class WebSocketRuntime {
     if (!server.ws) {
       return
     }
+
+    this.#upgradeRuntime.configureHeaderPrefetch(server.ws.prefetchHeaders, server.requestPrefetchPlanClass)
 
     app.ws('/*', {
       idleTimeout: server.wsIdleTimeoutSec,

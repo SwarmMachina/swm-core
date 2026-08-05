@@ -2,7 +2,7 @@ import { deepStrictEqual, throws } from 'node:assert'
 import { describe, test } from 'node:test'
 import { verifyPackedFiles } from '../../scripts/build-release-artifact.js'
 import { isMissingPublishedPackage } from '../../scripts/publish-release-artifact.js'
-import { verifyReleaseMetadata } from '../../scripts/verify-release.js'
+import { verifyBindingLockIntegrity, verifyReleaseMetadata } from '../../scripts/verify-release.js'
 
 const manifest = { name: '@swarmmachina/swm-core', version: '2.0.3', packageManager: 'pnpm@11.3.0' }
 
@@ -21,6 +21,31 @@ describe('release metadata', () => {
 
   test('rejects a missing pnpm version pin', () => {
     throws(() => verifyReleaseMetadata({ manifest: { ...manifest, packageManager: undefined } }), /must pin pnpm/)
+  })
+})
+
+describe('native binding lock', () => {
+  const releaseManifest = {
+    ...manifest,
+    dependencies: { '@swarmmachina/swm-uws': '0.6.0' }
+  }
+
+  test('accepts an exact binding entry with registry integrity', () => {
+    verifyBindingLockIntegrity({
+      manifest: releaseManifest,
+      lockfile: "packages:\n  '@swarmmachina/swm-uws@0.6.0':\n    resolution:\n      { integrity: sha512-YWJjZA== }\n"
+    })
+  })
+
+  test('rejects a prospective binding entry without published integrity', () => {
+    throws(
+      () =>
+        verifyBindingLockIntegrity({
+          manifest: releaseManifest,
+          lockfile: "packages:\n  '@swarmmachina/swm-uws@0.6.0':\n    engines: { node: 22.x || 24.x }\n"
+        }),
+      /missing registry integrity/
+    )
   })
 })
 

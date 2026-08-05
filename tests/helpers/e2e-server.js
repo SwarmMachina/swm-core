@@ -9,6 +9,7 @@ import { getFreePort } from '@swarmmachina/benchkit'
  * @param {number|null} [opt.maxBodyBudget]
  * @param {number} [opt.requestTimeoutMs]
  * @param {boolean} [opt.prefetch]
+ * @param {false|'all'|string[]} [opt.prefetchHeaders]
  * @param {(ctx: import('../../src/http-context.js').default, error: Error) => unknown} [opt.onError]
  * @returns {Promise<{server: Server, port: number, baseUrl: string, close: () => Promise<void>}>}
  */
@@ -19,11 +20,12 @@ export async function startHttpServer({
   maxBodyBudget,
   requestTimeoutMs,
   prefetch,
+  prefetchHeaders,
   onError
 }) {
   const port = await getFreePort()
   const server = new Server({
-    http: { onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs, prefetch, onError },
+    http: { onRequest, routes, maxBodySize, maxBodyBudget, requestTimeoutMs, prefetch, prefetchHeaders, onError },
     port
   })
 

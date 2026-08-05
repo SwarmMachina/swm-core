@@ -1416,7 +1416,11 @@ describe('ResStreamer', () => {
       const res = createMockRes()
       const req = createMockReq()
 
-      ctx.reset(res, req)
+      ctx.reset(res, req, {
+        finalizeHttpContext() {
+          //
+        }
+      })
       streamer.reset(ctx, res)
       res.setWriteResultSequence([true])
 

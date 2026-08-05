@@ -12,11 +12,12 @@ let currentApp = null
 let pendingListenCallback = null
 
 /**
+ * @param {object} [options]
  * @returns {object}
  */
-export function App() {
+export function App(options) {
   if (!currentApp) {
-    currentApp = createMockApp()
+    currentApp = createMockApp(options)
 
     if (pendingListenCallback) {
       currentApp.setListenCallback(pendingListenCallback)
@@ -25,6 +26,25 @@ export function App() {
   }
 
   return currentApp
+}
+
+/** Mock compiled request-prefetch plan. */
+export class RequestPrefetchPlan {
+  constructor({ headers }) {
+    this.headers = headers
+  }
+}
+
+/** @returns {Record<string, boolean>} */
+export function capabilities() {
+  return {
+    beginWrite: true,
+    collectBody: true,
+    httpTransportConfig: true,
+    requestPause: true,
+    requestPrefetch: true,
+    responseBatch: true
+  }
 }
 
 /**

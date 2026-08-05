@@ -84,7 +84,15 @@ export class TargetController {
     const profileDir = await ensureDir(
       path.join(benchDir, 'profiles', `${testName}-${runStamp}`, `run-${runIndex + 1}`, fw)
     )
-    const execArgv = fw === 'core-uwebsockets' || fw === 'raw-uwebsockets' ? ['--conditions=uwebsockets-reference'] : []
+
+    let execArgv = []
+
+    if (fw === 'core-uwebsockets' || fw === 'raw-uwebsockets') {
+      execArgv = ['--conditions=uwebsockets-reference']
+    } else if (fw === 'core-response-batch-off' || fw === 'core-response-batch-on') {
+      execArgv = ['--import', './tests/helpers/register-candidate-binding-loader.js']
+    }
+
     const session = await this.#provider.start({
       entrypoint: `./benchmark/${serverName}`,
       args: ['--fw', fw, '--test', testName],

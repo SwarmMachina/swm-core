@@ -1,7 +1,7 @@
 import { load as loadTransport } from './backends/uws.js'
 import BodyBudget from './body-budget.js'
 import HttpRuntime from './server/http-runtime.js'
-import { NOOP, normalizeHttpOptions, normalizeWsOptions } from './server/options.js'
+import { NOOP, normalizeHttpOptions, normalizeTransportOptions, normalizeWsOptions } from './server/options.js'
 import WebSocketRuntime from './server/ws-runtime.js'
 
 export default class Server {
@@ -19,13 +19,15 @@ export default class Server {
   }
 
   bindingCapabilities = Object.freeze({})
+  requestPrefetchPlanClass = null
 
   /**
    * @param {object} [opt]
-   * @param {{onRequest?: (ctx: import('./http-context.js').default) => unknown|Promise<unknown>, routes?: import('./server/options.js').Route[], onError?: (ctx: import('./http-context.js').default, err: Error) => unknown|Promise<unknown>, prefetch?: boolean, maxBodySize?: number, maxBodyBudget?: number|null, requestTimeoutMs?: number}|null} [opt.http]
+   * @param {{onRequest?: (ctx: import('./http-context.js').default) => unknown|Promise<unknown>, routes?: import('./server/options.js').Route[], onError?: (ctx: import('./http-context.js').default, err: Error) => unknown|Promise<unknown>, prefetch?: boolean, prefetchHeaders?: false|'all'|string[], maxBodySize?: number, maxBodyBudget?: number|null, requestTimeoutMs?: number}|null} [opt.http]
    * @param {(err: Error) => unknown|Promise<unknown>} [opt.onServerError]
    * @param {string} [opt.host]
    * @param {number} [opt.port]
+   * @param {import('./server/options.js').HttpTransportOptions} [opt.transport]
    * @param {import('./server/options.js').WSOptions|null} [opt.ws]
    */
   constructor(opt = {}) {
@@ -51,8 +53,16 @@ export default class Server {
       throw new TypeError('prefetch is no longer a server option; use http.prefetch')
     }
 
-    const { http: httpOptions, onServerError, host = '127.0.0.1', port = 6000, ws: wsOptions } = opt
+    const {
+      http: httpOptions,
+      onServerError,
+      host = '127.0.0.1',
+      port = 6000,
+      transport: transportOptions,
+      ws: wsOptions
+    } = opt
     const http = normalizeHttpOptions(httpOptions)
+    const transport = normalizeTransportOptions(transportOptions)
     const ws = normalizeWsOptions(wsOptions)
 
     if (!http && !ws) {
@@ -74,6 +84,7 @@ export default class Server {
     this.host = host
     this.port = port
     this.http = http
+    this.transport = transport
     this.ws = ws
     this.httpMaxBodyBytes = http?.maxBodySize ?? 0
     this.httpBodyBudget = http && http.maxBodyBudget !== null ? new BodyBudget(http.maxBodyBudget) : null
@@ -107,18 +118,21 @@ export default class Server {
       http: http
         ? Object.freeze({
             prefetch: http.prefetch,
+            prefetchHeaders: http.prefetchHeaders,
             maxBodySize: this.httpMaxBodyBytes,
             maxBodyBudget: http.maxBodyBudget,
             requestTimeoutMs: this.httpRequestTimeoutMs
           })
         : null,
+      transport,
       ws: ws
         ? Object.freeze({
             maxPayloadLength: this.wsMaxPayloadBytes,
             maxBackpressure: this.wsMaxBackpressureBytes,
             closeOnBackpressureLimit: this.wsCloseOnBackpressureLimit,
             idleTimeoutSec: this.wsIdleTimeoutSec,
-            upgradeTimeoutMs: this.wsUpgradeTimeoutMs
+            upgradeTimeoutMs: this.wsUpgradeTimeoutMs,
+            prefetchHeaders: ws.prefetchHeaders
           })
         : null
     })
@@ -215,7 +229,14 @@ export default class Server {
     if (!this.app) {
       this.#backend = await loadTransport()
       this.bindingCapabilities = Object.freeze({ ...(this.#backend.capabilities || {}) })
-      this.app = this.#backend.App()
+      this.requestPrefetchPlanClass =
+        this.bindingCapabilities.requestPrefetch === true ? (this.#backend.RequestPrefetchPlan ?? null) : null
+
+      if (this.transport && this.bindingCapabilities.httpTransportConfig !== true) {
+        throw new Error('transport options require a swm-uws binding with the httpTransportConfig capability')
+      }
+
+      this.app = this.transport ? this.#backend.App({ http: this.transport }) : this.#backend.App()
       this.app.onError?.((err) => void this.safeCall(this.onServerError, err))
 
       this.registerHttp(this.app)

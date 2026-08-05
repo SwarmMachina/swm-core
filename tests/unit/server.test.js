@@ -54,6 +54,8 @@ describe('Server', () => {
       strictEqual(server.effectiveConfig.http.maxBodyBudget, 256 * 1024 * 1024)
       strictEqual(server.httpRequestTimeoutMs, 30_000)
       strictEqual(server.http.prefetch, false)
+      strictEqual(server.http.prefetchHeaders, false)
+      strictEqual(server.transport, null)
       strictEqual(server.ws, null)
       strictEqual(server.wsIdleTimeoutSec, 15)
     })
@@ -94,6 +96,99 @@ describe('Server', () => {
       throws(() => makeServer({ http: { onRequest: () => {}, prefetch: 'yes' } }), {
         name: 'TypeError',
         message: 'http.prefetch must be a boolean'
+      })
+    })
+
+    test('should normalize selective HTTP header prefetch once', () => {
+      const server = makeServer({
+        http: {
+          onRequest: () => {},
+          prefetchHeaders: ['Authorization', 'traceparent', 'AUTHORIZATION']
+        }
+      })
+
+      deepStrictEqual(server.http.prefetchHeaders, ['authorization', 'traceparent'])
+      strictEqual(Object.isFrozen(server.http.prefetchHeaders), true)
+      deepStrictEqual(server.effectiveConfig.http.prefetchHeaders, ['authorization', 'traceparent'])
+    })
+
+    test('should reject invalid HTTP header prefetch configuration', () => {
+      throws(() => makeServer({ http: { onRequest: () => {}, prefetchHeaders: true } }), {
+        name: 'TypeError',
+        message: 'http.prefetchHeaders must be false, "all", or an array of header names'
+      })
+
+      throws(() => makeServer({ http: { onRequest: () => {}, prefetchHeaders: ['bad header'] } }), {
+        name: 'TypeError',
+        message: 'http.prefetchHeaders[0] must be a valid HTTP header name'
+      })
+    })
+
+    test('should validate a per-route body limit against the HTTP ceiling', () => {
+      const server = makeServer({
+        http: {
+          maxBodySize: 1024,
+          routes: [{ method: 'post', path: '/small', maxBodySize: 128, handler: () => {} }]
+        }
+      })
+
+      strictEqual(server.http.routes[0].maxBodySize, 128)
+
+      throws(
+        () =>
+          makeServer({
+            http: {
+              maxBodySize: 1024,
+              routes: [{ method: 'post', path: '/large', maxBodySize: 1025, handler: () => {} }]
+            }
+          }),
+        {
+          name: 'TypeError',
+          message: 'http.routes[0].maxBodySize cannot exceed http.maxBodySize (1024)'
+        }
+      )
+    })
+
+    test('should validate and freeze explicit native transport options', () => {
+      const server = makeServer({
+        onRequest: () => {},
+        transport: {
+          maxHeaderSize: 16 * 1024,
+          maxHeaderCount: 80,
+          headersTimeoutMs: 10_000,
+          keepAliveTimeoutMs: 5_000,
+          bodyIdleTimeoutMs: 10_000,
+          minBodyRateBytesPerSec: null,
+          responseWriteTimeoutMs: 10_000
+        }
+      })
+
+      strictEqual(Object.isFrozen(server.transport), true)
+      strictEqual(server.transport.maxHeaderSize, 16 * 1024)
+      strictEqual(server.transport.minBodyRateBytesPerSec, null)
+      strictEqual(server.effectiveConfig.transport, server.transport)
+    })
+
+    test('should treat an empty native transport policy as omitted', () => {
+      const server = makeServer({ onRequest: () => {}, transport: {} })
+
+      strictEqual(server.transport, null)
+      strictEqual(server.effectiveConfig.transport, null)
+    })
+
+    test('should reject invalid native transport options without coercion', () => {
+      throws(() => makeServer({ onRequest: () => {}, transport: { maxHeaderCount: 101 } }), {
+        name: 'TypeError',
+        message: 'transport.maxHeaderCount must be a positive safe integer no greater than 100'
+      })
+      throws(() => makeServer({ onRequest: () => {}, transport: { headersTimeoutMs: 0 } }), {
+        name: 'TypeError',
+        message: 'transport.headersTimeoutMs must be a positive safe integer no greater than 300000'
+      })
+      throws(() => makeServer({ onRequest: () => {}, transport: { maxHeaderSize: '16384' } }), TypeError)
+      throws(() => makeServer({ onRequest: () => {}, transport: { unknown: 1 } }), {
+        name: 'TypeError',
+        message: 'Unknown transport option: unknown'
       })
     })
 
@@ -419,7 +514,24 @@ describe('Server', () => {
         maxBackpressure: 65_536,
         closeOnBackpressureLimit: true,
         idleTimeoutSec: 15,
-        upgradeTimeoutMs: 10_000
+        upgradeTimeoutMs: 10_000,
+        prefetchHeaders: false
+      })
+    })
+
+    test('should normalize selective WebSocket upgrade header prefetch', () => {
+      const server = makeServer({
+        http: null,
+        ws: { prefetchHeaders: ['Authorization', 'authorization'] }
+      })
+
+      deepStrictEqual(server.ws.prefetchHeaders, ['authorization'])
+      strictEqual(Object.isFrozen(server.ws.prefetchHeaders), true)
+      deepStrictEqual(server.effectiveConfig.ws.prefetchHeaders, ['authorization'])
+
+      throws(() => makeServer({ http: null, ws: { prefetchHeaders: ['bad header'] } }), {
+        name: 'TypeError',
+        message: 'ws.prefetchHeaders[0] must be a valid HTTP header name'
       })
     })
 
@@ -608,6 +720,14 @@ describe('Server', () => {
       strictEqual(typeof mockApp.calls[0].handler, 'function')
       strictEqual(server.socket !== null, true)
       strictEqual(server.app !== null, true)
+      deepStrictEqual(server.bindingCapabilities, {
+        beginWrite: true,
+        collectBody: true,
+        httpTransportConfig: true,
+        requestPause: false,
+        requestPrefetch: true,
+        responseBatch: false
+      })
       deepStrictEqual(
         mockCalls.listen.map(({ host, port }) => ({ host, port })),
         [{ host: '127.0.0.1', port: 7000 }]
@@ -623,6 +743,19 @@ describe('Server', () => {
         mockCalls.listen.map(({ host, port }) => ({ host, port })),
         [{ host: '0.0.0.0', port: 7000 }]
       )
+    })
+
+    test('should pass explicit native transport options to swm-uws App', async () => {
+      const transport = {
+        maxHeaderSize: 16 * 1024,
+        headersTimeoutMs: 10_000,
+        keepAliveTimeoutMs: 5_000
+      }
+      const server = makeServer({ onRequest: () => {}, transport })
+
+      await server.listen()
+
+      deepStrictEqual(getCurrentMockApp().appOptions, { http: transport })
     })
 
     test('should return server instance on successful listen', async () => {
@@ -755,6 +888,222 @@ describe('Server', () => {
       await new Promise((resolve) => setImmediate(resolve))
 
       strictEqual(res.calls.find((call) => call.method === 'end').body, 'ok')
+    })
+
+    test('should enforce a route-specific body limit', async () => {
+      const server = makeServer({
+        http: {
+          maxBodySize: 1024,
+          routes: [
+            {
+              method: 'post',
+              path: '/small',
+              maxBodySize: 1,
+              handler: (ctx) => ctx.body()
+            }
+          ]
+        }
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/small')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setHeader('content-length', '2')
+      routeCall.handler(res, req)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(res.getStatus(), STATUS_TEXT[413])
+    })
+
+    test('should retain only selected HTTP headers without a full header iteration', async () => {
+      const gate = Promise.withResolvers()
+      const server = makeServer({
+        http: {
+          prefetchHeaders: ['authorization'],
+          onRequest: async (ctx) => {
+            await gate.promise
+
+            const headers = ctx.headers
+
+            return {
+              authorization: ctx.getHeader('authorization'),
+              omitted: ctx.getHeader('x-omitted'),
+              headers,
+              stableHeaders: headers === ctx.headers
+            }
+          }
+        }
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/*')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setHeader('authorization', 'Bearer original')
+      req.setHeader('x-omitted', 'not-retained')
+      routeCall.handler(res, req)
+      req.setHeader('authorization', 'Bearer stale')
+      gate.resolve()
+
+      await new Promise((resolve) => setImmediate(resolve))
+
+      const body = JSON.parse(res.calls.find((call) => call.method === 'end').body)
+
+      deepStrictEqual(body, {
+        authorization: 'Bearer original',
+        omitted: '',
+        headers: { authorization: 'Bearer original' },
+        stableHeaders: true
+      })
+      strictEqual(req.calls.filter((call) => call.method === 'prefetch').length, 1)
+      strictEqual(
+        req.calls.some((call) => call.method === 'forEach'),
+        false
+      )
+    })
+
+    test('should make getHeaders collect every field and hydrate the stable headers view', async () => {
+      const server = makeServer({
+        http: {
+          prefetchHeaders: ['authorization'],
+          onRequest: (ctx) => ({
+            prefetched: ctx.headers,
+            all: ctx.getHeaders()
+          })
+        }
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/*')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setHeader('authorization', 'Bearer token')
+      req.setHeader('x-omitted', 'collected explicitly')
+      routeCall.handler(res, req)
+
+      const body = JSON.parse(res.calls.find((call) => call.method === 'end').body)
+
+      deepStrictEqual(body, {
+        prefetched: {
+          authorization: 'Bearer token',
+          'x-omitted': 'collected explicitly'
+        },
+        all: {
+          authorization: 'Bearer token',
+          'x-omitted': 'collected explicitly'
+        }
+      })
+      strictEqual(req.calls.filter((call) => call.method === 'forEach').length, 1)
+    })
+
+    test('should not return partial data from getHeaders after a selective async boundary', async () => {
+      const server = makeServer({
+        http: {
+          prefetchHeaders: ['authorization'],
+          onRequest: async (ctx) => {
+            await Promise.resolve()
+
+            try {
+              ctx.getHeaders()
+            } catch (err) {
+              return err.code
+            }
+          }
+        }
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/*')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setHeader('authorization', 'Bearer token')
+      req.setHeader('x-omitted', 'not retained')
+      routeCall.handler(res, req)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(res.calls.find((call) => call.method === 'end').body, 'REQUEST_HEADERS_NOT_RETAINED')
+      strictEqual(
+        req.calls.some((call) => call.method === 'forEach'),
+        false
+      )
+    })
+
+    test('should make all headers available after await when prefetchHeaders is all', async () => {
+      const server = makeServer({
+        http: {
+          prefetchHeaders: 'all',
+          onRequest: async (ctx) => {
+            await Promise.resolve()
+
+            return ctx.getHeaders()
+          }
+        }
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/*')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setHeader('authorization', 'Bearer token')
+      req.setHeader('x-extra', 'retained')
+      routeCall.handler(res, req)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      deepStrictEqual(JSON.parse(res.calls.find((call) => call.method === 'end').body), {
+        authorization: 'Bearer token',
+        'x-extra': 'retained'
+      })
+      strictEqual(
+        req.calls.some((call) => call.method === 'forEach'),
+        false
+      )
+    })
+
+    test('should let a route disable inherited header prefetch', async () => {
+      const server = makeServer({
+        http: {
+          prefetchHeaders: ['authorization'],
+          routes: [
+            {
+              method: 'get',
+              path: '/x',
+              prefetchHeaders: false,
+              handler: async (ctx) => {
+                await Promise.resolve()
+
+                return ctx.getHeader('authorization')
+              }
+            }
+          ]
+        }
+      })
+
+      await server.listen()
+
+      const routeCall = getCurrentMockApp().calls.find((call) => call.path === '/x')
+      const req = createMockHttpRequest()
+      const res = createMockHttpResponse()
+
+      req.setHeader('authorization', 'Bearer token')
+      routeCall.handler(res, req)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(
+        req.calls.some((call) => call.method === 'prefetch'),
+        false
+      )
+      strictEqual(res.calls.find((call) => call.method === 'end').body, '')
     })
 
     test('should let a route disable inherited HTTP prefetch', async () => {
@@ -1928,7 +2277,7 @@ describe('Server', () => {
       strictEqual(errorErr, error)
     })
 
-    test('should snapshot upgrade metadata before an asynchronous onUpgrade resumes', async () => {
+    test('should capture non-header upgrade metadata and synchronously read headers before async detach', async () => {
       const gate = Promise.withResolvers()
       const userData = { role: 'reader' }
 
@@ -1938,6 +2287,10 @@ describe('Server', () => {
         onRequest: () => {},
         ws: {
           onUpgrade: async (meta) => {
+            const headers = meta.headers
+            const headersBeforeAwait = { ...headers }
+            const headerBeforeAwait = meta.getHeader('x-auth')
+
             await gate.promise
 
             observation = {
@@ -1946,7 +2299,11 @@ describe('Server', () => {
               query: meta.getQuery(),
               one: meta.getQuery('one'),
               missing: meta.getQuery('missing'),
-              header: meta.getHeader('x-auth')
+              header: meta.getHeader('x-auth'),
+              headerBeforeAwait,
+              headersBeforeAwait,
+              headers: { ...headers },
+              stableHeaders: headers === meta.headers
             }
 
             return userData
@@ -1993,17 +2350,114 @@ describe('Server', () => {
         query: 'one=original&empty=',
         one: 'original',
         missing: undefined,
-        header: 'original-token'
+        header: 'original-token',
+        headerBeforeAwait: 'original-token',
+        headersBeforeAwait: {},
+        headers: { 'x-auth': 'original-token' },
+        stableHeaders: true
       })
-      deepStrictEqual(
-        req.calls.filter((call) => call.method === 'snapshot'),
-        [{ method: 'snapshot', paramCount: 1 }]
-      )
+      strictEqual(req.calls.filter((call) => call.method === 'forEach').length, 0)
       strictEqual(upgradeCall !== undefined, true)
       strictEqual(upgradeCall.userData.role, userData.role)
       strictEqual(upgradeCall.secKey, 'sync-key')
       strictEqual(upgradeCall.protocol, 'sync-protocol')
       strictEqual(upgradeCall.extensions, 'sync-extensions')
+    })
+
+    test('should keep upgrade meta.headers empty until named headers are read without prefetch', async () => {
+      let observation
+
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          onUpgrade: (meta) => {
+            const headers = meta.headers
+
+            observation = {
+              before: { ...headers },
+              header: meta.getHeader('x-auth'),
+              after: { ...headers },
+              stableHeaders: headers === meta.headers
+            }
+
+            return {}
+          }
+        }
+      })
+
+      await server.listen()
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      req.setHeader('sec-websocket-key', 'key')
+      req.setHeader('x-auth', 'token')
+      req.setHeader('x-omitted', 'not-read')
+      server.onUpgrade(res, req, {})
+
+      deepStrictEqual(observation, {
+        before: {},
+        header: 'token',
+        after: { 'x-auth': 'token' },
+        stableHeaders: true
+      })
+      strictEqual(req.calls.filter((call) => call.method === 'forEach').length, 0)
+    })
+
+    test('should selectively retain WebSocket upgrade headers without a full header iteration', async () => {
+      const gate = Promise.withResolvers()
+
+      let observation
+
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          prefetchHeaders: ['x-auth'],
+          onUpgrade: async (meta) => {
+            await gate.promise
+
+            observation = {
+              url: meta.url(),
+              auth: meta.getHeader('x-auth'),
+              omitted: meta.getHeader('x-omitted'),
+              headers: { ...meta.headers },
+              stableHeaders: meta.headers === meta.headers
+            }
+
+            return {}
+          }
+        }
+      })
+
+      await server.listen()
+
+      const res = createMockHttpResponse()
+      const req = createMockHttpRequest()
+
+      req.setUrl('/socket')
+      req.setHeader('sec-websocket-key', 'key')
+      req.setHeader('x-auth', 'original')
+      req.setHeader('x-omitted', 'not-retained')
+      server.onUpgrade(res, req, {})
+
+      req.setUrl('/stale')
+      req.setHeader('x-auth', 'stale')
+      gate.resolve()
+      await new Promise((resolve) => setImmediate(resolve))
+
+      deepStrictEqual(observation, {
+        url: '/socket',
+        auth: 'original',
+        omitted: '',
+        headers: { 'x-auth': 'original' },
+        stableHeaders: true
+      })
+      strictEqual(req.calls.filter((call) => call.method === 'prefetch').length, 1)
+      strictEqual(
+        req.calls.some((call) => call.method === 'forEach'),
+        false
+      )
+      strictEqual(res.isUpgraded(), true)
     })
 
     test('should reject an unrequested subprotocol', async () => {
@@ -2511,6 +2965,32 @@ describe('Server', () => {
       server.onMessage(ws, new Uint8Array([1]).buffer, true)
 
       await Promise.resolve()
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(errorCalled, 1)
+    })
+
+    test('onMessage: rejected thenable without catch should call ws.onError', async () => {
+      let errorCalled = 0
+
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          onMessage: () => ({
+            then(resolve, reject) {
+              reject(new Error('x'))
+            }
+          }),
+          onError: () => {
+            errorCalled++
+          }
+        }
+      })
+      const ws = createMockWebSocket()
+
+      server.onOpen(ws)
+      server.onMessage(ws, new Uint8Array([1]).buffer, true)
+
       await new Promise((resolve) => setImmediate(resolve))
 
       strictEqual(errorCalled, 1)

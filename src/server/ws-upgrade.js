@@ -1,53 +1,39 @@
 import { STATUS_TEXT } from '../constants.js'
-import { getRemoteAddress } from '../remote-address.js'
-import { isPromise, parseWsProtocols, validateWsProtocolSelection } from './utils.js'
-
-const UPGRADE_PARAMETER_COUNT = 1
+import { compileHeaderPrefetchPlan, isPromise, parseWsProtocols, validateWsProtocolSelection } from './utils.js'
+import WebSocketUpgradeMeta from './ws-upgrade-meta.js'
 
 export const WS_CONTEXT_DATA = Symbol('swm-core.ws-context-data')
 
 /**
- * @param {import('@swarmmachina/swm-uws').HttpRequest} req
  * @param {import('@swarmmachina/swm-uws').HttpResponse} res
- * @returns {{url: string, ip: string, query: string, headers: Record<string, string>, params: Array<string|undefined>}}
+ * @param {number} [status]
  */
-function snapshotUpgradeRequest(req, res) {
-  let snapshot
-
-  if (typeof req.snapshot === 'function') {
-    snapshot = req.snapshot(UPGRADE_PARAMETER_COUNT)
-  } else {
-    const headers = Object.create(null)
-
-    req.forEach((name, value) => {
-      headers[name.toLowerCase()] = value
-    })
-
-    snapshot = {
-      url: req.getUrl(),
-      query: req.getQuery(),
-      headers,
-      params: [req.getParameter(0)]
-    }
-  }
-
-  return {
-    url: snapshot.url,
-    ip: getRemoteAddress(res),
-    query: snapshot.query,
-    headers: snapshot.headers,
-    params: snapshot.params
-  }
+function rejectUpgrade(res, status = 403) {
+  res.cork(() => {
+    res.writeStatus(STATUS_TEXT[status])
+    res.end()
+  })
 }
 
 export default class WebSocketUpgradeRuntime {
   #server
   #lifecycle
+  #headerSelection = false
+  #headerPlan = null
 
   constructor(server, lifecycle) {
     this.#server = server
     this.#lifecycle = lifecycle
     this.handle = this.handle.bind(this)
+  }
+
+  /**
+   * @param {false|'all'|readonly string[]} selection
+   * @param {(new (options: object) => object)|null|undefined} Plan
+   */
+  configureHeaderPrefetch(selection, Plan) {
+    this.#headerSelection = selection
+    this.#headerPlan = compileHeaderPrefetchPlan(selection, Plan)
   }
 
   /**
@@ -76,10 +62,7 @@ export default class WebSocketUpgradeRuntime {
 
       upgradeData = { ...userData, [WS_CONTEXT_DATA]: userData }
     } catch (err) {
-      res.cork(() => {
-        res.writeStatus(STATUS_TEXT[403])
-        res.end()
-      })
+      rejectUpgrade(res)
       void this.#server.safeCall(this.#server.onWsError, null, err)
 
       return
@@ -112,36 +95,35 @@ export default class WebSocketUpgradeRuntime {
     const secWebSocketProtocol = req.getHeader('sec-websocket-protocol')
     const secWebSocketExtensions = req.getHeader('sec-websocket-extensions')
 
-    let requestSnapshot = null
-    let snapshotQuery = null
+    let prefetchedHeaders = null
 
-    const meta = {
-      url: () => (requestSnapshot ? requestSnapshot.url : req.getUrl()),
-      ip: () => (requestSnapshot ? requestSnapshot.ip : getRemoteAddress(res)),
-      getParameter: (index) => (requestSnapshot ? requestSnapshot.params[index] : req.getParameter(index)),
-      getQuery: (key) => {
-        if (requestSnapshot) {
-          if (key === undefined) {
-            return requestSnapshot.query
-          }
+    const headerSelection = this.#headerSelection
+    const headerPlan = this.#headerPlan
 
-          snapshotQuery ??= new URLSearchParams(requestSnapshot.query)
-
-          const value = snapshotQuery.get(key)
-
-          return value === null ? undefined : value
+    try {
+      if (headerPlan !== null) {
+        if (!req || typeof req.prefetch !== 'function') {
+          throw new Error('swm-uws advertised requestPrefetch but HttpRequest.prefetch is unavailable')
         }
 
-        if (key === undefined) {
-          return req.getQuery()
-        }
+        prefetchedHeaders = req.prefetch(headerPlan)
 
-        return req.getQuery(key)
-      },
-      getHeader: (name) =>
-        requestSnapshot ? (requestSnapshot.headers[name.toLowerCase()] ?? '') : req.getHeader(name),
-      aborted: false
+        if (
+          !prefetchedHeaders ||
+          typeof prefetchedHeaders.getHeader !== 'function' ||
+          typeof prefetchedHeaders.getHeaders !== 'function'
+        ) {
+          throw new Error('swm-uws requestPrefetch did not return an owned header snapshot')
+        }
+      }
+    } catch (err) {
+      rejectUpgrade(res)
+      void server.safeCall(server.onWsError, null, err)
+
+      return
     }
+
+    const meta = new WebSocketUpgradeMeta(req, res, headerSelection, prefetchedHeaders)
 
     let upgradeTimer = null
 
@@ -152,38 +134,25 @@ export default class WebSocketUpgradeRuntime {
     })
 
     let upgradeResult
-    let upgradeError
-    let isAsync = false
 
     try {
       upgradeResult = server.onWsUpgrade(meta)
-      isAsync = isPromise(upgradeResult)
     } catch (err) {
-      upgradeError = err
-    }
-
-    if (upgradeError) {
       if (!meta.aborted) {
-        res.cork(() => {
-          res.writeStatus(STATUS_TEXT[403])
-          res.end()
-        })
-        void server.safeCall(server.onWsError, null, upgradeError)
+        rejectUpgrade(res)
+        void server.safeCall(server.onWsError, null, err)
       }
 
       return
     }
 
-    if (isAsync) {
+    if (isPromise(upgradeResult)) {
       try {
-        requestSnapshot = snapshotUpgradeRequest(req, res)
+        meta.capture()
       } catch (err) {
         void Promise.resolve(upgradeResult).catch(() => {})
 
-        res.cork(() => {
-          res.writeStatus(STATUS_TEXT[403])
-          res.end()
-        })
+        rejectUpgrade(res)
 
         void server.safeCall(server.onWsError, null, err)
 
@@ -199,10 +168,7 @@ export default class WebSocketUpgradeRuntime {
 
         settled = true
         upgradeTimer = null
-        res.cork(() => {
-          res.writeStatus(STATUS_TEXT[408])
-          res.end()
-        })
+        rejectUpgrade(res, 408)
 
         const error = new Error(`WebSocket upgrade timed out after ${server.wsUpgradeTimeoutMs}ms`)
 
@@ -226,10 +192,7 @@ export default class WebSocketUpgradeRuntime {
             return
           }
 
-          res.cork(() => {
-            res.writeStatus(STATUS_TEXT[403])
-            res.end()
-          })
+          rejectUpgrade(res)
         })
         .catch((err) => {
           if (settled || meta.aborted) {
@@ -240,10 +203,7 @@ export default class WebSocketUpgradeRuntime {
           clearTimeout(upgradeTimer)
           upgradeTimer = null
 
-          res.cork(() => {
-            res.writeStatus(STATUS_TEXT[403])
-            res.end()
-          })
+          rejectUpgrade(res)
 
           void server.safeCall(server.onWsError, null, err)
         })
@@ -257,10 +217,7 @@ export default class WebSocketUpgradeRuntime {
       if (result && typeof result === 'object') {
         this.#acceptUpgrade(res, result, secWebSocketKey, secWebSocketProtocol, secWebSocketExtensions, context)
       } else {
-        res.cork(() => {
-          res.writeStatus(STATUS_TEXT[403])
-          res.end()
-        })
+        rejectUpgrade(res)
       }
     }
   }

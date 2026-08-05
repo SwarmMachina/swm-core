@@ -13,12 +13,17 @@ export default class HttpContext {
   #method = ''
   #url = ''
   #headersCached = false
-  #headers = Object.create(null)
+  #headers = null
+  #headersView = null
+  #prefetchHeaders = false
+  #prefetchedHeaders = null
+  #prefetchedHeadersCached = false
+  #requestDetached = false
   #fullQuery = ''
   #fullQueryCached = false
   #fullQueryParsed = false
-  #query = Object.create(null)
-  #params = Object.create(null)
+  #query = null
+  #params = null
   #statusOverride = null
   #contentLength = undefined
   #pendingHeaders = new Map()
@@ -28,10 +33,21 @@ export default class HttpContext {
   #resStreamer = new ResStreamer()
   #requestTimeout = null
 
-  body = (maxSize) => this.#bodyParser.body(maxSize)
-  buffer = (maxSize) => this.#bodyParser.buffer(maxSize)
-  text = (maxSize) => this.#bodyParser.text(maxSize)
-  json = (maxSize) => this.#bodyParser.json(maxSize)
+  body(maxSize) {
+    return this.#bodyParser.body(maxSize)
+  }
+
+  buffer(maxSize) {
+    return this.#bodyParser.buffer(maxSize)
+  }
+
+  text(maxSize) {
+    return this.#bodyParser.text(maxSize)
+  }
+
+  json(maxSize) {
+    return this.#bodyParser.json(maxSize)
+  }
 
   prefetchBody() {
     return this.#bodyParser.prefetch()
@@ -180,6 +196,28 @@ export default class HttpContext {
     this.onWritableCallback = null
   }
 
+  #resetRequestState() {
+    this.#statusOverride = null
+    this.#contentLength = undefined
+    this.#pendingHeaders.clear()
+    this.#ip = ''
+    this.#ipCached = false
+    this.#url = ''
+    this.#method = ''
+    this.#headersCached = false
+    this.#headers = null
+    this.#headersView = null
+    this.#prefetchHeaders = false
+    this.#prefetchedHeaders = null
+    this.#prefetchedHeadersCached = false
+    this.#requestDetached = false
+    this.#fullQuery = ''
+    this.#fullQueryCached = false
+    this.#fullQueryParsed = false
+    this.#query = null
+    this.#params = null
+  }
+
   /**
    * @param {import('@swarmmachina/swm-uws').HttpResponse} res
    * @param {import('@swarmmachina/swm-uws').HttpRequest} req
@@ -191,20 +229,7 @@ export default class HttpContext {
     this.stopRequestTimeout()
 
     if (!this.#cleared) {
-      this.#statusOverride = null
-      this.#contentLength = undefined
-      this.#pendingHeaders.clear()
-      this.#ip = ''
-      this.#ipCached = false
-      this.#url = ''
-      this.#method = ''
-      this.#headersCached = false
-      this.#headers = Object.create(null)
-      this.#fullQuery = ''
-      this.#fullQueryCached = false
-      this.#fullQueryParsed = false
-      this.#query = Object.create(null)
-      this.#params = Object.create(null)
+      this.#resetRequestState()
     }
 
     this.#cleared = false
@@ -256,20 +281,7 @@ export default class HttpContext {
     this.#responseBatch = false
 
     if (!this.#cleared) {
-      this.#statusOverride = null
-      this.#contentLength = undefined
-      this.#pendingHeaders.clear()
-      this.#ip = ''
-      this.#ipCached = false
-      this.#url = ''
-      this.#method = ''
-      this.#headersCached = false
-      this.#headers = Object.create(null)
-      this.#fullQuery = ''
-      this.#fullQueryCached = false
-      this.#fullQueryParsed = false
-      this.#query = Object.create(null)
-      this.#params = Object.create(null)
+      this.#resetRequestState()
 
       this.#bodyParser.clear()
       this.#resStreamer.clear()
@@ -309,53 +321,111 @@ export default class HttpContext {
   }
 
   /**
-   * Preserve request metadata before the native request object expires. Newer
-   * bindings can materialize it in one crossing; older backends keep the
-   * compatibility path.
+   * Retain the configured request headers while the native request is still attached.
+   * @param {false|'all'|readonly string[]} selection
+   * @param {object|null} plan
+   */
+  attachPrefetchedHeaders(selection, plan) {
+    this.#prefetchHeaders = selection
+
+    if (plan === null) {
+      return
+    }
+
+    if (!this.req || typeof this.req.prefetch !== 'function') {
+      throw new Error('swm-uws advertised requestPrefetch but HttpRequest.prefetch is unavailable')
+    }
+
+    const retained = this.req.prefetch(plan)
+
+    if (!retained || typeof retained.getHeader !== 'function' || typeof retained.getHeaders !== 'function') {
+      throw new Error('swm-uws requestPrefetch did not return an owned header snapshot')
+    }
+
+    this.#prefetchedHeaders = retained
+  }
+
+  /**
+   * @param {string} name
+   * @returns {boolean}
+   */
+  #isHeaderPrefetched(name) {
+    return (
+      this.#prefetchHeaders === 'all' || (Array.isArray(this.#prefetchHeaders) && this.#prefetchHeaders.includes(name))
+    )
+  }
+
+  /**
+   * @param {string} name
+   * @param {string|symbol} value
+   */
+  #storeHeader(name, value) {
+    const headers = (this.#headers ??= Object.create(null))
+
+    headers[name] = value
+
+    if (!this.#headersView) {
+      return
+    }
+
+    if (value === MISSING_HEADER) {
+      delete this.#headersView[name]
+    } else {
+      this.#headersView[name] = value
+    }
+  }
+
+  /**
+   * Preserve non-header request metadata before the native request object
+   * expires. Headers remain lazy unless the configured native prefetch plan
+   * retained them or application code read them synchronously.
    * @param {string[]} [paramNames]
    */
   cacheRequest(paramNames) {
-    const canSnapshot = this.server?.bindingCapabilities?.requestSnapshot === true
+    this.getMethod()
+    this.getUrl()
+    this.cacheQuery()
+    this.cacheParams(paramNames)
+    this.#requestDetached = true
+  }
 
-    if (canSnapshot && this.req && typeof this.req.snapshot === 'function') {
-      const names = paramNames || []
-      const snapshot = this.req.snapshot(names.length)
+  cacheHeaders() {
+    if (this.#headersCached) {
+      return
+    }
 
-      this.#method = typeof snapshot?.method === 'string' ? snapshot.method : ''
-      this.#url = typeof snapshot?.url === 'string' ? snapshot.url : ''
-      this.#fullQuery = typeof snapshot?.query === 'string' ? snapshot.query : ''
-      this.#fullQueryCached = true
-      this.#fullQueryParsed = false
-      this.#headers = snapshot?.headers || Object.create(null)
+    if (this.#prefetchHeaders === 'all') {
+      this.#cachePrefetchedHeaders()
       this.#headersCached = true
-
-      const values = Array.isArray(snapshot?.params) ? snapshot.params : []
-
-      for (let i = 0; i < names.length; i++) {
-        this.#params[i] = values[i]
-        this.#params[names[i]] = values[i]
-      }
 
       return
     }
 
-    this.getMethod()
-    this.getUrl()
-    this.cacheQuery()
-    this.cacheHeaders()
-    this.cacheParams(paramNames)
-  }
-
-  cacheHeaders() {
-    if (this.#headersCached || !this.req) {
+    if (this.#requestDetached || !this.req) {
       return
     }
 
     this.req.forEach((key, value) => {
-      this.#headers[key.toLowerCase()] = value
+      this.#storeHeader(key.toLowerCase(), value)
     })
 
     this.#headersCached = true
+  }
+
+  #cachePrefetchedHeaders() {
+    if (this.#prefetchedHeadersCached) {
+      return
+    }
+
+    const prefetched = this.#prefetchedHeaders?.getHeaders?.()
+
+    if (prefetched && typeof prefetched === 'object') {
+      for (const name in prefetched) {
+        this.#storeHeader(name.toLowerCase(), prefetched[name])
+      }
+    }
+
+    this.#prefetchedHeadersCached = true
   }
 
   cacheQuery() {
@@ -383,6 +453,13 @@ export default class HttpContext {
       return
     }
 
+    let query = this.#query
+
+    if (!query) {
+      query = Object.create(null)
+      this.#query = query
+    }
+
     let start = 0
 
     while (start <= fullQuery.length) {
@@ -396,8 +473,8 @@ export default class HttpContext {
       const hasEq = eq !== -1 && eq < end
       const key = hasEq ? fullQuery.slice(start, eq) : fullQuery.slice(start, end)
 
-      if (!Object.hasOwn(this.#query, key)) {
-        this.#query[key] = hasEq ? fullQuery.slice(eq + 1, end) : ''
+      if (!Object.hasOwn(query, key)) {
+        query[key] = hasEq ? fullQuery.slice(eq + 1, end) : ''
       }
 
       if (end === fullQuery.length) {
@@ -496,18 +573,26 @@ export default class HttpContext {
    * @returns {string|undefined}
    */
   #getQueryParameter(name) {
-    if (Object.hasOwn(this.#query, name)) {
-      return this.#query[name]
+    let query = this.#query
+
+    if (query && Object.hasOwn(query, name)) {
+      return query[name]
     }
 
     if (this.#fullQueryCached) {
       this.#parseFullQuery()
+      query = this.#query
 
-      if (Object.hasOwn(this.#query, name)) {
-        return this.#query[name]
+      if (query && Object.hasOwn(query, name)) {
+        return query[name]
       }
 
-      this.#query[name] = undefined
+      if (!query) {
+        query = Object.create(null)
+        this.#query = query
+      }
+
+      query[name] = undefined
 
       return undefined
     }
@@ -518,7 +603,12 @@ export default class HttpContext {
 
     const value = this.req.getQuery(name)
 
-    this.#query[name] = value
+    if (!query) {
+      query = Object.create(null)
+      this.#query = query
+    }
+
+    query[name] = value
 
     return value
   }
@@ -532,8 +622,10 @@ export default class HttpContext {
    * @returns {string|undefined}
    */
   getParameter(i) {
-    if (Object.hasOwn(this.#params, i)) {
-      return this.#params[i]
+    let params = this.#params
+
+    if (params && Object.hasOwn(params, i)) {
+      return params[i]
     }
 
     if (!this.req) {
@@ -542,7 +634,12 @@ export default class HttpContext {
 
     const value = this.req.getParameter(i)
 
-    this.#params[i] = value
+    if (!params) {
+      params = Object.create(null)
+      this.#params = params
+    }
+
+    params[i] = value
 
     return value
   }
@@ -555,15 +652,17 @@ export default class HttpContext {
    * @param {string[]} [names]
    */
   cacheParams(names) {
-    if (!names || !this.req) {
+    if (!names || names.length === 0 || !this.req) {
       return
     }
+
+    const params = (this.#params ??= Object.create(null))
 
     for (let i = 0; i < names.length; i++) {
       const value = this.req.getParameter(i)
 
-      this.#params[i] = value
-      this.#params[names[i]] = value
+      params[i] = value
+      params[names[i]] = value
     }
   }
 
@@ -573,37 +672,97 @@ export default class HttpContext {
    */
   getHeader(name) {
     const headerName = name.toLowerCase()
+    const headers = this.#headers
 
-    if (Object.hasOwn(this.#headers, headerName)) {
-      const value = this.#headers[headerName]
+    if (headers && Object.hasOwn(headers, headerName)) {
+      const value = headers[headerName]
 
       return value === MISSING_HEADER ? '' : value
     }
 
-    if (this.#headersCached || !this.req) {
+    if (this.#isHeaderPrefetched(headerName)) {
+      const value = this.#prefetchedHeaders?.getHeader?.(headerName)
+
+      this.#storeHeader(headerName, value === undefined ? MISSING_HEADER : value)
+
+      return value ?? ''
+    }
+
+    if (this.#headersCached || this.#requestDetached || !this.req) {
       return ''
     }
 
     const value = this.req.getHeader(headerName) ?? ''
 
-    this.#headers[headerName] = value === '' ? MISSING_HEADER : value
+    this.#storeHeader(headerName, value === '' ? MISSING_HEADER : value)
 
     return value
   }
 
   /**
+   * Lazily materialized stable view of retained and already-read headers.
+   * Accessing this property never enumerates the native request.
+   * @returns {Record<string, string>}
+   */
+  get headers() {
+    if (this.#headersView) {
+      return this.#headersView
+    }
+
+    if (this.#prefetchHeaders !== false) {
+      this.#cachePrefetchedHeaders()
+    }
+
+    const headers = Object.create(null)
+    const cachedHeaders = this.#headers
+
+    if (cachedHeaders) {
+      for (const name in cachedHeaders) {
+        const value = cachedHeaders[name]
+
+        if (value !== MISSING_HEADER) {
+          headers[name] = value
+        }
+      }
+    }
+
+    this.#headersView = headers
+
+    return headers
+  }
+
+  /**
+   * Materialize a complete header collection. Selective prefetch intentionally
+   * cannot satisfy this operation after the native request has detached.
    * @returns {Record<string, string>}
    */
   getHeaders() {
     this.cacheHeaders()
 
+    if (!this.#headersCached) {
+      if (!this.#requestDetached && !this.req) {
+        return Object.create(null)
+      }
+
+      const error = new Error(
+        'All request headers are unavailable after the async boundary; use prefetchHeaders: "all" or call getHeaders() synchronously'
+      )
+
+      error.code = 'REQUEST_HEADERS_NOT_RETAINED'
+
+      throw error
+    }
+
     const headers = Object.create(null)
+    const cachedHeaders = this.#headers
 
-    for (const name in this.#headers) {
-      const value = this.#headers[name]
+    if (cachedHeaders) {
+      for (const name in cachedHeaders) {
+        const value = cachedHeaders[name]
 
-      if (value !== MISSING_HEADER) {
-        headers[name] = value
+        if (value !== MISSING_HEADER) {
+          headers[name] = value
+        }
       }
     }
 
@@ -621,7 +780,7 @@ export default class HttpContext {
 
     const clh = this.getHeader('content-length')
 
-    if (clh === undefined || clh == null || clh === '') {
+    if (clh === '') {
       this.#contentLength = null
 
       return this.#contentLength
@@ -978,7 +1137,7 @@ export default class HttpContext {
    * @returns {void}
    */
   sendError(error) {
-    if (isFinite(error?.status)) {
+    if (Number.isFinite(error?.status)) {
       return this.reply(error.status, TEXT_PLAIN_HEADER, error.message)
     }
 
@@ -1116,13 +1275,7 @@ export default class HttpContext {
       throw new Error('Must call startStreaming() before tryEnd()')
     }
 
-    const [ok, done] = this.#resStreamer.tryEnd(chunk, totalSize)
-
-    if (done) {
-      this.streaming = false
-    }
-
-    return [ok, done]
+    return this.#resStreamer.tryEnd(chunk, totalSize)
   }
 
   /**
@@ -1137,7 +1290,6 @@ export default class HttpContext {
       throw new Error('Must call startStreaming() before end()')
     }
 
-    this.streaming = false
     this.#resStreamer.end(chunk)
   }
 

@@ -356,6 +356,7 @@ new Server(options)
 | --------------- | --------------- | ------------- | ----------------------------------------------- |
 | `http`          | `Object`/`null` | `null`        | HTTP application configuration (see below)      |
 | `ws`            | `Object`/`null` | `null`        | WebSocket application configuration (see below) |
+| `transport`     | `Object`/`null` | `null`        | Explicit native HTTP parser/connection policy   |
 | `onServerError` | `Function`      | `() => {}`    | Post-listen transport error handler             |
 | `host`          | `String`        | `'127.0.0.1'` | Address or hostname to bind                     |
 | `port`          | `Number`        | `6000`        | Server port (1-65535)                           |
@@ -374,18 +375,65 @@ a fixed `404` without allocating an `HttpContext`.
 
 **HTTP Options (`http` object):**
 
-| Option             | Type            | Default     | Description                                                          |
-| ------------------ | --------------- | ----------- | -------------------------------------------------------------------- |
-| `maxBodySize`      | `Number`        | `1048576`   | Maximum HTTP request body size in bytes (1 MiB default, 64 MiB max). |
-| `maxBodyBudget`    | `Number`/`null` | `268435456` | Aggregate retained/in-flight body-memory budget in bytes (256 MiB).  |
-| `requestTimeoutMs` | `Number`        | `30000`     | Async handler timeout in ms (100-300000); explicit `0` disables it.  |
-| `prefetch`         | `Boolean`       | `false`     | Collect request bodies before user handlers run.                     |
-| `onRequest`        | `Function`      | default 404 | Universal request handler `(ctx) => any`                             |
-| `routes`           | `Array`         | default 404 | Declarative route definitions                                        |
-| `onError`          | `Function`      | `() => {}`  | Request error handler `(ctx, error) => void`                         |
+| Option             | Type                       | Default     | Description                                                          |
+| ------------------ | -------------------------- | ----------- | -------------------------------------------------------------------- |
+| `maxBodySize`      | `Number`                   | `1048576`   | Maximum HTTP request body size in bytes (1 MiB default, 64 MiB max). |
+| `maxBodyBudget`    | `Number`/`null`            | `268435456` | Aggregate retained/in-flight body-memory budget in bytes (256 MiB).  |
+| `requestTimeoutMs` | `Number`                   | `30000`     | Async handler timeout in ms (100-300000); explicit `0` disables it.  |
+| `prefetch`         | `Boolean`                  | `false`     | Collect request bodies before user handlers run.                     |
+| `prefetchHeaders`  | `false`/`'all'`/`String[]` | omitted     | Retain selected request headers before handlers run.                 |
+| `onRequest`        | `Function`                 | default 404 | Universal request handler `(ctx) => any`                             |
+| `routes`           | `Array`                    | default 404 | Declarative route definitions                                        |
+| `onError`          | `Function`                 | `() => {}`  | Request error handler `(ctx, error) => void`                         |
 
 `http.onRequest` and `http.routes` are mutually exclusive. `http: {}` enables
 HTTP with a deterministic default `404` response.
+
+`prefetchHeaders` is independent from body `prefetch`. A string list is
+normalized once and retains only those fields in native-owned storage. `false`
+explicitly retains none and `'all'` retains every field. When the option is
+omitted, no headers are retained automatically. Fields remain readable
+synchronously and successful reads populate `ctx.headers`, but they are
+unavailable after the native callback returns unless read and cached before
+detach. Use a selective list for the usual async case and `'all'` only when the
+complete set is actually required after an `await`.
+
+`ctx.headers` is a stable view of headers already retained or read. Accessing it
+does not enumerate the native request: without header prefetch it starts empty,
+and each successful `ctx.getHeader(name)` adds that field. `ctx.getHeaders()`
+collects the complete set and fills the same view.
+
+```javascript
+new Server({
+  http: {
+    prefetchHeaders: ['authorization', 'traceparent'],
+    onRequest: async (ctx) => {
+      await authorize(ctx.headers.authorization)
+      return { trace: ctx.headers.traceparent }
+    }
+  }
+})
+```
+
+The native binding capability is checked during `listen()`. Configuration
+fails instead of silently falling back to a full JavaScript header scan.
+
+**Native HTTP transport options (`transport` object):**
+
+| Option                   | Type            | Description                                      |
+| ------------------------ | --------------- | ------------------------------------------------ |
+| `maxHeaderSize`          | `Number`        | Request line plus all request headers, in bytes. |
+| `maxHeaderCount`         | `Number`        | Maximum number of request header fields.         |
+| `headersTimeoutMs`       | `Number`        | Deadline for receiving a complete request head.  |
+| `keepAliveTimeoutMs`     | `Number`        | Idle wait for the next keep-alive request.       |
+| `bodyIdleTimeoutMs`      | `Number`        | Idle timeout while receiving request body bytes. |
+| `minBodyRateBytesPerSec` | `Number`/`null` | Minimum body receive rate; `null` disables it.   |
+| `responseWriteTimeoutMs` | `Number`        | Timeout for outbound backpressure stalls.        |
+
+Only explicitly configured values are passed to `swm-uws`; binding defaults
+remain binding-owned. Transport values are positive safe integers, timeout
+values are capped at 300000 ms, and `maxHeaderCount` is capped at the native
+capacity of 100.
 
 `http.maxBodySize` and `ws.maxPayloadLength` are independent. Changing one does
 not change the limit for the other protocol.
@@ -544,36 +592,49 @@ connection, and ignores late results. It does not cancel application work; use
 
 **Route Definition (for `routes` array):**
 
-| Property   | Type               | Description                                                                                              |
-| ---------- | ------------------ | -------------------------------------------------------------------------------------------------------- |
-| `method`   | `String`           | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'`   |
-| `path`     | `String`           | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                               |
-| `handler`  | `Function`         | Handler function `(ctx) => any \| Promise<any>`                                                          |
-| `before`   | `Function`/`Array` | Optional. One function or an array, run before `handler` (see [Route before hooks](#route-before-hooks)) |
-| `prefetch` | `Boolean`          | Optional route override. `true` enables prefetch, `false` forces lazy, omitted inherits `http.prefetch`  |
+| Property          | Type                       | Description                                                                                              |
+| ----------------- | -------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `method`          | `String`                   | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'`   |
+| `path`            | `String`                   | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                               |
+| `handler`         | `Function`                 | Handler function `(ctx) => any \| Promise<any>`                                                          |
+| `before`          | `Function`/`Array`         | Optional. One function or an array, run before `handler` (see [Route before hooks](#route-before-hooks)) |
+| `prefetch`        | `Boolean`                  | Optional route body-prefetch override. Omitted inherits `http.prefetch`.                                 |
+| `prefetchHeaders` | `false`/`'all'`/`String[]` | Optional header-retention override. Omitted inherits `http.prefetchHeaders`.                             |
+| `maxBodySize`     | `Number`                   | Optional route body limit in bytes; cannot exceed `http.maxBodySize`.                                    |
 
 **WebSocket Options (`ws` object):**
 
-| Option                     | Type       | Default                                  | Description                                                                                                                                                                                                                                                              |
-| -------------------------- | ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `maxPayloadLength`         | `Number`   | `1048576`                                | Maximum bytes in one incoming WebSocket message (1 MiB default, 64 MiB max).                                                                                                                                                                                             |
-| `maxBackpressure`          | `Number`   | `65536`                                  | Maximum permitted outgoing backpressure in bytes per WebSocket.                                                                                                                                                                                                          |
-| `closeOnBackpressureLimit` | `Boolean`  | `true`                                   | Close a slow WebSocket when an outgoing message is dropped at the backpressure limit.                                                                                                                                                                                    |
-| `idleTimeoutSec`           | `Number`   | `15`                                     | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
-| `upgradeTimeoutMs`         | `Number`   | `10000`                                  | Deadline for an asynchronous `onUpgrade` decision in milliseconds (0-300000). `0` schedules a zero-delay timeout; it does not disable the deadline.                                                                                                                      |
-| `onOpen`                   | `Function` | `(ctx) => {}`                            | Called when client connects.                                                                                                                                                                                                                                             |
-| `onMessage`                | `Function` | `(ctx, message, isBinary) => {}`         | Called when message received.                                                                                                                                                                                                                                            |
-| `onDropped`                | `Function` | `(ctx, message, isBinary) => {}`         | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
-| `onClose`                  | `Function` | `(ctx, code, message) => {}`             | Called when client disconnects.                                                                                                                                                                                                                                          |
-| `onDrain`                  | `Function` | `(ctx) => {}`                            | Called when socket is writable again.                                                                                                                                                                                                                                    |
-| `onError`                  | `Function` | `(ctx, error) => {}`                     | Called on WebSocket error.                                                                                                                                                                                                                                               |
-| `onUpgrade`                | `Function` | **required**                             | Authorize the upgrade. Return `null` to reject with `403`, or a flat object to accept; that exact object becomes `ctx.data`. Async handlers can safely use `meta` after an `await`.                                                                                      |
-| `selectProtocol`           | `Function` | `undefined`                              | Optional synchronous `(requested, userData) => string \| undefined` subprotocol selector. The returned token must be present in the client-requested list.                                                                                                               |
-| `onSubscription`           | `Function` | `(ctx, topic, newCount, oldCount) => {}` | Called on topic subscription change.                                                                                                                                                                                                                                     |
-| `connectionKey`            | `Function` | `undefined`                              | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
+| Option                     | Type                       | Default                                  | Description                                                                                                                                                                                                                                                              |
+| -------------------------- | -------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxPayloadLength`         | `Number`                   | `1048576`                                | Maximum bytes in one incoming WebSocket message (1 MiB default, 64 MiB max).                                                                                                                                                                                             |
+| `maxBackpressure`          | `Number`                   | `65536`                                  | Maximum permitted outgoing backpressure in bytes per WebSocket.                                                                                                                                                                                                          |
+| `closeOnBackpressureLimit` | `Boolean`                  | `true`                                   | Close a slow WebSocket when an outgoing message is dropped at the backpressure limit.                                                                                                                                                                                    |
+| `idleTimeoutSec`           | `Number`                   | `15`                                     | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
+| `upgradeTimeoutMs`         | `Number`                   | `10000`                                  | Deadline for an asynchronous `onUpgrade` decision in milliseconds (0-300000). `0` schedules a zero-delay timeout; it does not disable the deadline.                                                                                                                      |
+| `prefetchHeaders`          | `false`/`'all'`/`String[]` | omitted                                  | Retain selected HTTP upgrade headers for asynchronous `onUpgrade` authorization.                                                                                                                                                                                         |
+| `onOpen`                   | `Function`                 | `(ctx) => {}`                            | Called when client connects.                                                                                                                                                                                                                                             |
+| `onMessage`                | `Function`                 | `(ctx, message, isBinary) => {}`         | Called when message received.                                                                                                                                                                                                                                            |
+| `onDropped`                | `Function`                 | `(ctx, message, isBinary) => {}`         | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
+| `onClose`                  | `Function`                 | `(ctx, code, message) => {}`             | Called when client disconnects.                                                                                                                                                                                                                                          |
+| `onDrain`                  | `Function`                 | `(ctx) => {}`                            | Called when socket is writable again.                                                                                                                                                                                                                                    |
+| `onError`                  | `Function`                 | `(ctx, error) => {}`                     | Called on WebSocket error.                                                                                                                                                                                                                                               |
+| `onUpgrade`                | `Function`                 | **required**                             | Authorize the upgrade. Return `null` to reject with `403`, or a flat object to accept; that exact object becomes `ctx.data`. Async handlers can safely use `meta` after an `await`.                                                                                      |
+| `selectProtocol`           | `Function`                 | `undefined`                              | Optional synchronous `(requested, userData) => string \| undefined` subprotocol selector. The returned token must be present in the client-requested list.                                                                                                               |
+| `onSubscription`           | `Function`                 | `(ctx, topic, newCount, oldCount) => {}` | Called on topic subscription change.                                                                                                                                                                                                                                     |
+| `connectionKey`            | `Function`                 | `undefined`                              | Opt-in. `(ctx) => string \| number \| null`. Derive a stable key (e.g. a user id) so the connection can be addressed via [`server.sendTo()`](#serversendtokey-message-isbinary). Computed once in `onOpen`; return nullish to skip. Unset = no registry (zero overhead). |
 
 `ws.onUpgrade` is required. Use `onUpgrade: () => ({})` only for intentionally
 anonymous endpoints; use `ws: null` to disable WebSocket.
+
+`ws.prefetchHeaders` runs on the HTTP request before `onUpgrade` is called, so
+the selected fields remain available from `meta.headers` and
+`meta.getHeader()` after an `await`. Without prefetch, `meta.headers` starts
+empty and is populated by successful `meta.getHeader(name)` calls without
+enumerating the native request. Those reads must happen synchronously to remain
+available after detach. Fields outside a selective list are available only
+during the synchronous part of `onUpgrade`. The protocol-required `sec-websocket-key`,
+`sec-websocket-protocol`, and `sec-websocket-extensions` fields are captured
+directly by swm-core and do not need to be included in the list.
 
 ### WebSocket payload and backpressure limits
 
@@ -649,9 +710,9 @@ const server = new Server({
 const socket = new WebSocket('wss://example.com', ['chat.v1', 'admin.v1'])
 ```
 
-The negotiated value is available as `socket.protocol`. Async upgrades snapshot
+The negotiated value is available as `socket.protocol`. Async upgrades capture
 URL, IP, headers, query, and the `/*` parameter before the native request
-expires, so `UpgradeMeta` remains safe after an `await`. This snapshot is
+expires, so `UpgradeMeta` remains safe after an `await`. This capture is
 unrelated to `http.prefetch`.
 
 ### Server Methods
@@ -789,10 +850,11 @@ an outgoing response header.
 
 #### Properties
 
-| Property      | Type      | Description                    |
-| ------------- | --------- | ------------------------------ |
-| `ctx.replied` | `Boolean` | Whether response has been sent |
-| `ctx.aborted` | `Boolean` | Whether request was aborted    |
+| Property      | Type                     | Description                                                |
+| ------------- | ------------------------ | ---------------------------------------------------------- |
+| `ctx.headers` | `Record<string, string>` | Stable view of prefetched or already-read request headers. |
+| `ctx.replied` | `Boolean`                | Whether response has been sent                             |
+| `ctx.aborted` | `Boolean`                | Whether request was aborted                                |
 
 #### Methods
 
@@ -901,7 +963,15 @@ Header names are case-insensitive. A missing header returns an empty string.
 
 Get a shallow copy of all incoming request headers. Names are lowercase and
 the returned object has a `null` prototype. Mutating it does not affect the
-context's internal request cache.
+context's internal request cache. This method always requests the complete
+header set; it never returns only the selective `ctx.headers` view. As a side
+effect, it fills the stable `ctx.headers` object with the complete set.
+
+With selective or disabled header prefetch, call `getHeaders()` synchronously
+before the handler yields. After an async boundary, the complete set is
+available only if it was already collected or `prefetchHeaders: 'all'` was
+configured; otherwise the method throws with code
+`REQUEST_HEADERS_NOT_RETAINED`.
 
 ```javascript
 const headers = ctx.getHeaders()
@@ -1863,17 +1933,55 @@ This compares explicit unlimited (`maxBodyBudget: null`) with
 `requestTimeoutMs: 0` with `30000` on an async-handler workload. Reports are
 written to `benchmark/profiles/body-safety/`.
 
+Prepared-response batching has a separate balanced off/on gate:
+
+```bash
+RESPONSE_BATCH_RUNS=4 \
+RESPONSE_BATCH_WARMUP=2 \
+RESPONSE_BATCH_DURATION=6 \
+RESPONSE_BATCH_CONNECTIONS=100 \
+RESPONSE_BATCH_PIPELINING=10 \
+RESPONSE_BATCH_SAMPLE_MS=250 \
+pnpm bench:response-batch
+```
+
+It measures sync JSON and reusable prepared-header responses, including paired
+throughput, p95/p99, ELU, RSS, and errors. Reports are written to
+`benchmark/profiles/response-batch/`. `pnpm bench:response-batch:gate` exits
+non-zero unless every scenario meets the documented default-eligibility
+thresholds.
+
 ## Native binding regression gate
 
-The runtime is `@swarmmachina/swm-uws@0.5.7`. The regression gate runs
-the same `swm-core` HTTP and WebSocket paths against the dev-only
-`uWebSockets.js@20.69.0` reference, changing only the native binding.
+The runtime is `@swarmmachina/swm-uws@0.6.0`. The regression gate runs the
+shared `swm-core` HTTP and WebSocket contract against the dev-only
+`uWebSockets.js@20.69.0` reference. Tests that require swm-uws-only transport
+or request-prefetch capabilities are covered by the full installed and
+sibling/RC gates instead of being treated as upstream compatibility failures.
 
 ```bash
 pnpm test:e2e:bindings
+pnpm test:e2e:binding-candidate
 pnpm bench:bindings
 pnpm bench:bindings:deep
 ```
+
+`test:e2e:binding-candidate` loads `../swm-uws` by default, verifies its
+manifest/native version and all six required capabilities, then runs the full
+HTTP/WebSocket e2e suite through that exact binding. For an unpacked release
+candidate elsewhere, invoke the underlying Node gate directly while the target
+version is still prospective. This avoids asking the package manager to fetch
+an unpublished registry tarball before the gate starts:
+
+```bash
+SWM_UWS_CANDIDATE=/path/to/swm-uws-rc node scripts/test-runtime-binding.js
+```
+
+After the dependency version is published and installed, the equivalent
+`pnpm test:e2e:binding-candidate` alias is safe to use.
+
+CI checks out tag `v<dependency version>`; manual workflows can override the
+candidate branch or tag with `swm_uws_ref`.
 
 `bench:bindings` is the CI gate; `bench:bindings:deep` is the longer diagnostic
 run. Both use balanced AB/BA ordering and write JSON under `benchmark/profiles/`.
@@ -1882,14 +1990,47 @@ Parameters can be overridden with `BINDING_BENCH_*` or `DEEP_BINDING_*`.
 To advance the runtime binding and its upstream reference together, run:
 
 ```bash
-pnpm deps:update:bindings 0.5.4 v20.69.0
-pnpm test:e2e:bindings
+pnpm deps:update:bindings 0.6.0 v20.69.0
+node scripts/test-runtime-binding.js
 ```
 
 The updater changes both pins and the lockfile; do not edit them independently.
+For a coordinated minor release, publish the binding first, then rerun the
+updater so the lockfile records the registry `sha512` integrity. A prospective
+version without published integrity may be used with the sibling/RC runtime
+gate, but `release:artifact` rejects it by design.
 
-`SWM_UWS_NATIVE_FAST_PATHS=0` disables native fast paths. A comma-separated list
-selects individual paths; `all` also enables experimental paths.
+### Native capabilities
+
+After `listen()`, `server.bindingCapabilities` exposes the six binding flags
+after process-level selection:
+
+```javascript
+await server.listen()
+console.log(server.bindingCapabilities)
+```
+
+| Capability            | Core default               | Core use / short example                                                                                                                   |
+| --------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `beginWrite`          | enabled                    | Internal streaming path behind `ctx.startStreaming()`.                                                                                     |
+| `collectBody`         | enabled                    | Native collection behind `await ctx.body()` and body prefetch.                                                                             |
+| `httpTransportConfig` | enabled                    | `new Server({ transport: { maxHeaderCount: 64 }, http: {} })`.                                                                             |
+| `requestPrefetch`     | enabled                    | `prefetchHeaders: ['authorization']` retains only named fields.                                                                            |
+| `responseBatch`       | **experimental, disabled** | Prepared `ctx.reply()` path. The 0.6.0 gate measured −2.33% sync JSON and −10.10% prepared-header paired throughput, so it is not default. |
+| `requestPause`        | **unused, disabled**       | Advertised by the binding, but swm-core has no request-flow-control consumer yet.                                                          |
+
+`SWM_UWS_NATIVE_FAST_PATHS=0` disables every native extension. A comma-separated
+list selects exact paths. Experimental `responseBatch` can be tested without
+enabling `requestPause`:
+
+```bash
+SWM_UWS_NATIVE_FAST_PATHS=beginWrite,collectBody,httpTransportConfig,requestPrefetch,responseBatch \
+node server.js
+```
+
+`SWM_UWS_NATIVE_FAST_PATHS=all` enables all advertised paths, including both
+experimental/unused paths; it is intended for diagnostics, not the default
+production profile.
 
 ## Regression profiling (CI)
 

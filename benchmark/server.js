@@ -55,10 +55,15 @@ function sendReady(port) {
 
 /**
  * @param {number} port
- * @param {{prefetch?: boolean, maxBodyBudget?: number|null, requestTimeoutMs?: number}} [options]
+ * @param {{prefetch?: boolean, maxBodyBudget?: number|null, requestTimeoutMs?: number, nativeFastPaths?: string}} [options]
  */
 async function runCore(port, options = {}) {
-  const { prefetch = false, maxBodyBudget = null, requestTimeoutMs = 0 } = options
+  const { prefetch = false, maxBodyBudget = null, requestTimeoutMs = 0, nativeFastPaths } = options
+
+  if (nativeFastPaths !== undefined) {
+    process.env.SWM_UWS_NATIVE_FAST_PATHS = nativeFastPaths
+  }
+
   const { default: Server, prepareHeaders } = await import('../src/index.js')
   const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
   const onRequest = (ctx) => {
@@ -225,6 +230,22 @@ async function main() {
 
   if (fw === 'core-timeout') {
     await runCore(port, { requestTimeoutMs: 30_000 })
+
+    return
+  }
+
+  if (fw === 'core-response-batch-off') {
+    await runCore(port, {
+      nativeFastPaths: 'beginWrite,collectBody,httpTransportConfig,requestPrefetch'
+    })
+
+    return
+  }
+
+  if (fw === 'core-response-batch-on') {
+    await runCore(port, {
+      nativeFastPaths: 'beginWrite,collectBody,httpTransportConfig,requestPrefetch,responseBatch'
+    })
 
     return
   }

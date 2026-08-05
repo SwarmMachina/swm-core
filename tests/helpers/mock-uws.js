@@ -18,9 +18,10 @@ export function resetMocks() {
 }
 
 /**
+ * @param {object} [options]
  * @returns {object}
  */
-export function createMockApp() {
+export function createMockApp(options) {
   const calls = []
 
   let listenCallback = null
@@ -30,6 +31,7 @@ export function createMockApp() {
 
   const app = {
     calls,
+    appOptions: options,
     setListenCallback(cb) {
       listenCallback = cb
     },
@@ -366,20 +368,31 @@ export function createMockHttpRequest() {
         cb(name, headers[name])
       }
     },
-    snapshot(paramCount = 0) {
-      calls.push({ method: 'snapshot', paramCount })
+    prefetch(plan) {
+      calls.push({ method: 'prefetch', plan })
+
+      const names = plan.headers === 'all' ? Object.keys(headers) : plan.headers
+      const retained = Object.create(null)
+
+      for (const name of names) {
+        if (Object.hasOwn(headers, name)) {
+          retained[name] = headers[name]
+        }
+      }
 
       return {
-        method,
-        url,
-        query:
-          typeof fullQuery === 'string'
-            ? fullQuery
-            : Object.entries(query)
-                .map(([name, value]) => (value === '' ? name : `${name}=${value}`))
-                .join('&'),
-        headers: Object.assign(Object.create(null), headers),
-        params: parameters.slice(0, paramCount)
+        getHeader(name) {
+          return Object.hasOwn(retained, name) ? retained[name] : undefined
+        },
+        getHeaderValues(name) {
+          return Object.hasOwn(retained, name) ? [retained[name]] : undefined
+        },
+        getHeaders() {
+          return Object.assign(Object.create(null), retained)
+        },
+        getHeaderEntries() {
+          return Object.entries(retained).flat()
+        }
       }
     }
   }

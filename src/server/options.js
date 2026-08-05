@@ -5,6 +5,17 @@ export const NOOP = () => {}
 /** @typedef {import('../ws-context.js').default} WSCtx */
 /** @typedef {import('../http-context.js').default} HttpCtx */
 
+/**
+ * @typedef {object} HttpTransportOptions
+ * @property {number} [maxHeaderSize]
+ * @property {number} [maxHeaderCount]
+ * @property {number} [headersTimeoutMs]
+ * @property {number} [keepAliveTimeoutMs]
+ * @property {number} [bodyIdleTimeoutMs]
+ * @property {number|null} [minBodyRateBytesPerSec]
+ * @property {number} [responseWriteTimeoutMs]
+ */
+
 export const DEFAULT_HTTP_MAX_BODY_SIZE_BYTES = 1024 * 1024
 export const MAX_HTTP_BODY_SIZE_BYTES = 64 * 1024 * 1024
 export const DEFAULT_HTTP_BODY_BUDGET_BYTES = 256 * 1024 * 1024
@@ -13,6 +24,18 @@ export const DEFAULT_WS_MAX_BACKPRESSURE_BYTES = 64 * 1024
 const MAX_UWS_UNSIGNED_SIZE = 0xffff_ffff
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_WS_UPGRADE_TIMEOUT_MS = 10_000
+const MAX_HTTP_HEADER_COUNT = 100
+const MAX_UWS_TIMEOUT_MS = 300_000
+const HTTP_HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+const HTTP_TRANSPORT_FIELDS = new Set([
+  'maxHeaderSize',
+  'maxHeaderCount',
+  'headersTimeoutMs',
+  'keepAliveTimeoutMs',
+  'bodyIdleTimeoutMs',
+  'minBodyRateBytesPerSec',
+  'responseWriteTimeoutMs'
+])
 
 /**
  * @typedef {object} WSOptions
@@ -21,6 +44,7 @@ const DEFAULT_WS_UPGRADE_TIMEOUT_MS = 10_000
  * @property {boolean} [closeOnBackpressureLimit]
  * @property {number} [idleTimeoutSec]
  * @property {number} [upgradeTimeoutMs]
+ * @property {false|'all'|readonly string[]} [prefetchHeaders]
  * @property {(ctx: WSCtx) => unknown} [onOpen]
  * @property {(ctx: WSCtx) => unknown} [onDrain]
  * @property {(ctx: WSCtx, msg: ArrayBuffer, isBinary: boolean) => unknown} [onDropped]
@@ -40,6 +64,8 @@ const DEFAULT_WS_UPGRADE_TIMEOUT_MS = 10_000
  * @property {(ctx: HttpCtx) => unknown|Promise<unknown>} handler
  * @property {((ctx: HttpCtx) => unknown|Promise<unknown>)|((ctx: HttpCtx) => unknown|Promise<unknown>)[]} [before]
  * @property {boolean} [prefetch]
+ * @property {false|'all'|readonly string[]} [prefetchHeaders]
+ * @property {number} [maxBodySize]
  */
 
 /**
@@ -121,6 +147,111 @@ function normalizeRequestTimeout(value) {
 }
 
 /**
+ * Normalize an opt-in request-header retention policy. Omitted and `false`
+ * both keep headers lazy and avoid native header retention.
+ * @param {unknown} value
+ * @param {string} [name]
+ * @returns {false|'all'|readonly string[]}
+ */
+export function normalizePrefetchHeaders(value, name = 'http.prefetchHeaders') {
+  if (value === undefined) {
+    return false
+  }
+
+  if (value === false || value === 'all') {
+    return value
+  }
+
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${name} must be false, "all", or an array of header names`)
+  }
+
+  const names = []
+  const seen = new Set()
+
+  for (let i = 0; i < value.length; i++) {
+    const entry = value[i]
+
+    if (typeof entry !== 'string' || !HTTP_HEADER_NAME.test(entry)) {
+      throw new TypeError(`${name}[${i}] must be a valid HTTP header name`)
+    }
+
+    const headerName = entry.toLowerCase()
+
+    if (!seen.has(headerName)) {
+      seen.add(headerName)
+      names.push(headerName)
+    }
+  }
+
+  return names.length === 0 ? false : Object.freeze(names)
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} name
+ * @param {number} [maximum]
+ * @returns {number}
+ */
+function normalizePositiveTransportInteger(value, name, maximum = MAX_UWS_UNSIGNED_SIZE) {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) {
+    throw new TypeError(`${name} must be a positive safe integer no greater than ${maximum}`)
+  }
+
+  return value
+}
+
+/**
+ * Validate the optional native HTTP transport policy without filling binding-
+ * owned defaults. An omitted policy therefore remains compatible with older
+ * bindings and keeps their current effective defaults.
+ * @param {unknown} transport
+ * @returns {Readonly<HttpTransportOptions>|null}
+ */
+export function normalizeTransportOptions(transport) {
+  if (transport === undefined || transport === null) {
+    return null
+  }
+
+  assertOptionsObject(transport, 'transport')
+
+  for (const name of Object.keys(transport)) {
+    if (!HTTP_TRANSPORT_FIELDS.has(name)) {
+      throw new TypeError(`Unknown transport option: ${name}`)
+    }
+  }
+
+  const normalized = {}
+
+  if (transport.maxHeaderSize !== undefined) {
+    normalized.maxHeaderSize = normalizePositiveTransportInteger(transport.maxHeaderSize, 'transport.maxHeaderSize')
+  }
+
+  if (transport.maxHeaderCount !== undefined) {
+    normalized.maxHeaderCount = normalizePositiveTransportInteger(
+      transport.maxHeaderCount,
+      'transport.maxHeaderCount',
+      MAX_HTTP_HEADER_COUNT
+    )
+  }
+
+  for (const name of ['headersTimeoutMs', 'keepAliveTimeoutMs', 'bodyIdleTimeoutMs', 'responseWriteTimeoutMs']) {
+    if (transport[name] !== undefined) {
+      normalized[name] = normalizePositiveTransportInteger(transport[name], `transport.${name}`, MAX_UWS_TIMEOUT_MS)
+    }
+  }
+
+  if (transport.minBodyRateBytesPerSec !== undefined) {
+    normalized.minBodyRateBytesPerSec =
+      transport.minBodyRateBytesPerSec === null
+        ? null
+        : normalizePositiveTransportInteger(transport.minBodyRateBytesPerSec, 'transport.minBodyRateBytesPerSec')
+  }
+
+  return Object.keys(normalized).length === 0 ? null : Object.freeze(normalized)
+}
+
+/**
  * @param {unknown} value
  * @param {string} name
  * @param {number} fallback
@@ -168,6 +299,12 @@ function validateRoute(route, index) {
     throw new TypeError(`http.routes[${index}].prefetch must be a boolean`)
   }
 
+  normalizePrefetchHeaders(route.prefetchHeaders, `http.routes[${index}].prefetchHeaders`)
+
+  if (route.maxBodySize !== undefined) {
+    validateBodyByteLimit(route.maxBodySize, `http.routes[${index}].maxBodySize`)
+  }
+
   if (before === undefined) {
     return
   }
@@ -199,7 +336,8 @@ function normalizePrefetch(value) {
  *  {
  *    onRequest: ((ctx: HttpCtx) => unknown|Promise<unknown>)|null,
  *    routes: Route[]|null, onError: (ctx: HttpCtx, err: Error) => unknown|Promise<unknown>,
- *    maxBodySize: number, maxBodyBudget: number|null, requestTimeoutMs: number, prefetch: boolean
+ *    maxBodySize: number, maxBodyBudget: number|null, requestTimeoutMs: number, prefetch: boolean,
+ *    prefetchHeaders: false|'all'|readonly string[]
  *  }|null}
  */
 export function normalizeHttpOptions(http) {
@@ -226,11 +364,20 @@ export function normalizeHttpOptions(http) {
     'http.maxBodySize'
   )
 
+  for (let i = 0; i < (http.routes?.length ?? 0); i++) {
+    const routeMaxBodySize = http.routes[i].maxBodySize
+
+    if (routeMaxBodySize !== undefined && routeMaxBodySize > maxBodySize) {
+      throw new TypeError(`http.routes[${i}].maxBodySize cannot exceed http.maxBodySize (${maxBodySize})`)
+    }
+  }
+
   return {
     onRequest: http.onRequest ?? null,
     routes: http.routes ?? null,
     onError: http.onError ?? NOOP,
     prefetch,
+    prefetchHeaders: normalizePrefetchHeaders(http.prefetchHeaders),
     maxBodySize,
     maxBodyBudget: normalizeMaxBodyBudget(http.maxBodyBudget),
     requestTimeoutMs: normalizeRequestTimeout(http.requestTimeoutMs)
@@ -303,6 +450,7 @@ export function normalizeWsOptions(ws) {
 
   return {
     ...ws,
+    prefetchHeaders: normalizePrefetchHeaders(ws.prefetchHeaders, 'ws.prefetchHeaders'),
     maxPayloadLength: normalizeWsByteCount(
       ws.maxPayloadLength,
       'ws.maxPayloadLength',

@@ -11,7 +11,7 @@ function assertBytes(bytes, name) {
 export default class BodyBudget {
   #limitBytes
   #usedBytes = 0
-  #reservations = new Set()
+  #reservations = new Map()
 
   constructor(limitBytes) {
     assertBytes(limitBytes, 'BodyBudget limit')
@@ -31,49 +31,46 @@ export default class BodyBudget {
   }
 
   /**
-   * Reserve retained/in-flight body storage for one request-generation owner.
+   * Reserve retained/in-flight body storage for one request collector.
    * @param {number} bytes
    * @param {object} owner
-   * @returns {{bytes: number, owner: object, active: boolean}|null}
+   * @returns {boolean}
    */
   tryReserve(bytes, owner) {
     assertBytes(bytes, 'BodyBudget reservation')
+    this.#assertOwner(owner)
 
-    if ((typeof owner !== 'object' && typeof owner !== 'function') || owner === null) {
-      throw new TypeError('BodyBudget owner must be an object')
+    if (this.#reservations.has(owner)) {
+      throw new Error('BodyBudget owner already has an active reservation')
     }
 
     if (bytes > this.#limitBytes - this.#usedBytes) {
-      return null
+      return false
     }
 
-    const reservation = { bytes, owner, active: true }
-
-    this.#reservations.add(reservation)
+    this.#reservations.set(owner, bytes)
     this.#usedBytes += bytes
     this.#assertInvariant()
 
-    return reservation
+    return true
   }
 
   /**
    * Atomically resize a live reservation. Failure leaves it unchanged.
-   * @param {{bytes: number, owner: object, active: boolean}} reservation
    * @param {number} newBytes
    * @param {object} owner
    * @returns {boolean}
    */
-  resize(reservation, newBytes, owner) {
-    this.#assertOwned(reservation, owner)
+  resize(newBytes, owner) {
     assertBytes(newBytes, 'BodyBudget reservation')
-
-    const delta = newBytes - reservation.bytes
+    const currentBytes = this.#getReservation(owner)
+    const delta = newBytes - currentBytes
 
     if (delta > this.#limitBytes - this.#usedBytes) {
       return false
     }
 
-    reservation.bytes = newBytes
+    this.#reservations.set(owner, newBytes)
     this.#usedBytes += delta
     this.#assertInvariant()
 
@@ -81,26 +78,30 @@ export default class BodyBudget {
   }
 
   /**
-   * @param {{bytes: number, owner: object, active: boolean}} reservation
    * @param {object} owner
    */
-  release(reservation, owner) {
-    this.#assertOwned(reservation, owner)
+  release(owner) {
+    const bytes = this.#getReservation(owner)
 
-    this.#reservations.delete(reservation)
-    reservation.active = false
-    this.#usedBytes -= reservation.bytes
+    this.#reservations.delete(owner)
+    this.#usedBytes -= bytes
     this.#assertInvariant()
   }
 
-  #assertOwned(reservation, owner) {
-    if (!reservation || reservation.active !== true || !this.#reservations.has(reservation)) {
+  #assertOwner(owner) {
+    if ((typeof owner !== 'object' && typeof owner !== 'function') || owner === null) {
+      throw new TypeError('BodyBudget owner must be an object')
+    }
+  }
+
+  #getReservation(owner) {
+    this.#assertOwner(owner)
+
+    if (!this.#reservations.has(owner)) {
       throw new Error('BodyBudget reservation is not active')
     }
 
-    if (reservation.owner !== owner) {
-      throw new Error('BodyBudget reservation owner mismatch')
-    }
+    return this.#reservations.get(owner)
   }
 
   #assertInvariant() {

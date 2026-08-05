@@ -99,12 +99,9 @@ export default class BodyParser {
   #bodyReject = null
   #collectionLimit = 0
   #generation = 0
-  /** @type {object|null} */
-  #owner = null
   /** @type {import('./body-budget.js').default|null} */
   #budget = null
-  /** @type {{bytes: number, owner: object, active: boolean}|null} */
-  #reservation = null
+  #reservedBytes = 0
   /** @type {HttpContext|null} */
   #ctx = null
   #maxSize = DEFAULT_HTTP_MAX_BODY_SIZE_BYTES
@@ -127,7 +124,7 @@ export default class BodyParser {
       state: this.#state,
       generation: this.#generation,
       collectionLimit: this.#collectionLimit,
-      reservedBytes: this.#reservation?.bytes ?? 0
+      reservedBytes: this.#reservedBytes
     })
   }
 
@@ -315,40 +312,42 @@ export default class BodyParser {
       return true
     }
 
-    const reservation = budget.tryReserve(bytes, this.#owner)
-
-    if (!reservation) {
+    if (!budget.tryReserve(bytes, this)) {
       return false
     }
 
     this.#budget = budget
-    this.#reservation = reservation
+    this.#reservedBytes = bytes
 
     return true
   }
 
   #reconcileReservation(bytes) {
-    if (!this.#reservation) {
+    if (!this.#budget) {
       return true
     }
 
-    return this.#budget.resize(this.#reservation, bytes, this.#owner)
+    if (!this.#budget.resize(bytes, this)) {
+      return false
+    }
+
+    this.#reservedBytes = bytes
+
+    return true
   }
 
   #releaseReservation() {
-    const reservation = this.#reservation
     const budget = this.#budget
-    const owner = this.#owner
 
-    if (!reservation) {
+    if (!budget) {
       return
     }
 
     // Null first so cleanup remains idempotent even if a surrounding terminal
     // path is re-entered. BodyBudget itself asserts double release and owners.
-    this.#reservation = null
     this.#budget = null
-    budget.release(reservation, owner)
+    this.#reservedBytes = 0
+    budget.release(this)
   }
 
   #cancel(error, state) {
@@ -377,7 +376,7 @@ export default class BodyParser {
     this.#bodyReject = null
     this.#collectionLimit = 0
     this.#budget = null
-    this.#reservation = null
+    this.#reservedBytes = 0
     this.#discardStorage()
   }
 
@@ -395,7 +394,6 @@ export default class BodyParser {
     this.#clearRequestState()
     this.#maxSize = validateBodyByteLimit(maxSize, 'maxSize')
     this.#ctx = ctx
-    this.#owner = Object.freeze({ generation: this.#generation })
     this.#state = 'idle'
   }
 
@@ -408,7 +406,6 @@ export default class BodyParser {
     this.#generation++
     this.#clearRequestState()
     this.#ctx = null
-    this.#owner = null
     this.#state = 'cleared'
   }
 
@@ -474,12 +471,12 @@ export default class BodyParser {
       return
     }
 
-    const owner = this.#owner
+    const generation = this.#generation
 
     if (ctx.server?.bindingCapabilities?.collectBody === true && typeof ctx.res?.collectBody === 'function') {
       try {
         ctx.res.collectBody(limit, (body) => {
-          if (this.#owner !== owner || this.#ctx !== ctx || this.#state !== 'collecting') {
+          if (this.#generation !== generation || this.#ctx !== ctx || this.#state !== 'collecting') {
             return
           }
 
@@ -526,7 +523,7 @@ export default class BodyParser {
         this.#dst = Buffer.allocUnsafeSlow(contentLength)
 
         ctx.res.onData((value, isLast) => {
-          if (this.#owner === owner && this.#ctx === ctx) {
+          if (this.#generation === generation && this.#ctx === ctx) {
             this.#onDataKnown(value, isLast)
           }
         })
@@ -544,7 +541,7 @@ export default class BodyParser {
 
     try {
       ctx.res.onData((value, isLast) => {
-        if (this.#owner === owner && this.#ctx === ctx) {
+        if (this.#generation === generation && this.#ctx === ctx) {
           this.#onDataUnknown(value, isLast)
         }
       })

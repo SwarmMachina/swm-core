@@ -12,6 +12,8 @@ import type {
   HttpHeaders,
   HttpMethod,
   HttpOptions,
+  HttpTransportOptions,
+  NativeCapabilities,
   PreparedHeaders,
   RawWebSocket,
   ResponseHeaders,
@@ -69,6 +71,7 @@ type CorePublicTypes = [
   WSOptions,
   HttpBaseOptions,
   HttpOptions,
+  HttpTransportOptions,
   CommonServerOptions,
   ServerOptions,
   EffectiveHttpConfig,
@@ -106,11 +109,19 @@ type BindingPublicTypes = [
 
 const upgradeResult: UpgradeResult = { userId: 'reader' }
 const rejectedUpgrade: UpgradeResult = null
+const uploadRoute: Route = {
+  method: 'post',
+  path: '/upload',
+  maxBodySize: 1024,
+  prefetchHeaders: ['authorization'],
+  handler: (ctx) => ctx.headers.authorization
+}
 const wsOptions: WSOptions = {
   maxPayloadLength: 32 * 1024,
   maxBackpressure: 64 * 1024,
   closeOnBackpressureLimit: true,
-  onUpgrade: async (meta) => ({ token: meta.getHeader('authorization') }),
+  prefetchHeaders: ['authorization'],
+  onUpgrade: async (meta) => ({ token: meta.headers.authorization }),
   selectProtocol: (requested, userData) => {
     void userData
 
@@ -119,8 +130,14 @@ const wsOptions: WSOptions = {
 }
 
 const configuredOptions = defineConfig({
+  transport: {
+    maxHeaderSize: 16 * 1024,
+    headersTimeoutMs: 10_000,
+    keepAliveTimeoutMs: 5_000
+  },
   http: {
     prefetch: true,
+    prefetchHeaders: ['authorization', 'traceparent'],
     maxBodySize: 16 * 1024 * 1024,
     maxBodyBudget: 256 * 1024 * 1024,
     onRequest: () => 'ok'
@@ -134,6 +151,12 @@ const unlimitedServer: ServerType = new Server({
 const effectiveConfig: Readonly<EffectiveServerConfig> = server.effectiveConfig
 const effectiveHttp: Readonly<EffectiveHttpConfig> | null = effectiveConfig.http
 const effectiveWs: Readonly<EffectiveWSConfig> | null = effectiveConfig.ws
+const effectiveTransport: Readonly<HttpTransportOptions> | null = effectiveConfig.transport
+const nativeCapabilities: Readonly<NativeCapabilities> = server.bindingCapabilities
+
+void effectiveTransport
+void nativeCapabilities.requestPrefetch
+void nativeCapabilities.responseBatch
 
 export function verifyHttpContextReaders(ctx: HttpContext): void {
   const ip: string = ctx.getIP()
@@ -143,6 +166,7 @@ export function verifyHttpContextReaders(ctx: HttpContext): void {
   const queryValue: string | undefined = ctx.getQuery('page')
   const parameter: string | undefined = ctx.getParameter('id')
   const header: string = ctx.getHeader('x-test')
+  const prefetchedHeaders: Readonly<Record<string, string>> = ctx.headers
   const headers: Record<string, string> = ctx.getHeaders()
   const contentLength: number | null = ctx.getContentLength()
 
@@ -153,6 +177,7 @@ export function verifyHttpContextReaders(ctx: HttpContext): void {
   void queryValue
   void parameter
   void header
+  void prefetchedHeaders
   void headers
   void contentLength
 
@@ -197,4 +222,5 @@ void coreTypes
 void bindingTypes
 void upgradeResult
 void rejectedUpgrade
+void uploadRoute
 void wsOptions

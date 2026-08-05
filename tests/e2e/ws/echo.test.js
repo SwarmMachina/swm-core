@@ -121,6 +121,7 @@ test('async ws upgrade reads owned metadata after await', async () => {
 
   handle = await startWsServer({
     ws: {
+      prefetchHeaders: ['x-auth'],
       onUpgrade: async (meta) => {
         await new Promise((resolve) => setImmediate(resolve))
 

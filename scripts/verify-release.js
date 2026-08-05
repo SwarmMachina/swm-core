@@ -41,11 +41,61 @@ export function verifyReleaseMetadata({ manifest, tag }) {
 }
 
 /**
+ * Read the exact native runtime dependency's registry integrity.
+ * @param {object} params
+ * @param {object} params.manifest
+ * @param {string} params.lockfile
+ * @returns {string|null}
+ */
+export function getBindingLockIntegrity({ manifest, lockfile }) {
+  const name = '@swarmmachina/swm-uws'
+  const version = manifest.dependencies?.[name]
+
+  if (typeof version !== 'string') {
+    throw new Error(`${name} must be an exact runtime dependency`)
+  }
+
+  const header = `  '${name}@${version}':`
+  const start = lockfile.indexOf(header)
+
+  if (start === -1) {
+    throw new Error(`pnpm-lock.yaml is missing ${name}@${version}`)
+  }
+
+  const next = lockfile.indexOf("\n  '", start + header.length)
+  const block = lockfile.slice(start, next === -1 ? lockfile.length : next)
+  const match = /resolution:\s*(?:\r?\n\s*)?\{\s*integrity:\s*(sha512-[A-Za-z0-9+/=]+)\s*\}/u.exec(block)
+
+  return match?.[1] ?? null
+}
+
+/**
+ * Require the exact native runtime dependency to be locked by registry
+ * integrity before a release artifact can be built.
+ * @param {object} params
+ * @param {object} params.manifest
+ * @param {string} params.lockfile
+ */
+export function verifyBindingLockIntegrity({ manifest, lockfile }) {
+  const name = '@swarmmachina/swm-uws'
+  const version = manifest.dependencies?.[name]
+
+  if (getBindingLockIntegrity({ manifest, lockfile }) === null) {
+    throw new Error(`pnpm-lock.yaml is missing registry integrity for ${name}@${version}`)
+  }
+}
+
+/**
  * @param {string|undefined} tag
  * @returns {Promise<{ name: string, version: string, tag: string|null }>}
  */
 export async function verifyRepositoryRelease(tag) {
-  const manifest = await fs.readFile(path.join(ROOT, 'package.json'), 'utf8').then(JSON.parse)
+  const [manifest, lockfile] = await Promise.all([
+    fs.readFile(path.join(ROOT, 'package.json'), 'utf8').then(JSON.parse),
+    fs.readFile(path.join(ROOT, 'pnpm-lock.yaml'), 'utf8')
+  ])
+
+  verifyBindingLockIntegrity({ manifest, lockfile })
 
   try {
     execFileSync('pnpm', ['install', '--lockfile-only', '--frozen-lockfile', '--ignore-scripts'], {

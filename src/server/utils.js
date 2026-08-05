@@ -4,6 +4,26 @@ export const isPromise = (value) =>
   value != null && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function'
 
 /**
+ * Compile a reusable native header-retention plan during route registration.
+ * The factory exists only because the concrete plan implementation belongs to
+ * the selected transport binding.
+ * @param {false|'all'|readonly string[]} selection
+ * @param {(new (options: object) => object)|null|undefined} Plan
+ * @returns {object|null}
+ */
+export function compileHeaderPrefetchPlan(selection, Plan) {
+  if (selection === false) {
+    return null
+  }
+
+  if (typeof Plan !== 'function') {
+    throw new Error('prefetchHeaders requires a swm-uws binding with the requestPrefetch capability')
+  }
+
+  return new Plan({ headers: selection })
+}
+
+/**
  * Validate a WebSocket close frame payload before crossing into the native
  * binding. RFC-defined codes and application/private codes are accepted;
  * reserved wire codes are rejected.

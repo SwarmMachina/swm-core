@@ -24,6 +24,7 @@ const READABLE_SURFACE = {
     'getUrl',
     'getWriteOffset',
     'header',
+    'headers',
     'ip',
     'json',
     'method',
@@ -33,7 +34,7 @@ const READABLE_SURFACE = {
     'text',
     'url'
   ],
-  UpgradeMeta: ['aborted', 'getHeader', 'getParameter', 'getQuery', 'ip', 'url'],
+  UpgradeMeta: ['aborted', 'getHeader', 'getParameter', 'getQuery', 'headers', 'ip', 'url'],
   WSContext: ['data', 'decode', 'key', 'ws'],
   RawWebSocket: [
     'getBufferedAmount',
@@ -69,6 +70,7 @@ const CORE_READ_METHODS = {
     'getUrl',
     'getWriteOffset',
     'header',
+    'headers',
     'ip',
     'method',
     'param',
@@ -276,6 +278,7 @@ test(
         'getUrl',
         'getWriteOffset',
         'header',
+        'headers',
         'ip',
         'method',
         'param',
@@ -292,6 +295,8 @@ test(
       assert.equal(ctx.param(0), ctx.getParameter(0))
       assert.equal(ctx.header('x-contract'), ctx.getHeader('x-contract'))
       assert.equal(ctx.contentLength(), ctx.getContentLength())
+      assert.equal(ctx.headers, ctx.headers)
+      assert.equal(ctx.headers['x-contract'], 'Value')
 
       const headers = ctx.getHeaders()
       const headerFromSnapshot = headers['x-contract']
@@ -362,7 +367,7 @@ test(
         },
         onUpgrade(meta) {
           assert.deepEqual(Object.keys(meta).sort(), [...READABLE_SURFACE.UpgradeMeta].sort())
-          cover('UpgradeMeta', 'aborted', 'getHeader', 'getParameter', 'getQuery', 'ip', 'url')
+          cover('UpgradeMeta', 'aborted', 'getHeader', 'getParameter', 'getQuery', 'headers', 'ip', 'url')
           const observation = {
             url: meta.url(),
             ip: meta.ip(),
@@ -371,6 +376,7 @@ test(
             one: meta.getQuery('one'),
             missing: meta.getQuery('missing'),
             header: meta.getHeader('x-upgrade-test'),
+            headers: meta.headers,
             aborted: meta.aborted
           }
 
@@ -532,6 +538,7 @@ test(
         assert.equal(meta.one, '1')
         assert.equal(meta.missing, undefined)
         assert.equal(meta.header, 'yes')
+        assert.equal(meta.headers['x-upgrade-test'], 'yes')
         assert.equal(meta.aborted, false)
       }
 

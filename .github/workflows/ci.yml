@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      swm_uws_ref:
+        description: Optional swm-uws release-candidate branch or tag
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -71,6 +76,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Resolve swm-uws candidate ref
+        if: matrix.node-version == '22'
+        id: binding-candidate
+        run: |
+          ref="${{ inputs.swm_uws_ref }}"
+          if [ -z "$ref" ]; then
+            ref="v$(node -p \"require('./package.json').dependencies['@swarmmachina/swm-uws']\")"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - name: Formatting and lint
         if: matrix.node-version == '22'
         run: pnpm check
@@ -94,6 +109,25 @@ jobs:
 
       - name: uWebSockets.js reference binding compatibility
         run: pnpm test:e2e:uwebsockets-reference
+
+      - name: Checkout swm-uws candidate
+        if: matrix.node-version == '22'
+        uses: actions/checkout@v6
+        with:
+          repository: SwarmMachina/swm-uws
+          ref: ${{ steps.binding-candidate.outputs.ref }}
+          path: .runtime-candidate/swm-uws
+
+      - name: Build swm-uws candidate from source
+        if: matrix.node-version == '22'
+        working-directory: .runtime-candidate/swm-uws
+        run: npm ci && npm run build:native
+
+      - name: swm-uws release-candidate runtime compatibility
+        if: matrix.node-version == '22'
+        run: pnpm test:e2e:binding-candidate
+        env:
+          SWM_UWS_CANDIDATE: ${{ github.workspace }}/.runtime-candidate/swm-uws
 
   swm-uws-bookworm:
     runs-on: ubuntu-latest

@@ -88,6 +88,10 @@ try {
       2
     )
   )
+  writeFileSync(
+    join(consumer, 'pnpm-workspace.yaml'),
+    `overrides:\n  '@swarmmachina/swm-uws': 'file:${bindingPack.path}'\n`
+  )
   cpSync(join(root, 'tests/fixtures/types'), join(consumer, 'fixtures'), { recursive: true })
 
   execFileSync('pnpm', ['install', '--ignore-scripts', '--no-frozen-lockfile'], {

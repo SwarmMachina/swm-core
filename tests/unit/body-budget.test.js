@@ -7,56 +7,55 @@ describe('BodyBudget', () => {
     const budget = new BodyBudget(10)
     const ownerA = {}
     const ownerB = {}
-    const a = budget.tryReserve(6, ownerA)
 
-    strictEqual(a.bytes, 6)
+    strictEqual(budget.tryReserve(6, ownerA), true)
+
     strictEqual(budget.usedBytes, 6)
     strictEqual(budget.activeReservations, 1)
-    strictEqual(budget.tryReserve(5, ownerB), null)
-    strictEqual(budget.resize(a, 4, ownerA), true)
+    strictEqual(budget.tryReserve(5, ownerB), false)
+    strictEqual(budget.resize(4, ownerA), true)
     strictEqual(budget.usedBytes, 4)
 
-    const b = budget.tryReserve(5, ownerB)
+    strictEqual(budget.tryReserve(5, ownerB), true)
 
-    strictEqual(b.bytes, 5)
     strictEqual(budget.usedBytes, 9)
-    strictEqual(budget.resize(a, 6, ownerA), false)
-    strictEqual(a.bytes, 4)
+    strictEqual(budget.resize(6, ownerA), false)
     strictEqual(budget.usedBytes, 9)
 
-    budget.release(a, ownerA)
-    budget.release(b, ownerB)
+    budget.release(ownerA)
+    budget.release(ownerB)
 
     strictEqual(budget.usedBytes, 0)
     strictEqual(budget.activeReservations, 0)
     strictEqual(budget.limitBytes, 10)
   })
 
-  test('asserts duplicate release and wrong-generation ownership', () => {
+  test('asserts duplicate reservation and release', () => {
     const budget = new BodyBudget(10)
     const owner = {}
-    const reservation = budget.tryReserve(3, owner)
 
-    throws(() => budget.resize(reservation, 2, {}), /owner mismatch/)
-    throws(() => budget.release(reservation, {}), /owner mismatch/)
+    strictEqual(budget.tryReserve(3, owner), true)
+    throws(() => budget.tryReserve(2, owner), /already has an active reservation/)
+    throws(() => budget.resize(2, {}), /not active/)
+    throws(() => budget.release({}), /not active/)
 
-    budget.release(reservation, owner)
+    budget.release(owner)
 
-    throws(() => budget.release(reservation, owner), /not active/)
+    throws(() => budget.release(owner), /not active/)
     strictEqual(budget.usedBytes, 0)
   })
 
   test('tracks zero-byte reservations without treating zero as unlimited', () => {
     const budget = new BodyBudget(0)
     const owner = {}
-    const reservation = budget.tryReserve(0, owner)
 
-    strictEqual(reservation.bytes, 0)
-    strictEqual(budget.tryReserve(1, {}), null)
+    strictEqual(budget.tryReserve(0, owner), true)
+
+    strictEqual(budget.tryReserve(1, {}), false)
     strictEqual(budget.usedBytes, 0)
     strictEqual(budget.activeReservations, 1)
 
-    budget.release(reservation, owner)
+    budget.release(owner)
     strictEqual(budget.activeReservations, 0)
   })
 

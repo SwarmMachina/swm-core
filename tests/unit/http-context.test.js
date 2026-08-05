@@ -333,6 +333,29 @@ describe('HttpContext', () => {
       strictEqual(ctx.getHeader('Authorization'), 'Bearer abc')
     })
 
+    test('headers is a stable cached-only view that getHeader and getHeaders hydrate', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { authorization: 'Bearer abc', 'x-trace': 'trace' } })
+
+      ctx.reset(res, req)
+
+      const headers = ctx.headers
+
+      strictEqual(headers, ctx.headers)
+      deepStrictEqual({ ...headers }, {})
+      strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 0)
+
+      strictEqual(ctx.getHeader('Authorization'), 'Bearer abc')
+      strictEqual(ctx.getHeader('x-missing'), '')
+      deepStrictEqual({ ...headers }, { authorization: 'Bearer abc' })
+
+      deepStrictEqual({ ...ctx.getHeaders() }, { authorization: 'Bearer abc', 'x-trace': 'trace' })
+      deepStrictEqual({ ...headers }, { authorization: 'Bearer abc', 'x-trace': 'trace' })
+      strictEqual(headers, ctx.headers)
+      strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 1)
+    })
+
     test('getHeaders() returns an isolated lowercase null-prototype snapshot of present headers', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -386,7 +409,7 @@ describe('HttpContext', () => {
       strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 0)
     })
 
-    test('cacheRequest() uses one native snapshot when the backend supports it', () => {
+    test('cacheRequest() captures metadata and keeps only headers read synchronously', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({
@@ -396,12 +419,10 @@ describe('HttpContext', () => {
         headers: { authorization: 'Bearer token' },
         parameters: ['42']
       })
-      const server = {
-        bindingCapabilities: { requestSnapshot: true },
-        finalizeHttpContext() {}
-      }
+      const server = { finalizeHttpContext() {} }
 
       ctx.reset(res, req, server)
+      strictEqual(ctx.getHeader('authorization'), 'Bearer token')
       ctx.cacheRequest(['id'])
 
       strictEqual(ctx.getMethod(), 'get')
@@ -410,7 +431,13 @@ describe('HttpContext', () => {
       strictEqual(ctx.getHeader('authorization'), 'Bearer token')
       strictEqual(ctx.getParameter(0), '42')
       strictEqual(ctx.getParameter('id'), '42')
-      deepStrictEqual(req.calls, [['snapshot', 1]])
+      deepStrictEqual(req.calls, [
+        ['getHeader', 'authorization'],
+        ['getMethod'],
+        ['getUrl'],
+        ['getQuery', undefined],
+        ['getParameter', 0]
+      ])
     })
 
     test('getQuery(name)/query(name) share the cache', () => {
@@ -2106,6 +2133,31 @@ describe('HttpContext', () => {
         strictEqual(res.calls.filter((c) => c[0] === 'writeStatus').length, 1)
         strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 1)
         strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
+      })
+
+      test('settles before finalize returns the context to the pool', async () => {
+        const pool = {
+          release(current) {
+            current.clear()
+          }
+        }
+        const ctx = new HttpContext(pool)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req, {
+          finalizeHttpContext(current) {
+            current.release()
+          }
+        })
+
+        const readable = createMockReadable()
+        const promise = ctx.stream(readable, 200)
+
+        readable.emit('end')
+
+        await promise
+        strictEqual(ctx.done, true)
       })
 
       test('backpressure', async () => {

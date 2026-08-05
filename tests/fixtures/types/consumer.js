@@ -28,6 +28,7 @@ export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, be
   ctx.getQuery('page')
   ctx.getParameter('id')
   ctx.getHeader('x-test')
+  ctx.headers
   ctx.getHeaders()
   ctx.getContentLength()
   ctx.method()
@@ -46,18 +47,20 @@ export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, be
   void ws.key
   req.getUrl()
   req.getHeader('x-test')
-  req.snapshot()
   res.getRemoteAddress()
   res.getProxiedRemoteAddress()
   res.collectBody(1024, () => {})
   void options
   void effectiveConfig.http?.maxBodyBudget
+  void effectiveConfig.transport?.maxHeaderSize
   void behavior
 }
 
 export const jsOptions = defineConfig({
+  transport: { maxHeaderSize: 16 * 1024 },
   http: {
     maxBodyBudget: 256 * 1024 * 1024,
+    prefetchHeaders: ['authorization'],
     onRequest: (ctx) => ({ method: ctx.getMethod() })
   }
 })

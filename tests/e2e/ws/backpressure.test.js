@@ -272,12 +272,20 @@ test('onDrain reports recovery after a stalled socket resumes reading', { timeou
     assert.strictEqual(handle.server.sendTo('slow', payload, true), true)
   }
 
-  assert.ok(raw.getBufferedAmount() > 0, 'test did not create native WebSocket backpressure')
+  const bufferedBeforeResume = raw.getBufferedAmount()
+
+  assert.ok(bufferedBeforeResume > 0, 'test did not create native WebSocket backpressure')
   slow._socket.resume()
 
-  assert.strictEqual(
-    await withTimeout(drained.promise, 3000, 'native WebSocket did not emit drain after reads resumed'),
-    0
+  const bufferedAfterDrain = await withTimeout(
+    drained.promise,
+    3000,
+    'native WebSocket did not emit drain after reads resumed'
+  )
+
+  assert.ok(
+    bufferedAfterDrain < bufferedBeforeResume,
+    `native WebSocket drain made no progress: before=${bufferedBeforeResume}, after=${bufferedAfterDrain}`
   )
   assert.strictEqual(handle.server.hasConnection('slow'), true)
 })

@@ -1,7 +1,8 @@
 import HttpContext from '../http-context.js'
 import ContextPool from '../context-pool.js'
 import { STATUS_TEXT } from '../constants.js'
-import { isPromise } from './utils.js'
+import { normalizePrefetchHeaders } from './options.js'
+import { compileHeaderPrefetchPlan, isPromise } from './utils.js'
 
 /**
  * @param {import('@swarmmachina/swm-uws').HttpResponse} res
@@ -19,17 +20,11 @@ function sendNotFound(res) {
  * @returns {(ctx: HttpContext) => unknown|Promise<unknown>}
  */
 function composeRouteHandler(handler, before) {
-  if (before == null) {
+  if (!before) {
     return handler
   }
 
   const chain = Array.isArray(before) ? before : [before]
-
-  for (let i = 0; i < chain.length; i++) {
-    if (typeof chain[i] !== 'function') {
-      throw new TypeError('Route before must be a function or an array of functions')
-    }
-  }
 
   if (chain.length === 0) {
     return handler
@@ -126,8 +121,11 @@ export default class HttpRuntime {
    * @param {import('@swarmmachina/swm-uws').HttpRequest} req
    * @param {(ctx: HttpContext) => unknown|Promise<unknown>} handler
    * @param {string[]} [paramNames]
+   * @param {false|'all'|readonly string[]} [headerSelection]
+   * @param {object|null} [headerPlan]
+   * @param {number} [maxBodySize]
    */
-  handleWithContext = (res, req, handler, paramNames) => {
+  handleWithContext = (res, req, handler, paramNames, headerSelection = false, headerPlan = null, maxBodySize) => {
     const server = this.#server
 
     if (this.#lifecycle.draining) {
@@ -142,7 +140,7 @@ export default class HttpRuntime {
 
     this.#lifecycle.activeHttp++
 
-    const ctx = this.contextPool.acquire().reset(res, req, server, server.httpMaxBodyBytes)
+    const ctx = this.contextPool.acquire().reset(res, req, server, maxBodySize ?? server.httpMaxBodyBytes)
 
     res.onAborted(ctx.onAbort)
     ctx.handlerPending = true
@@ -150,6 +148,10 @@ export default class HttpRuntime {
     let result
 
     try {
+      if (headerSelection !== false) {
+        ctx.attachPrefetchedHeaders(headerSelection, headerPlan)
+      }
+
       result = handler(ctx)
     } catch (err) {
       if (!ctx.replied) {
@@ -189,7 +191,7 @@ export default class HttpRuntime {
       ctx.startRequestTimeout(server.httpRequestTimeoutMs)
 
       // eslint-disable-next-line promise/catch-or-return
-      result.then(ctx.onResolve, ctx.onReject)
+      Promise.resolve(result).then(ctx.onResolve, ctx.onReject)
 
       return
     }
@@ -230,8 +232,15 @@ export default class HttpRuntime {
         const shouldPrefetch = prefetch ?? server.http.prefetch
         const routeHandler = shouldPrefetch ? withBodyPrefetch(composedHandler) : composedHandler
         const paramNames = path.match(/:[^/]+/g)?.map((name) => name.slice(1)) ?? []
+        const headerSelection = Object.hasOwn(route, 'prefetchHeaders')
+          ? normalizePrefetchHeaders(route.prefetchHeaders, `route ${method.toUpperCase()} ${path} prefetchHeaders`)
+          : server.http.prefetchHeaders
+        const headerPlan = compileHeaderPrefetchPlan(headerSelection, server.requestPrefetchPlanClass)
+        const maxBodySize = route.maxBodySize ?? server.httpMaxBodyBytes
 
-        app[methodName](path, (res, req) => handleWithContext(res, req, routeHandler, paramNames))
+        app[methodName](path, (res, req) =>
+          handleWithContext(res, req, routeHandler, paramNames, headerSelection, headerPlan, maxBodySize)
+        )
       }
 
       if (!server.http.routes.some(({ method, path }) => method === 'any' && path === '/*')) {
@@ -243,8 +252,10 @@ export default class HttpRuntime {
 
     if (server.http?.onRequest) {
       const onRequest = server.http.prefetch ? withBodyPrefetch(server.http.onRequest) : server.http.onRequest
+      const headerSelection = server.http.prefetchHeaders
+      const headerPlan = compileHeaderPrefetchPlan(headerSelection, server.requestPrefetchPlanClass)
 
-      app.any('/*', (res, req) => handleWithContext(res, req, onRequest))
+      app.any('/*', (res, req) => handleWithContext(res, req, onRequest, undefined, headerSelection, headerPlan))
 
       return
     }

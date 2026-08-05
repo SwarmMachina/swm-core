@@ -26,9 +26,10 @@ for (const prefetch of [false, true]) {
       maxBodySize: 1024 * 1024,
       maxBodyBudget: 1024 * 1024,
       onRequest: async (ctx) => {
+        const hold = ctx.header('x-hold') === 'yes'
         const data = await ctx.body()
 
-        if (ctx.header('x-hold') === 'yes') {
+        if (hold) {
           firstCollected.resolve()
           await releaseFirst.promise
         }

@@ -69,6 +69,9 @@ export function prepareHeaders(headers: HttpHeaders): PreparedHeaders
  */
 export type Handler = (ctx: HttpContext) => any | Promise<any>
 
+/** Request-header retention policy used across an asynchronous native callback boundary. */
+export type HeaderPrefetch = false | 'all' | readonly string[]
+
 /** A declarative HTTP route definition. */
 export interface Route {
   /** HTTP method matched by the route. */
@@ -99,15 +102,43 @@ export interface Route {
    * lazy even when HTTP-level prefetch is enabled.
    */
   prefetch?: boolean
+
+  /**
+   * Overrides {@link HttpBaseOptions.prefetchHeaders} for this route.
+   *
+   * A list retains only those lowercase-normalized fields. `false` retains no
+   * request headers automatically, while `'all'` retains every field.
+   */
+  prefetchHeaders?: HeaderPrefetch
+
+  /**
+   * Per-route request-body limit in bytes.
+   *
+   * The value may lower but cannot exceed {@link HttpBaseOptions.maxBodySize},
+   * which remains the server-wide safety ceiling.
+   */
+  maxBodySize?: number
 }
 
 /**
  * Request metadata passed to {@link WSOptions.onUpgrade}.
  *
- * For an asynchronous upgrade, swm-core snapshots URL, query parameters,
- * headers, route parameters, and the remote endpoint before the first `await`.
+ * For an asynchronous upgrade, swm-core retains URL, query parameters, route
+ * parameters, and the remote endpoint before the first `await`. Header
+ * retention follows {@link WSOptions.prefetchHeaders}. Without prefetch, only
+ * fields read synchronously before the first `await` remain available.
  */
 export interface UpgradeMeta {
+  /**
+   * Lazy stable view of retained or already-read upgrade-request headers.
+   *
+   * Reading this property does not enumerate the native request. Without
+   * header prefetch it starts empty; successful `getHeader()` calls add their
+   * values. Prefetched fields are present immediately. Mutations are local to
+   * this materialized view and do not change `getHeader()` results.
+   */
+  readonly headers: Record<string, string>
+
   /** Returns the request URL path without the query string. */
   url(): string
 
@@ -207,6 +238,14 @@ export interface WSOptions {
   upgradeTimeoutMs?: number
 
   /**
+   * Retains selected HTTP upgrade headers before {@link WSOptions.onUpgrade}.
+   *
+   * When configured, an asynchronous upgrade can read only the retained
+   * fields after its first `await`. Synchronous reads remain lazy.
+   */
+  prefetchHeaders?: HeaderPrefetch
+
+  /**
    * Called after a WebSocket connection opens.
    *
    * Throwing or rejecting routes the error to {@link WSOptions.onError}.
@@ -240,7 +279,7 @@ export interface WSOptions {
   onClose?: (ctx: WSContext, code: number, message: ArrayBuffer) => any
 
   /**
-   * Called after queued outbound data drains and the socket becomes writable.
+   * Called when outbound backpressure decreases and the socket can make progress.
    *
    * Inspect `ctx.ws.getBufferedAmount()` before resuming application sends.
    */
@@ -258,8 +297,8 @@ export interface WSOptions {
    * Authorizes an HTTP-to-WebSocket upgrade.
    *
    * Return `null` to deny with 403, or return an object to accept. The exact
-   * object is exposed as {@link WSContext.data}. Async handlers receive an owned
-   * metadata snapshot and are bounded by {@link WSOptions.upgradeTimeoutMs}.
+   * object is exposed as {@link WSContext.data}. Async handlers receive owned
+   * request metadata and are bounded by {@link WSOptions.upgradeTimeoutMs}.
    *
    * This callback is required so enabling WebSocket can never implicitly allow
    * unauthenticated upgrades. Return an empty object only when anonymous
@@ -306,6 +345,16 @@ export interface HttpBaseOptions {
    * @defaultValue `false`
    */
   prefetch?: boolean
+
+  /**
+   * Retains request headers in native-owned storage before handlers run.
+   *
+   * A list retains only those fields, `false` explicitly disables automatic
+   * header retention, and `'all'` retains every field. When omitted, the
+   * compatibility path captures all request metadata and headers before the
+   * native request expires.
+   */
+  prefetchHeaders?: HeaderPrefetch
 
   /**
    * Maximum body size for one HTTP request, in bytes.
@@ -372,6 +421,30 @@ export type HttpOptions = HttpBaseOptions &
     | { onRequest?: never; routes?: never }
   )
 
+/** Native HTTP parser and connection timeout policy applied by swm-uws. */
+export interface HttpTransportOptions {
+  /** Request line plus all request header fields, in bytes. */
+  maxHeaderSize?: number
+
+  /** Maximum number of request header fields. */
+  maxHeaderCount?: number
+
+  /** Deadline for receiving a complete request head. */
+  headersTimeoutMs?: number
+
+  /** Idle time while waiting for the next keep-alive request. */
+  keepAliveTimeoutMs?: number
+
+  /** Idle timeout while receiving request body bytes. */
+  bodyIdleTimeoutMs?: number
+
+  /** Minimum sustained body receive rate, or `null` to disable it. */
+  minBodyRateBytesPerSec?: number | null
+
+  /** Timeout for a response blocked by outbound backpressure. */
+  responseWriteTimeoutMs?: number
+}
+
 /** Options shared by HTTP-only, WebSocket-only, and dual-protocol servers. */
 export interface CommonServerOptions {
   /**
@@ -394,6 +467,13 @@ export interface CommonServerOptions {
    * @defaultValue `6000`
    */
   port?: number
+
+  /**
+   * Optional per-server native HTTP transport policy.
+   *
+   * Requires a swm-uws binding advertising `httpTransportConfig`.
+   */
+  transport?: HttpTransportOptions
 }
 
 /**
@@ -437,6 +517,7 @@ export function defineConfig<const Options extends ServerOptions>(options: Optio
 /** Normalized HTTP resource settings exposed by {@link Server.effectiveConfig}. */
 export interface EffectiveHttpConfig {
   readonly prefetch: boolean
+  readonly prefetchHeaders: HeaderPrefetch
   readonly maxBodySize: number
   readonly maxBodyBudget: number | null
   readonly requestTimeoutMs: number
@@ -449,12 +530,24 @@ export interface EffectiveWSConfig {
   readonly closeOnBackpressureLimit: boolean
   readonly idleTimeoutSec: number
   readonly upgradeTimeoutMs: number
+  readonly prefetchHeaders: HeaderPrefetch
 }
 
 /** Immutable snapshot of the server's effective protocol configuration. */
 export interface EffectiveServerConfig {
   readonly http: Readonly<EffectiveHttpConfig> | null
+  readonly transport: Readonly<HttpTransportOptions> | null
   readonly ws: Readonly<EffectiveWSConfig> | null
+}
+
+/** Native binding extensions selected for this process. */
+export interface NativeCapabilities {
+  readonly beginWrite: boolean
+  readonly collectBody: boolean
+  readonly httpTransportConfig: boolean
+  readonly requestPause: boolean
+  readonly requestPrefetch: boolean
+  readonly responseBatch: boolean
 }
 
 /**
@@ -466,6 +559,17 @@ export interface EffectiveServerConfig {
  * data needed by background work.
  */
 export interface HttpContext {
+  /**
+   * Lazy stable view of retained or already-read request headers.
+   *
+   * Reading this property does not enumerate the native request. Without
+   * header prefetch it starts empty; successful {@link HttpContext.getHeader}
+   * calls add their values. Prefetched fields are present immediately, and
+   * {@link HttpContext.getHeaders} fills the view with the complete set.
+   * Mutations are local to the view and do not change `getHeader()` results.
+   */
+  readonly headers: Record<string, string>
+
   /** Whether a response or stream has already started. */
   replied: boolean
 
@@ -553,7 +657,12 @@ export interface HttpContext {
    * Returns a shallow copy of all request headers.
    *
    * Header names are lowercase and the returned object has a `null`
-   * prototype.
+   * prototype. This operation is independent of selective header prefetch.
+   * It also fills the stable {@link HttpContext.headers} view with the complete
+   * set while returning a separate shallow copy.
+   * After an async boundary, it requires an earlier synchronous call or
+   * `prefetchHeaders: 'all'`; otherwise it throws an error with code
+   * `REQUEST_HEADERS_NOT_RETAINED` instead of returning a partial set.
    */
   getHeaders(): Record<string, string>
 
@@ -792,6 +901,12 @@ declare class Server {
    * Use this for startup diagnostics instead of reproducing defaulting logic.
    */
   readonly effectiveConfig: Readonly<EffectiveServerConfig>
+
+  /**
+   * Advertised native extensions after `SWM_UWS_NATIVE_FAST_PATHS` selection.
+   * Populated when {@link listen} loads the binding.
+   */
+  readonly bindingCapabilities: Readonly<NativeCapabilities>
 
   /**
    * Starts listening.

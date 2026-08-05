@@ -161,17 +161,18 @@ export default class ResStreamer {
       throw new Error('tryEnd(chunk, totalSize): totalSize is required')
     }
 
-    let result = [false, false]
+    const ctx = this.#ctx
+
+    let result
 
     this.#res.cork(() => {
-      const [ok, done] = this.#res.tryEnd(chunk, totalSize)
+      result = this.#res.tryEnd(chunk, totalSize)
 
-      result = [ok, done]
-
-      if (done) {
+      if (result[1]) {
         this.#started = false
-        this.#ctx.streaming = false
-        this.#ctx?.finalize?.()
+        ctx.streaming = false
+        this.#settleOk()
+        ctx.finalize()
       }
     })
 
@@ -197,17 +198,7 @@ export default class ResStreamer {
       return
     }
 
-    this.#res.cork(() => {
-      if (chunk !== null && chunk !== undefined) {
-        this.#res.end(chunk)
-      } else {
-        this.#res.end()
-      }
-    })
-
-    this.#started = false
-    this.#ctx.streaming = false
-    this.#ctx?.finalize?.()
+    this.#finishEnd(chunk)
   }
 
   /**
@@ -306,22 +297,18 @@ export default class ResStreamer {
       ctx.streaming = false
     }
 
-    this.#settleOk()
+    if (ctx?.aborted) {
+      this.#settleOk()
+    }
   }
 
   #onError = (err) => {
     const ctx = this.#ctx
 
-    if (ctx) {
-      ctx.streaming = false
-    }
-
     if (ctx && !ctx.aborted) {
-      try {
-        this.end()
-      } catch {
-        //
-      }
+      this.#finishEnd(null, err)
+
+      return
     }
 
     this.#settleErr(err)
@@ -329,6 +316,12 @@ export default class ResStreamer {
 
   #onClose = () => {
     const ctx = this.#ctx
+
+    if (ctx && !ctx.aborted && this.#started) {
+      this.#finishEnd(null)
+
+      return
+    }
 
     if (ctx) {
       ctx.streaming = false
@@ -348,6 +341,42 @@ export default class ResStreamer {
     cb(offset)
 
     return false
+  }
+
+  #finishEnd(chunk, streamError = null) {
+    const ctx = this.#ctx
+    const res = this.#res
+
+    let responseError = null
+
+    try {
+      res.cork(() => {
+        if (chunk !== null && chunk !== undefined) {
+          res.end(chunk)
+        } else {
+          res.end()
+        }
+      })
+    } catch (error) {
+      responseError = error
+    }
+
+    this.#started = false
+    ctx.streaming = false
+
+    if (streamError) {
+      this.#settleErr(streamError)
+    } else if (responseError) {
+      this.#settleErr(responseError)
+    } else {
+      this.#settleOk()
+    }
+
+    ctx.finalize()
+
+    if (responseError && !streamError) {
+      throw responseError
+    }
   }
 
   #settleOk() {
