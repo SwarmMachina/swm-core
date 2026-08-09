@@ -15,7 +15,17 @@ const baseline = {
 
 test('HTTP regression parameters default to the baseline configuration', () => {
   deepStrictEqual(resolveHttpParams(baseline, {}), {
-    tests: ['base-sync', 'base-async', 'headers', 'headers-prepared', 'post-base'],
+    tests: [
+      'base-sync',
+      'base-async',
+      'headers',
+      'headers-prepared',
+      'static-cache-hit',
+      'static-cache-miss',
+      'stream',
+      'stream-backpressure',
+      'post-base'
+    ],
     runs: 5,
     warmup: 4,
     duration: 12,

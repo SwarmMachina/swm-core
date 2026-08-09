@@ -1,0 +1,3 @@
+Static benchmark fixture. It is intentionally small: cache-miss measurements add
+the filesystem stat and read path without turning network throughput into the
+limiting factor.

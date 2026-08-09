@@ -7,6 +7,12 @@ import { parseArgs, shuffle } from '@swarmmachina/benchkit/orchestration'
 import { processV8Profile, type ProcessedV8Profile } from '@swarmmachina/benchkit/profiling'
 import { formatYmdHms, msToHuman } from '@swarmmachina/benchkit/reporting'
 import { median } from '@swarmmachina/benchkit/statistics'
+import {
+  assertNonEmpty,
+  assertNonNegativeFinite,
+  assertPositiveFinite,
+  assertPositiveSafeInteger
+} from './helpers/bench-args.js'
 import { TargetController } from './helpers/target-controller.js'
 import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
 import { REPOSITORY_ROOT, RUNTIME_BENCHMARK_DIR } from './runtime-paths.js'
@@ -105,6 +111,18 @@ function parseWsBenchArgs(argv: string[]): WsBenchArgs {
     },
     ...TARGET_ARG_HANDLERS
   })
+}
+
+function validateWsBenchArgs(args: WsBenchArgs): void {
+  assertNonEmpty(args.frameworks, '--fw')
+  assertPositiveSafeInteger(args.runs, '--runs')
+  assertNonNegativeFinite(args.warmup, '--warmup')
+  assertPositiveFinite(args.duration, '--duration')
+  assertPositiveSafeInteger(args.connections, '--connections')
+  assertPositiveSafeInteger(args.workers, '--workers')
+  assertPositiveSafeInteger(args.sampleMs, '--sample-ms')
+  assertPositiveSafeInteger(args.msgSize, '--msg-size')
+  assertPositiveSafeInteger(args.depth, '--depth')
 }
 
 interface WsRow {
@@ -267,6 +285,9 @@ async function runOne({
  */
 async function main() {
   const args = parseWsBenchArgs(process.argv)
+
+  validateWsBenchArgs(args)
+
   const targetController = new TargetController(args, REPOSITORY_ROOT, RUNTIME_BENCHMARK_DIR)
 
   for (const fw of args.frameworks) {

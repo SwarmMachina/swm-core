@@ -6,7 +6,18 @@ import { cpuGuard, metricGuard } from '@swarmmachina/benchkit/regression'
 import { median } from '@swarmmachina/benchkit/statistics'
 import { requireMetric, type ProfiledBenchmarkSummary, type SuiteOptions } from '../types.js'
 
-const TESTS = ['base-sync', 'base-async', 'headers', 'headers-prepared', 'post-base']
+const TESTS = [
+  'base-sync',
+  'base-async',
+  'headers',
+  'headers-prepared',
+  'static-cache-hit',
+  'static-cache-miss',
+  'stream',
+  'stream-backpressure',
+  'post-base'
+]
+const RPS_RATIO_TESTS = ['static-cache-hit', 'static-cache-miss', 'stream', 'stream-backpressure']
 
 /**
  * @param {string} name
@@ -22,6 +33,7 @@ interface HttpBaseline {
     connections?: number
     sampleMs?: number
     cpuProfile?: boolean
+    testConnections?: Record<string, number>
   }
   tests?: Record<string, { guards?: Record<string, { min?: number; max?: number }> }>
   cpuProfileGuard?: {
@@ -110,7 +122,7 @@ function summarizeCore(bench: ProfiledBenchmarkSummary): Record<string, number> 
     throw new Error(`benchmark ${bench.test?.name || 'unknown'} has no core result`)
   }
 
-  return {
+  const summary: Record<string, number> = {
     rps: requireMetric(medianRow, 'rps', 'http median'),
     latencyAvgMs: requireMetric(medianRow, 'latAvgMs', 'http median'),
     latencyP97_5Ms: requireMetric(medianRow, 'latP97_5Ms', 'http median'),
@@ -141,6 +153,37 @@ function summarizeCore(bench: ProfiledBenchmarkSummary): Record<string, number> 
       'array buffer memory'
     )
   }
+
+  if (bench.test?.name === 'stream-backpressure') {
+    summary.backpressurePauses = requireMetric(medianRow, 'backpressurePauses', 'http median')
+    summary.backpressureResumes = requireMetric(medianRow, 'backpressureResumes', 'http median')
+  }
+
+  return summary
+}
+
+function addRpsRatios(results: Record<string, Record<string, number>>): void {
+  const baseRps = results['base-sync']?.rps
+
+  if (typeof baseRps !== 'number' || !Number.isFinite(baseRps) || baseRps <= 0) {
+    throw new Error('base-sync benchmark has no positive RPS for relative HTTP guards')
+  }
+
+  for (const test of RPS_RATIO_TESTS) {
+    const result = results[test]
+
+    if (!result) {
+      throw new Error(`${test}: missing result for relative HTTP guard`)
+    }
+
+    const rps = result.rps
+
+    if (typeof rps !== 'number' || !Number.isFinite(rps)) {
+      throw new Error(`${test}: missing finite RPS for relative HTTP guard`)
+    }
+
+    result.rpsRelativeToBaseSync = Number((rps / baseRps).toFixed(4))
+  }
 }
 
 /**
@@ -159,6 +202,7 @@ export default async function runHttpSuite({ sourceBenchDir, runtimeBenchDir, re
 
   for (const test of params.tests) {
     const jsonOut = path.join(outDir, `${test}.json`)
+    const connections = baseline.parameters?.testConnections?.[test] ?? params.connections
 
     await runChild([
       path.join(runtimeBenchDir, 'bench.js'),
@@ -173,7 +217,7 @@ export default async function runHttpSuite({ sourceBenchDir, runtimeBenchDir, re
       '--duration',
       String(params.duration),
       '--connections',
-      String(params.connections),
+      String(connections),
       '--sample-ms',
       String(params.sampleMs),
       '--v8prof',
@@ -187,6 +231,8 @@ export default async function runHttpSuite({ sourceBenchDir, runtimeBenchDir, re
     results[test] = summarizeCore(bench)
     cpuProfiles.push(...(await copyCpuProfiles(bench, test, outDir, repoRoot)))
   }
+
+  addRpsRatios(results)
 
   if (!baseline.tests) {
     throw new Error('HTTP regression baseline is missing test guards')

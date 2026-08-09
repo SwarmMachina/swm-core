@@ -105,7 +105,6 @@ test('routes mode: custom 404', async () => {
         method: 'any',
         path: '/*',
         handler: (ctx) => {
-          console.log(ctx.getUrl())
           ctx.sendJson(
             {
               ok: false,

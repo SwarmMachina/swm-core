@@ -21,7 +21,7 @@
   },
   "metrics": {
     "upgradesPerSec": { "label": "upgrades", "unit": "upgrade/s" },
-    "latencyP99Ms": { "label": "p99 handshake", "unit": "ms" },
+    "latP99Ms": { "label": "p99 handshake", "unit": "ms" },
     "errors": { "label": "errors", "unit": "" },
     "heapMB": { "label": "heap peak", "unit": "MB" }
   },
@@ -31,9 +31,9 @@
       "guards": { "errors": { "max": 0 } },
       "reportOnly": [
         "upgradesPerSec",
-        "latencyAvgMs",
-        "latencyP95Ms",
-        "latencyP99Ms",
+        "latAvgMs",
+        "latP95Ms",
+        "latP99Ms",
         "eluPct",
         "eventLoopDelayP99Ms",
         "rssMB",
@@ -47,9 +47,9 @@
       "guards": { "errors": { "max": 0 } },
       "reportOnly": [
         "upgradesPerSec",
-        "latencyAvgMs",
-        "latencyP95Ms",
-        "latencyP99Ms",
+        "latAvgMs",
+        "latP95Ms",
+        "latP99Ms",
         "eluPct",
         "eventLoopDelayP99Ms",
         "rssMB",

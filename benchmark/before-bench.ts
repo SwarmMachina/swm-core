@@ -2,6 +2,7 @@ import { timed, type MetricsSummary, type TimedResult } from '@swarmmachina/benc
 import { parseArgs } from '@swarmmachina/benchkit/orchestration'
 import { formatYmdHms } from '@swarmmachina/benchkit/reporting'
 import { median } from '@swarmmachina/benchkit/statistics'
+import { assertNonNegativeFinite, assertPositiveFinite, assertPositiveSafeInteger } from './helpers/bench-args.js'
 import runLoad from './helpers/run-load.js'
 import { TargetController } from './helpers/target-controller.js'
 import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
@@ -60,6 +61,15 @@ function parseBeforeArgs(argv: string[]): BeforeArgs {
       ...TARGET_ARG_HANDLERS
     }
   ) as BeforeArgs
+}
+
+function validateBeforeArgs(args: BeforeArgs): void {
+  assertPositiveSafeInteger(args.runs, '--runs')
+  assertNonNegativeFinite(args.warmup, '--warmup')
+  assertPositiveFinite(args.duration, '--duration')
+  assertPositiveSafeInteger(args.connections, '--connections')
+  assertPositiveSafeInteger(args.pipelining, '--pipelining')
+  assertPositiveSafeInteger(args.sampleMs, '--sample-ms')
 }
 
 interface BeforeRun {
@@ -170,6 +180,9 @@ async function runOne({
  */
 async function main() {
   const args = parseBeforeArgs(process.argv)
+
+  validateBeforeArgs(args)
+
   const targetController = new TargetController(args, REPOSITORY_ROOT, RUNTIME_BENCHMARK_DIR)
   const runStamp = formatYmdHms()
   const per: Record<BeforeVariant, BeforeRun[]> = {

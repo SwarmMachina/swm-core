@@ -66,7 +66,7 @@ class MockCtx {
 
   #contentLength: number | null
 
-  contentLength(): number | null {
+  getContentLength(): number | null {
     return this.#contentLength
   }
 }
@@ -117,8 +117,8 @@ function parseBodyParserArgs(argv: string[]): BodyParserArgs {
     }
   })
 
-  if (!Number.isFinite(out.size) || out.size < 0) {
-    throw new Error('bad --size')
+  if (!Number.isFinite(out.size) || out.size <= 0) {
+    throw new Error('--size must be a positive number')
   }
 
   if (!Number.isFinite(out.chunk) || out.chunk <= 0) {

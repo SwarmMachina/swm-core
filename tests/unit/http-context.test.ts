@@ -1125,6 +1125,13 @@ describe('HttpContext', () => {
       ])
     })
 
+    test('response batch mock keeps the native receiver contract', () => {
+      const res = createMockRes()
+
+      strictEqual(res.endBatch(STATUS_TEXT[200]!, ['content-type', 'text/plain'], 'ok'), res)
+      deepStrictEqual(res.calls, [['endBatch', STATUS_TEXT[200], ['content-type', 'text/plain'], 'ok']])
+    })
+
     test('reply keeps the compatibility path when headers were staged dynamically', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()

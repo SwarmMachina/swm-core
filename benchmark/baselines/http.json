@@ -16,7 +16,7 @@
     "benchkit": "0.2.0",
     "swmUws": "0.5.6",
     "ciRunner": "self-hosted (Ubuntu 24.04, Intel Xeon E5-2680 v4, dedicated, schedutil)",
-    "note": "Calibrated from 4 self-hosted benchkit series with 3 runs per scenario. RPS floors sit 12-14% below the slowest series median; p99 ceilings include observed per-run scheduler spikes. Memory was stable and rssMB is report-only."
+    "note": "Base scenarios were calibrated from 4 self-hosted benchkit series with 3 runs per scenario. Their RPS floors sit 12-14% below the slowest series median; p99 ceilings include observed per-run scheduler spikes. Memory was stable and rssMB is report-only. Static and stream scenarios use portable same-run RPS ratios until their next self-hosted calibration."
   },
   "parameters": {
     "runs": 3,
@@ -24,7 +24,11 @@
     "durationSec": 6,
     "connections": 100,
     "sampleMs": 250,
-    "cpuProfile": true
+    "cpuProfile": true,
+    "testConnections": {
+      "static-cache-miss": 25,
+      "stream-backpressure": 10
+    }
   },
   "metrics": {
     "rps": { "label": "RPS", "unit": "req/s" },
@@ -33,7 +37,10 @@
     "heapMB": { "label": "heap peak", "unit": "MB" },
     "externalMB": { "label": "external peak", "unit": "MB" },
     "arrayBuffersMB": { "label": "arrayBuffers peak", "unit": "MB" },
-    "rssMB": { "label": "rss peak", "unit": "MB" }
+    "rssMB": { "label": "rss peak", "unit": "MB" },
+    "rpsRelativeToBaseSync": { "label": "RPS / base-sync", "unit": "ratio" },
+    "backpressurePauses": { "label": "native backpressure pauses", "unit": "events" },
+    "backpressureResumes": { "label": "native writable resumes", "unit": "events" }
   },
   "tests": {
     "base-sync": {
@@ -135,6 +142,56 @@
         "arrayBuffersMB": { "max": 2 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
+    "static-cache-hit": {
+      "description": "GET cached static fixture through serveStatic",
+      "guards": {
+        "rpsRelativeToBaseSync": { "min": 0.29 },
+        "latencyP99Ms": { "max": 25 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 48 },
+        "externalMB": { "max": 12 },
+        "arrayBuffersMB": { "max": 4 }
+      },
+      "reportOnly": ["rps", "latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
+    "static-cache-miss": {
+      "description": "GET uncached static fixture through serveStatic",
+      "guards": {
+        "rpsRelativeToBaseSync": { "min": 0.039 },
+        "latencyP99Ms": { "max": 25 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 48 },
+        "externalMB": { "max": 12 },
+        "arrayBuffersMB": { "max": 4 }
+      },
+      "reportOnly": ["rps", "latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
+    "stream": {
+      "description": "GET Readable response through ResStreamer",
+      "guards": {
+        "rpsRelativeToBaseSync": { "min": 0.12 },
+        "latencyP99Ms": { "max": 25 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 48 },
+        "externalMB": { "max": 12 },
+        "arrayBuffersMB": { "max": 4 }
+      },
+      "reportOnly": ["rps", "latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
+    "stream-backpressure": {
+      "description": "GET 1 MiB Readable response with observed native write backpressure",
+      "guards": {
+        "rpsRelativeToBaseSync": { "min": 0.005 },
+        "latencyP99Ms": { "max": 25 },
+        "errors": { "max": 0 },
+        "backpressurePauses": { "min": 1 },
+        "backpressureResumes": { "min": 1 },
+        "heapMB": { "max": 48 },
+        "externalMB": { "max": 12 },
+        "arrayBuffersMB": { "max": 4 }
+      },
+      "reportOnly": ["rps", "latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
     "post-base": {
       "description": "POST /base JSON body parsing hot path",

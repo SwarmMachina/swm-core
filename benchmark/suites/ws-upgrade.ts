@@ -70,9 +70,9 @@ function summarize(bench: ProfiledBenchmarkSummary, scenario: string): Record<st
 
   return {
     upgradesPerSec: requireFiniteNumber(medianRow.upgradesPerSec, `${scenario} median upgrades`),
-    latencyAvgMs: requireFiniteNumber(medianRow.latAvgMs, `${scenario} median average latency`),
-    latencyP95Ms: requireFiniteNumber(medianRow.latP95Ms, `${scenario} median p95 latency`),
-    latencyP99Ms: requireFiniteNumber(medianRow.latP99Ms, `${scenario} median p99 latency`),
+    latAvgMs: requireFiniteNumber(medianRow.latAvgMs, `${scenario} median average latency`),
+    latP95Ms: requireFiniteNumber(medianRow.latP95Ms, `${scenario} median p95 latency`),
+    latP99Ms: requireFiniteNumber(medianRow.latP99Ms, `${scenario} median p99 latency`),
     errors: rows.reduce((sum, row) => sum + (row.errors || 0), 0),
     eluPct: medianRequired(
       rows.map((row) => row.eluPct),

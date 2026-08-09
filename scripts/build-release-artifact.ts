@@ -32,6 +32,10 @@ export function verifyPackedFiles(files: PackedFile[]): void {
     if (!ALLOWED_ROOT_FILES.has(file) && !file.startsWith('dist/')) {
       throw new Error(`release tarball contains unexpected file: ${file}`)
     }
+
+    if (file.endsWith('.map')) {
+      throw new Error(`release tarball contains unpublished-source map: ${file}`)
+    }
   }
 }
 

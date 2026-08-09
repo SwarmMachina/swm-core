@@ -3,6 +3,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs, runChild } from '@swarmmachina/benchkit/orchestration'
 import { finiteMedian } from '@swarmmachina/benchkit/statistics'
+import {
+  assertNonEmpty,
+  assertNonNegativeFinite,
+  assertPositiveFinite,
+  assertPositiveSafeInteger
+} from './helpers/bench-args.js'
 import { BENCHMARK_PROFILES_DIR } from './runtime-paths.js'
 
 interface PayloadArgs {
@@ -99,11 +105,25 @@ function parsePayloadArgs(argv: string[]): PayloadArgs {
   })
 }
 
+function validatePayloadArgs(args: PayloadArgs): void {
+  assertNonEmpty(args.frameworks, '--fw')
+  assertNonEmpty(args.sizes, '--sizes')
+  assertPositiveSafeInteger(args.runs, '--runs')
+  assertNonNegativeFinite(args.warmup, '--warmup')
+  assertPositiveFinite(args.duration, '--duration')
+  assertPositiveSafeInteger(args.connections, '--connections')
+  assertPositiveSafeInteger(args.workers, '--workers')
+  assertPositiveSafeInteger(args.depth, '--depth')
+}
+
 /**
  *
  */
 async function main() {
   const args = parsePayloadArgs(process.argv)
+
+  validatePayloadArgs(args)
+
   const outDir = args.outDir || path.join(BENCHMARK_PROFILES_DIR, 'ws-payload')
   const rows = []
 

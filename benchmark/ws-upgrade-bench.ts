@@ -6,6 +6,12 @@ import { processV8Profile, type ProcessedV8Profile } from '@swarmmachina/benchki
 import type { TargetSession } from '@swarmmachina/benchkit/target-provider'
 import { formatYmdHms, msToHuman } from '@swarmmachina/benchkit/reporting'
 import { median } from '@swarmmachina/benchkit/statistics'
+import {
+  assertNonEmpty,
+  assertNonNegativeFinite,
+  assertPositiveFinite,
+  assertPositiveSafeInteger
+} from './helpers/bench-args.js'
 import wsUpgradeLoad from './helpers/ws-upgrade-load.js'
 import { TargetController } from './helpers/target-controller.js'
 import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from './helpers/target-session.js'
@@ -35,10 +41,10 @@ interface UpgradeRow {
   fw: string
   scenario: string
   upgradesPerSec: number
-  latencyAvgMs: number | null
-  latencyP95Ms: number | null
-  latencyP97_5Ms: number | null
-  latencyP99Ms: number | null
+  latAvgMs: number | null
+  latP95Ms: number | null
+  latP97_5Ms: number | null
+  latP99Ms: number | null
   errors: number
   eluPct: number | null
   eldP99ms: number | null
@@ -103,6 +109,16 @@ function parseBenchArgs(argv: string[]): UpgradeArgs {
   })
 }
 
+function validateBenchArgs(args: UpgradeArgs): void {
+  assertNonEmpty(args.frameworks, '--fw')
+  assertNonEmpty(args.scenarios, '--scenario')
+  assertPositiveSafeInteger(args.runs, '--runs')
+  assertNonNegativeFinite(args.warmup, '--warmup')
+  assertPositiveFinite(args.duration, '--duration')
+  assertPositiveSafeInteger(args.concurrency, '--concurrency')
+  assertPositiveSafeInteger(args.sampleMs, '--sample-ms')
+}
+
 /**
  *
  * @param {object} options
@@ -138,10 +154,10 @@ async function runScenario({
     fw: 'core',
     scenario,
     upgradesPerSec: result.upgradesPerSec,
-    latencyAvgMs: result.latencyAvgMs,
-    latencyP95Ms: result.latencyP95Ms,
-    latencyP97_5Ms: result.latencyP97_5Ms,
-    latencyP99Ms: result.latencyP99Ms,
+    latAvgMs: result.latencyAvgMs,
+    latP95Ms: result.latencyP95Ms,
+    latP97_5Ms: result.latencyP97_5Ms,
+    latP99Ms: result.latencyP99Ms,
     errors: result.errors,
     eluPct: metrics?.eluPct ?? null,
     eldP99ms: metrics?.eventLoopDelayMs?.p99 ?? null,
@@ -173,10 +189,10 @@ function medianRow(framework: string, scenario: string, rows: UpgradeRow[]) {
     fw: framework,
     scenario,
     upgradesPerSec: value('upgradesPerSec'),
-    latencyAvgMs: value('latencyAvgMs'),
-    latencyP95Ms: value('latencyP95Ms'),
-    latencyP97_5Ms: value('latencyP97_5Ms'),
-    latencyP99Ms: value('latencyP99Ms'),
+    latAvgMs: value('latAvgMs'),
+    latP95Ms: value('latP95Ms'),
+    latP97_5Ms: value('latP97_5Ms'),
+    latP99Ms: value('latP99Ms'),
     n: rows.length
   }
 }
@@ -186,6 +202,9 @@ function medianRow(framework: string, scenario: string, rows: UpgradeRow[]) {
  */
 async function main() {
   const args = parseBenchArgs(process.argv)
+
+  validateBenchArgs(args)
+
   const targetController = new TargetController(args, REPOSITORY_ROOT, RUNTIME_BENCHMARK_DIR)
 
   for (const scenario of args.scenarios) {
@@ -231,7 +250,7 @@ async function main() {
           rows.push(row)
           console.log(
             `[ws-upgrade] ${framework}/${scenario}: upgrades/s=${Math.round(row.upgradesPerSec)} ` +
-              `p99=${row.latencyP99Ms?.toFixed(2) ?? 'n/a'}ms errors=${row.errors}`
+              `p99=${row.latP99Ms?.toFixed(2) ?? 'n/a'}ms errors=${row.errors}`
           )
         }
       } finally {

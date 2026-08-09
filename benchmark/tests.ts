@@ -13,6 +13,7 @@ export interface TestDefinition {
   payload?: unknown
   responseText?: string
   responseHeaders?: Record<string, string | string[]>
+  requiresBackpressure?: boolean
 }
 
 export interface HeadersTestDefinition extends TestDefinition {
@@ -87,6 +88,55 @@ const TESTS: Map<string, TestDefinition> = new Map([
       pipelining: 10,
       description: 'Prevalidated reusable response headers benchmark',
       responseText: 'ok'
+    }
+  ],
+  [
+    'static-cache-hit',
+    {
+      name: 'static-cache-hit',
+      method: 'GET',
+      path: '/static-cache-hit/payload.txt',
+      duration: 6,
+      connections: 100,
+      pipelining: 10,
+      description: 'serveStatic cached-file lookup and reusable response metadata'
+    }
+  ],
+  [
+    'static-cache-miss',
+    {
+      name: 'static-cache-miss',
+      method: 'GET',
+      path: '/static-cache-miss/payload.txt',
+      duration: 6,
+      connections: 25,
+      pipelining: 1,
+      description: 'serveStatic uncached filesystem read path (cacheLimit: 0)'
+    }
+  ],
+  [
+    'stream',
+    {
+      name: 'stream',
+      method: 'GET',
+      path: '/stream',
+      duration: 6,
+      connections: 100,
+      pipelining: 1,
+      description: 'Readable streaming response lifecycle'
+    }
+  ],
+  [
+    'stream-backpressure',
+    {
+      name: 'stream-backpressure',
+      method: 'GET',
+      path: '/stream-backpressure',
+      duration: 6,
+      connections: 10,
+      pipelining: 1,
+      description: '1 MiB Readable stream that must observe native write backpressure and resume',
+      requiresBackpressure: true
     }
   ],
   [

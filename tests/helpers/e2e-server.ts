@@ -2,14 +2,7 @@ import Server from '../../src/index.js'
 import { getFreePort } from '@swarmmachina/benchkit'
 
 import type HttpContext from '../../src/http-context.js'
-import type {
-  HeaderPrefetch,
-  Handler,
-  HttpBaseOptions,
-  HttpOptions,
-  Route,
-  WSOptions
-} from '../../src/server/options.js'
+import type { HeaderPrefetch, Handler, HttpOptions, Route, WSOptions } from '../../src/server/options.js'
 
 export interface HttpServerOptions {
   onRequest?: Handler
@@ -27,22 +20,6 @@ export interface HttpServerHandle {
   port: number
   baseUrl: string
   close: () => Promise<void>
-}
-
-function createHttpOptions(
-  common: HttpBaseOptions,
-  onRequest: Handler | undefined,
-  routes: Route[] | undefined
-): HttpOptions {
-  if (onRequest !== undefined) {
-    return { ...common, onRequest }
-  }
-
-  if (routes !== undefined) {
-    return { ...common, routes }
-  }
-
-  return common
 }
 
 export async function startHttpServer({
@@ -64,7 +41,8 @@ export async function startHttpServer({
     ...(prefetchHeaders !== undefined ? { prefetchHeaders } : {}),
     ...(onError !== undefined ? { onError } : {})
   }
-  const http = createHttpOptions(common, onRequest, routes)
+  const http: HttpOptions =
+    onRequest !== undefined ? { ...common, onRequest } : routes !== undefined ? { ...common, routes } : common
   const server = new Server({
     http,
     port
@@ -123,8 +101,6 @@ export async function startWsServer({
     port,
     httpBaseUrl: `http://127.0.0.1:${port}`,
     wsBaseUrl: `ws://127.0.0.1:${port}`,
-    close: async () => {
-      await server.shutdown(1000)
-    }
+    close: () => server.shutdown(1000)
   }
 }

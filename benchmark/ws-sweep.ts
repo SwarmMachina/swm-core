@@ -3,6 +3,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs, runChild } from '@swarmmachina/benchkit/orchestration'
+import {
+  assertNonEmpty,
+  assertNonNegativeFinite,
+  assertPositiveFinite,
+  assertPositiveSafeInteger
+} from './helpers/bench-args.js'
 
 interface SweepArgs {
   frameworks: string
@@ -100,6 +106,13 @@ async function main() {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
+
+  assertNonEmpty(frameworks, '--fw')
+  assertPositiveSafeInteger(args.runs, '--runs')
+  assertNonNegativeFinite(args.warmup, '--warmup')
+  assertPositiveFinite(args.duration, '--duration')
+  assertPositiveSafeInteger(args.msgSize, '--msg-size')
+  assertPositiveSafeInteger(args.depth, '--depth')
 
   if (!args.connectionsList.length) {
     throw new Error('--connections-list must contain at least one positive number')

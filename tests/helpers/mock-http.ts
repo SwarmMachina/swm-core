@@ -1,4 +1,4 @@
-import type { HttpRequest, HttpResponse } from '@swarmmachina/swm-uws'
+import type { HttpRequest, HttpResponse, NativeData } from '@swarmmachina/swm-uws'
 import type { Readable } from 'node:stream'
 
 export type MockCall = [method: string, ...args: unknown[]]
@@ -25,7 +25,7 @@ interface MockResControls {
   getProxiedRemoteAddressCallCount(): number
   getRemoteAddressCallCount(): number
   getWarnings(): string[]
-  endBatch(status: string, headerLines: string, body: ByteInput): void
+  endBatch(status: string, headerLines: string[], body?: NativeData): this
   beginWrite(): void
   pushCollectedBody(data: ArrayLike<number> | null): void
   setWriteResultSequence(results: boolean[]): void
@@ -172,8 +172,10 @@ export function createMockRes(options: MockResOptions = {}): MockRes {
     close(): void {
       calls.push(['close'])
     },
-    endBatch(status: string, headerLines: string, body: ByteInput): void {
+    endBatch(status: string, headerLines: string[], body?: NativeData) {
       calls.push(['endBatch', status, headerLines, body])
+
+      return this
     },
     beginWrite(): void {
       calls.push(['beginWrite'])

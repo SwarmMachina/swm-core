@@ -90,6 +90,8 @@ export type BenchmarkMetric =
   | 'heapMB'
   | 'eluPct'
   | 'errors'
+  | 'backpressurePauses'
+  | 'backpressureResumes'
 
 export interface BenchmarkRow {
   fw: string
@@ -104,6 +106,8 @@ export interface BenchmarkRow {
   heapMB?: number | null
   eluPct?: number | null
   errors?: number | null
+  backpressurePauses?: number | null
+  backpressureResumes?: number | null
 }
 
 export interface BenchmarkRun {

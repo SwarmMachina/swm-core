@@ -1,4 +1,6 @@
 import http from 'node:http'
+import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { parseArgs } from '@swarmmachina/benchkit/orchestration'
 import { TargetRuntime } from '@swarmmachina/benchkit/target'
 import { getTest, type HeadersTestDefinition } from './tests.js'
@@ -47,6 +49,31 @@ const { fw, host, port, testName } = parseArgs(
 const HEADERS_TEST = getTest('headers') as HeadersTestDefinition
 const BASE_SYNC_TEST = getTest('base-sync')
 const BASE_ASYNC_TEST = getTest('base-async')
+const STATIC_FIXTURE_ROOT = join(import.meta.dirname, 'fixtures')
+const STREAM_PAYLOAD = Buffer.from('stream benchmark payload\n'.repeat(512))
+const STREAM_BACKPRESSURE_CHUNKS = Array.from({ length: 16 }, () => Buffer.alloc(64 * 1024, 's'))
+
+let streamBackpressurePauses = 0
+let streamBackpressureResumes = 0
+
+function createBackpressureReadable(): Readable {
+  const readable = Readable.from(STREAM_BACKPRESSURE_CHUNKS)
+
+  let paused = false
+
+  readable.on('pause', () => {
+    paused = true
+    streamBackpressurePauses++
+  })
+  readable.on('resume', () => {
+    if (paused) {
+      paused = false
+      streamBackpressureResumes++
+    }
+  })
+
+  return readable
+}
 
 /**
  * @returns {Promise<unknown>}
@@ -93,8 +120,11 @@ async function runCore(port: number, options: CoreOptions = {}) {
     process.env.SWM_UWS_NATIVE_FAST_PATHS = nativeFastPaths
   }
 
-  const { default: Server, prepareHeaders } = await import('../src/index.js')
+  const { default: Server, prepareHeaders, serveStatic } = await import('../src/index.js')
   const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
+  const streamHeaders = prepareHeaders({ 'content-type': 'text/plain; charset=utf-8' })
+  const serveCached = serveStatic(STATIC_FIXTURE_ROOT, { cacheLimit: 1 })
+  const serveUncached = serveStatic(STATIC_FIXTURE_ROOT, { cacheLimit: 0 })
   const onRequest: Handler = (ctx) => {
     const method = ctx.getMethod()
     const url = ctx.getUrl()
@@ -113,6 +143,33 @@ async function runCore(port: number, options: CoreOptions = {}) {
 
     if (method === 'get' && url === '/headers-prepared') {
       return ctx.reply(200, preparedHeaders, HEADERS_TEST.responseText)
+    }
+
+    if (method === 'get' && url === '/__bench/stream-backpressure/reset') {
+      streamBackpressurePauses = 0
+      streamBackpressureResumes = 0
+
+      return { ok: true }
+    }
+
+    if (method === 'get' && url === '/__bench/stream-backpressure/stats') {
+      return { pauses: streamBackpressurePauses, resumes: streamBackpressureResumes }
+    }
+
+    if (method === 'get' && url.startsWith('/static-cache-hit/')) {
+      return serveCached(ctx)
+    }
+
+    if (method === 'get' && url.startsWith('/static-cache-miss/')) {
+      return serveUncached(ctx)
+    }
+
+    if (method === 'get' && url === '/stream') {
+      return ctx.stream(Readable.from([STREAM_PAYLOAD]), 200, streamHeaders)
+    }
+
+    if (method === 'get' && url === '/stream-backpressure') {
+      return ctx.stream(createBackpressureReadable(), 200, streamHeaders)
     }
 
     if (method === 'post' && url === '/base') {

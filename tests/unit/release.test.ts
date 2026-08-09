@@ -1,6 +1,7 @@
 import { deepStrictEqual, throws } from 'node:assert'
 import { describe, test } from 'node:test'
 import { verifyPackedFiles } from '../../scripts/build-release-artifact.js'
+import { assertCorePackageIsolation } from '../../scripts/package-contract.js'
 import { isMissingPublishedPackage } from '../../scripts/publish-release-artifact.js'
 import { verifyBindingLockIntegrity, verifyReleaseMetadata } from '../../scripts/verify-release.js'
 
@@ -62,6 +63,33 @@ describe('release tarball contents', () => {
 
   test('rejects accidental non-package files', () => {
     throws(() => verifyPackedFiles([...required, 'tests/private.test.js'].map((path) => ({ path }))), /unexpected file/)
+  })
+
+  test('rejects source maps without published TypeScript sources', () => {
+    throws(
+      () => verifyPackedFiles([...required, 'dist/http-context.js.map'].map((path) => ({ path }))),
+      /unpublished-source map/
+    )
+  })
+})
+
+describe('published core package isolation', () => {
+  test('accepts the scoped core package without a test-only binding', () => {
+    assertCorePackageIsolation({
+      name: '@swarmmachina/swm-core',
+      imports: { '#uws-binding': { default: '@swarmmachina/swm-uws' } }
+    })
+  })
+
+  test('rejects a test-only binding condition in the scoped core package', () => {
+    throws(
+      () =>
+        assertCorePackageIsolation({
+          name: '@swarmmachina/swm-core',
+          imports: { '#uws-binding': { 'swm-core-test': './tests/mock.js', default: '@swarmmachina/swm-uws' } }
+        }),
+      /must not reference the disposable test build/
+    )
   })
 })
 
