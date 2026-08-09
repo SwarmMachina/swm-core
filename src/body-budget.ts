@@ -99,10 +99,6 @@ export default class BodyBudget {
   #getReservation(owner: BudgetOwner): number {
     this.#assertOwner(owner)
 
-    if (!this.#reservations.has(owner)) {
-      throw new Error('BodyBudget reservation is not active')
-    }
-
     const bytes = this.#reservations.get(owner)
 
     if (bytes === undefined) {

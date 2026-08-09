@@ -326,6 +326,10 @@ export default class BodyParser {
       return true
     }
 
+    if (bytes === this.#reservedBytes) {
+      return true
+    }
+
     if (!this.#budget.resize(bytes, this)) {
       return false
     }
@@ -383,21 +387,36 @@ export default class BodyParser {
    * @param {HttpContext} ctx
    * @param {number} [maxSize]
    */
-  reset(ctx: HttpBodyContext, maxSize = this.#maxSize): void {
-    if (this.#state === 'collecting' || this.#state === 'idle') {
-      this.#cancel(CACHED_ERRORS.aborted, 'aborted')
+  reset(ctx: HttpBodyContext, maxSize: number = this.#maxSize): void {
+    if (this.#state !== 'idle' && this.#state !== 'cleared') {
+      if (this.#state === 'collecting') {
+        this.#cancel(CACHED_ERRORS.aborted, 'aborted')
+      }
+
+      this.#releaseReservation()
+      this.#generation++
+      this.#clearRequestState()
     }
 
-    this.#releaseReservation()
-    this.#generation++
-    this.#clearRequestState()
     this.#maxSize = validateBodyByteLimit(maxSize, 'maxSize')
     this.#ctx = ctx
     this.#state = 'idle'
   }
 
   clear(): void {
-    if (this.#state === 'collecting' || this.#state === 'idle') {
+    if (this.#state === 'cleared') {
+      return
+    }
+
+    if (this.#state === 'idle') {
+      this.#clearRequestState()
+      this.#ctx = null
+      this.#state = 'cleared'
+
+      return
+    }
+
+    if (this.#state === 'collecting') {
       this.#cancel(CACHED_ERRORS.aborted, 'aborted')
     }
 
@@ -639,10 +658,6 @@ export default class BodyParser {
 
   timeout(): void {
     this.#cancel(CACHED_ERRORS.requestTimeout, 'failed')
-  }
-
-  buffer(maxSize?: number): Promise<Buffer> {
-    return this.body(maxSize)
   }
 
   async text(maxSize?: number): Promise<string> {

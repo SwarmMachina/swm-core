@@ -253,6 +253,40 @@ describe('BodyParser', () => {
       strictEqual(budget.usedBytes, 0)
     })
 
+    test('should not resize an unchanged known-body reservation', async () => {
+      const calls: string[] = []
+      const budget = {
+        tryReserve(bytes: number): boolean {
+          calls.push(`reserve:${bytes}`)
+
+          return true
+        },
+        resize(bytes: number): boolean {
+          calls.push(`resize:${bytes}`)
+
+          return true
+        },
+        release(): void {
+          calls.push('release')
+        }
+      }
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req, { bindingCapabilities: {}, httpBodyBudget: budget })
+      parser.reset(ctx, 16)
+      const body = parser.body()
+
+      res.pushData('test', true)
+      strictEqual((await body).toString(), 'test')
+      deepStrictEqual(calls, ['reserve:4'])
+
+      parser.clear()
+      deepStrictEqual(calls, ['reserve:4', 'release'])
+    })
+
     test('should reject when aggregate capacity cannot be reserved', async () => {
       const parser = new BodyParser()
       const server = {
@@ -883,31 +917,6 @@ describe('BodyParser', () => {
 
         return true
       })
-    })
-  })
-
-  describe('buffer()', () => {
-    test('should be alias for body()', async () => {
-      const parser = new BodyParser()
-      const ctx = new HttpContext(null)
-      const res = createMockRes()
-      const req = createMockReq({ headers: { 'content-length': '2' } })
-
-      ctx.reset(res, req)
-
-      parser.reset(ctx)
-
-      const bodyPromise = parser.body()
-      const bufferPromise = parser.buffer()
-
-      strictEqual(bodyPromise, bufferPromise)
-
-      res.pushData(Buffer.from([1, 2]), true)
-
-      const bodyResult = await parser.body()
-      const bufferResult = await parser.buffer()
-
-      strictEqual(bodyResult, bufferResult)
     })
   })
 

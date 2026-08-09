@@ -249,7 +249,7 @@ export default class ResStreamer {
     return this.#streamPromise
   }
 
-  #resumeWritable = () => {
+  #resumeReadable = () => {
     this.#paused = false
     this.#readable?.resume()
   }
@@ -270,12 +270,8 @@ export default class ResStreamer {
     if (!ok && !this.#paused) {
       this.#paused = true
       this.#readable?.pause()
-      this.onWritable(this.#onWritableResume)
+      this.onWritable(this.#resumeReadable)
     }
-  }
-
-  #onWritableResume = () => {
-    this.#resumeWritable()
   }
 
   #onEnd = () => {
