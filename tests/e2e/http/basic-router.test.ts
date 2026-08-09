@@ -43,6 +43,24 @@ test('onRequest mode: GET /echo?q=1 => 200 "1"', async () => {
   assert.strictEqual(text, '1')
 })
 
+test('setHeader emits array values as separate response header fields', async () => {
+  server = await startHttpServer({
+    onRequest: (ctx) => {
+      ctx.setHeader('set-cookie', ['access=one; Path=/', 'refresh=two; Path=/refresh'])
+      ctx.setHeader('cookie', ['access=one', 'refresh=two'])
+
+      return 'ok'
+    }
+  })
+
+  const { status, headers, text } = await reqText(server.baseUrl)
+
+  assert.strictEqual(status, 200)
+  assert.strictEqual(text, 'ok')
+  assert.deepEqual(headers.getSetCookie(), ['access=one; Path=/', 'refresh=two; Path=/refresh'])
+  assert.strictEqual(headers.get('cookie'), 'access=one; refresh=two')
+})
+
 test('onRequest mode: POST /echo => 404 {ok:false}', async () => {
   server = await startHttpServer({
     onRequest: async (ctx) => {

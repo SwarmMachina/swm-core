@@ -672,9 +672,12 @@ export interface HttpContext {
   /**
    * Stages a response header, replacing earlier values for the same name.
    *
+   * Array values emit one header field per item, preserving order. `Cookie`
+   * values follow node:http and are joined with `; `.
+   *
    * @throws {TypeError} For invalid names or CR/LF-containing values.
    */
-  setHeader(key: string, value: string | number): this
+  setHeader(key: string, value: string | number | readonly string[]): this
 
   /**
    * Appends another value for a repeatable response header.

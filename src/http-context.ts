@@ -876,10 +876,10 @@ export default class HttpContext {
 
   /**
    * @param {string} key
-   * @param {string} value
+   * @param {string | number | readonly string[]} value
    * @returns {HttpContext}
    */
-  setHeader(key: string, value: string | number | null | undefined): this {
+  setHeader(key: string, value: string | number | readonly string[] | null | undefined): this {
     if (this.replied || this.aborted) {
       return this
     }
@@ -892,11 +892,34 @@ export default class HttpContext {
       return this
     }
 
+    const headerKey = key.toLowerCase()
+
+    if (Array.isArray(value)) {
+      const headerValues: string[] = []
+
+      for (let i = 0, len = value.length; i < len; i++) {
+        const entry = value[i]
+
+        if (entry === undefined || entry === null) {
+          continue
+        }
+
+        const headerValue = `${entry}`
+
+        assertHeaderValue(headerValue)
+        headerValues.push(headerValue)
+      }
+
+      const pendingValue = headerKey === 'cookie' && headerValues.length > 0 ? headerValues.join('; ') : headerValues
+
+      this.#pendingHeaders.set(headerKey, [key, pendingValue])
+
+      return this
+    }
+
     const headerValue = `${value}`
 
     assertHeaderValue(headerValue)
-
-    const headerKey = key.toLowerCase()
 
     this.#pendingHeaders.set(headerKey, [key, headerValue])
 

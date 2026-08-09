@@ -190,6 +190,7 @@ export function verifyHttpContextReaders(ctx: HttpContext): void {
   ctx.getReqHeader('x-test')
   ctx.getContentLength()
   ctx.setStatus(201)
+  ctx.setHeader('set-cookie', ['access=one; Path=/', 'refresh=two; Path=/refresh'] as const)
 }
 
 // @ts-expect-error prefetch belongs to the HTTP application options

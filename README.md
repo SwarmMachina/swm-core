@@ -1108,10 +1108,12 @@ ctx.setStatus(201).send({ created: true })
 
 ##### `ctx.setHeader(key, value)`
 
-Set or replace a staged response header. Header names are case-insensitive. Repeated `setHeader()` calls replace previously staged values for the same header. Null or undefined values are silently ignored.
+Set or replace a staged response header. Header names are case-insensitive. Repeated `setHeader()` calls replace previously staged values for the same header. An array emits one header field per item in order, which is useful for repeatable fields such as `Set-Cookie`; matching `node:http`, `Cookie` array values are joined with `; `. Null or undefined scalar values are silently ignored.
 
 ```javascript
 ctx.setHeader('x-header-any', 'string-value').setStatus(201).send({ created: true })
+
+ctx.setHeader('set-cookie', ['access=...; Path=/; HttpOnly', 'refresh=...; Path=/refresh; HttpOnly'])
 ```
 
 **Returns:** `HttpContext`

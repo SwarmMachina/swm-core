@@ -755,6 +755,68 @@ describe('HttpContext', () => {
       strictEqual(res.getWarnings().length, 0)
     })
 
+    test('setHeader should stage string[] values as separate header lines', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.setHeader('set-cookie', ['a=1; Path=/', 'b=2; Path=/refresh']), ctx)
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeader should validate an array atomically before replacing a staged header', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('set-cookie', 'original=1; Path=/')
+
+      throws(() => ctx.setHeader('set-cookie', ['safe=1; Path=/', 'ok\r\nSet-Cookie: evil=1']), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
+      })
+
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [['set-cookie', 'original=1; Path=/']])
+    })
+
+    test('setHeader should join Cookie array values like node:http', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('cookie', ['access=one', 'refresh=two'])
+      ctx.sendText('ok')
+
+      const cookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(cookieCalls, [['cookie', 'access=one; refresh=two']])
+    })
+
     test('appendHeader should stage repeated response headers in order', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
