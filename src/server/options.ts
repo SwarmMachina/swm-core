@@ -113,6 +113,25 @@ const HTTP_METHODS: ReadonlySet<HttpMethod> = new Set([
   'head',
   'any'
 ])
+const HTTP_CALLBACK_NAMES = ['onRequest', 'onError']
+const HTTP_TRANSPORT_TIMEOUT_NAMES = [
+  'headersTimeoutMs',
+  'keepAliveTimeoutMs',
+  'bodyIdleTimeoutMs',
+  'responseWriteTimeoutMs'
+]
+const WS_CALLBACK_NAMES = [
+  'onOpen',
+  'onDrain',
+  'onDropped',
+  'onUpgrade',
+  'selectProtocol',
+  'onError',
+  'onClose',
+  'onMessage',
+  'onSubscription',
+  'connectionKey'
+]
 
 export const NOOP = () => {}
 
@@ -305,7 +324,7 @@ export function normalizeTransportOptions(transport: unknown): Readonly<HttpTran
     )
   }
 
-  for (const name of ['headersTimeoutMs', 'keepAliveTimeoutMs', 'bodyIdleTimeoutMs', 'responseWriteTimeoutMs']) {
+  for (const name of HTTP_TRANSPORT_TIMEOUT_NAMES) {
     if (transport[name] !== undefined) {
       normalized[name] = normalizePositiveTransportInteger(transport[name], `transport.${name}`, MAX_UWS_TIMEOUT_MS)
     }
@@ -381,9 +400,7 @@ function validateRoute(route: unknown, index: number): void {
     return
   }
 
-  const chain = Array.isArray(before) ? before : [before]
-
-  if (chain.some((item) => typeof item !== 'function')) {
+  if (typeof before !== 'function' && (!Array.isArray(before) || before.some((item) => typeof item !== 'function'))) {
     throw new TypeError('Route before must be a function or an array of functions')
   }
 }
@@ -418,7 +435,7 @@ export function normalizeHttpOptions(http: unknown): NormalizedHttpOptions | nul
   }
 
   assertOptionsObject(http, 'http')
-  validateCallbacks(http, ['onRequest', 'onError'], 'http')
+  validateCallbacks(http, HTTP_CALLBACK_NAMES, 'http')
 
   if (http.onRequest !== undefined && http.routes !== undefined) {
     throw new TypeError('Cannot use both "http.onRequest" and "http.routes" options. Choose one.')
@@ -486,22 +503,7 @@ export function normalizeWsOptions(ws: unknown): NormalizedWSOptions | null {
     throw new TypeError('ws.maxBodySize is no longer supported; use ws.maxPayloadLength in bytes')
   }
 
-  validateCallbacks(
-    ws,
-    [
-      'onOpen',
-      'onDrain',
-      'onDropped',
-      'onUpgrade',
-      'selectProtocol',
-      'onError',
-      'onClose',
-      'onMessage',
-      'onSubscription',
-      'connectionKey'
-    ],
-    'ws'
-  )
+  validateCallbacks(ws, WS_CALLBACK_NAMES, 'ws')
 
   if (ws.onUpgrade === undefined) {
     throw new TypeError('ws.onUpgrade is required; explicitly authorize or reject every WebSocket upgrade')
