@@ -6,5 +6,6 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["src/**/*.js", "src/**/*.ts", "src/**/*.d.ts", "tests/**/*.js", "tests/**/*.ts"]
+  "include": ["src/**/*.js", "src/**/*.ts", "src/**/*.d.ts", "tests/**/*.js", "tests/**/*.ts"],
+  "exclude": ["tests/fixtures/types/**"]
 }
