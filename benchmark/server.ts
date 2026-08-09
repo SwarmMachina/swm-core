@@ -85,13 +85,25 @@ async function getAsyncPayload(): Promise<unknown> {
 /**
  * @param {import('../src/http-context.js').default} ctx
  */
-function sendCoreHeadersBench(ctx: HttpContext): void {
+function sendCoreHeadersBenchWithAppend(ctx: HttpContext): void {
   ctx.setHeader('content-type', HEADERS_TEST.responseHeaders['content-type'])
   ctx.setHeader('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
   ctx.setHeader('x-trace-id', HEADERS_TEST.responseHeaders['x-trace-id'])
   ctx.setHeader('x-response-id', HEADERS_TEST.responseHeaders['x-response-id'])
   ctx.appendHeader('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][0])
   ctx.appendHeader('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'][1])
+  ctx.reply(200, null, HEADERS_TEST.responseText)
+}
+
+/**
+ * @param {import('../src/http-context.js').default} ctx
+ */
+function sendCoreHeadersBenchWithArray(ctx: HttpContext): void {
+  ctx.setHeader('content-type', HEADERS_TEST.responseHeaders['content-type'])
+  ctx.setHeader('cache-control', HEADERS_TEST.responseHeaders['cache-control'])
+  ctx.setHeader('x-trace-id', HEADERS_TEST.responseHeaders['x-trace-id'])
+  ctx.setHeader('x-response-id', HEADERS_TEST.responseHeaders['x-response-id'])
+  ctx.setHeader('set-cookie', HEADERS_TEST.responseHeaders['set-cookie'])
   ctx.reply(200, null, HEADERS_TEST.responseText)
 }
 
@@ -111,10 +123,17 @@ interface CoreOptions {
   maxBodyBudget?: number | null
   requestTimeoutMs?: number
   nativeFastPaths?: string
+  headerMode?: 'append' | 'array'
 }
 
 async function runCore(port: number, options: CoreOptions = {}) {
-  const { prefetch = false, maxBodyBudget = null, requestTimeoutMs = 0, nativeFastPaths } = options
+  const {
+    prefetch = false,
+    maxBodyBudget = null,
+    requestTimeoutMs = 0,
+    nativeFastPaths,
+    headerMode = 'append'
+  } = options
 
   if (nativeFastPaths !== undefined) {
     process.env.SWM_UWS_NATIVE_FAST_PATHS = nativeFastPaths
@@ -125,6 +144,7 @@ async function runCore(port: number, options: CoreOptions = {}) {
   const streamHeaders = prepareHeaders({ 'content-type': 'text/plain; charset=utf-8' })
   const serveCached = serveStatic(STATIC_FIXTURE_ROOT, { cacheLimit: 1 })
   const serveUncached = serveStatic(STATIC_FIXTURE_ROOT, { cacheLimit: 0 })
+  const sendHeadersBench = headerMode === 'array' ? sendCoreHeadersBenchWithArray : sendCoreHeadersBenchWithAppend
   const onRequest: Handler = (ctx) => {
     const method = ctx.getMethod()
     const url = ctx.getUrl()
@@ -138,7 +158,7 @@ async function runCore(port: number, options: CoreOptions = {}) {
     }
 
     if (method === 'get' && url === '/headers') {
-      return sendCoreHeadersBench(ctx)
+      return sendHeadersBench(ctx)
     }
 
     if (method === 'get' && url === '/headers-prepared') {
@@ -296,6 +316,18 @@ async function runRawBinding(port: number): Promise<void> {
  *
  */
 async function main() {
+  if (fw === 'core-set-header-append') {
+    await runCore(port, { headerMode: 'append' })
+
+    return
+  }
+
+  if (fw === 'core-set-header-array') {
+    await runCore(port, { headerMode: 'array' })
+
+    return
+  }
+
   if (fw === 'core' || fw === 'core-swm-uws' || fw === 'core-uwebsockets' || fw === 'core-lazy') {
     await runCore(port)
 
