@@ -31,6 +31,16 @@ const previousWorkspace = readFileSync(workspacePath, 'utf8')
 const previousSwmVersion = packageJson.dependencies['@swarmmachina/swm-uws']
 const previousUpstream = packageJson.devDependencies['uwebsockets.js']
 const previousUpstreamTag = /#(v20\.\d+\.0)$/.exec(previousUpstream)?.[1]
+const previousReleaseAgeExclusion = `'@swarmmachina/swm-uws@${previousSwmVersion}'`
+const nextReleaseAgeExclusion = `'@swarmmachina/swm-uws@${nextSwmVersion}'`
+const nextWorkspace = previousWorkspace.replaceAll(previousReleaseAgeExclusion, nextReleaseAgeExclusion)
+const transitionWorkspace =
+  previousSwmVersion === nextSwmVersion
+    ? nextWorkspace
+    : previousWorkspace.replaceAll(
+        previousReleaseAgeExclusion,
+        `${previousReleaseAgeExclusion}\n  - ${nextReleaseAgeExclusion}`
+      )
 
 /**
  * @param {string} lockfile
@@ -84,10 +94,9 @@ function getPublishedBindingIntegrity(version: string): string {
 packageJson.dependencies['@swarmmachina/swm-uws'] = nextSwmVersion
 packageJson.devDependencies['uwebsockets.js'] = `github:uNetworking/uWebSockets.js#${nextUpstreamTag}`
 writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
-writeFileSync(
-  workspacePath,
-  previousWorkspace.replaceAll(`'@swarmmachina/swm-uws@${previousSwmVersion}'`, `'@swarmmachina/swm-uws@${swmVersion}'`)
-)
+// pnpm validates the existing lockfile before replacing its binding entry. Keep
+// both exact releases exempt during that transition, then retain only the new one.
+writeFileSync(workspacePath, transitionWorkspace)
 
 try {
   // HyperExpress 7.0.2 has a pinned Git subdependency. The runtime binding's
@@ -133,6 +142,8 @@ try {
       `Lockfile resolution mismatch: swm-uws=${lockedSwmVersion}, uWebSockets.js=${lockedUpstreamVersion}`
     )
   }
+
+  writeFileSync(workspacePath, nextWorkspace)
 } catch (error) {
   writeFileSync(packagePath, previousPackage)
   writeFileSync(lockPath, previousLock)
