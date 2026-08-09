@@ -10,6 +10,7 @@ let rootDir = ''
 interface CapturedResponse {
   status: number
   headers: Record<string, string>
+  responseHeaders: Record<string, string> | null
   body: string | Buffer | undefined
   replied: boolean
 }
@@ -50,7 +51,13 @@ after(() => {
  * @returns {object}
  */
 function fakeCtx(url: string, method = 'get'): FakeContext {
-  const captured: CapturedResponse = { status: 200, headers: {}, body: undefined, replied: false }
+  const captured: CapturedResponse = {
+    status: 200,
+    headers: {},
+    responseHeaders: null,
+    body: undefined,
+    replied: false
+  }
 
   return {
     captured,
@@ -72,6 +79,7 @@ function fakeCtx(url: string, method = 'get'): FakeContext {
     },
     reply(status: number, headers: Record<string, string>, body: string | Buffer) {
       captured.status = status
+      captured.responseHeaders = headers
       Object.assign(captured.headers, headers)
       captured.body = body
       captured.replied = true
@@ -179,4 +187,40 @@ test('serveStatic: bounded cache evicts oldest and re-reads from disk', async ()
   assert.strictEqual(bodyText(ctx.captured.body), 'A2')
 
   rmSync(dir, { recursive: true, force: true })
+})
+
+test('serveStatic: cache hits reuse the response header block', async () => {
+  const handler = serveStatic(rootDir)
+  const first = fakeCtx('/assets/app.js')
+  const second = fakeCtx('/assets/app.js')
+
+  await handler(first)
+  await handler(second)
+
+  assert.strictEqual(first.captured.responseHeaders, second.captured.responseHeaders)
+})
+
+test('serveStatic: cacheLimit zero disables caching', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'swm-static-no-cache-'))
+
+  writeFileSync(join(dir, 'asset.txt'), 'v1')
+  const handler = serveStatic(dir, { cacheLimit: 0 })
+
+  let ctx = fakeCtx('/asset.txt')
+
+  await handler(ctx)
+  assert.strictEqual(bodyText(ctx.captured.body), 'v1')
+
+  writeFileSync(join(dir, 'asset.txt'), 'v2')
+  ctx = fakeCtx('/asset.txt')
+  await handler(ctx)
+  assert.strictEqual(bodyText(ctx.captured.body), 'v2')
+
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('serveStatic: rejects an invalid cache limit at initialization', () => {
+  for (const cacheLimit of [-1, 1.5, NaN, Infinity]) {
+    assert.throws(() => serveStatic(rootDir, { cacheLimit }), /cacheLimit must be a non-negative safe integer/)
+  }
 })

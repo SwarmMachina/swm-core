@@ -20,7 +20,7 @@ interface StaticContext {
 
 interface StaticEntry {
   readonly buf: Buffer
-  readonly type: string
+  readonly headers: Record<string, string>
 }
 
 const MIME_TYPES: Readonly<Record<string, string>> = {
@@ -62,13 +62,20 @@ export default function serveStatic(
   const cacheLimit = options.cacheLimit ?? 128
   const maxAge = options.maxAge
   const cacheControl = maxAge != null ? `public, max-age=${maxAge}` : null
-  const cache = useCache ? new Map<string, StaticEntry>() : null
+
+  if (!Number.isSafeInteger(cacheLimit) || cacheLimit < 0) {
+    throw new TypeError('serveStatic: cacheLimit must be a non-negative safe integer')
+  }
+
+  const cache = useCache && cacheLimit > 0 ? new Map<string, StaticEntry>() : null
 
   /**
    */
   async function load(absPath: string): Promise<StaticEntry | null> {
-    if (cache && cache.has(absPath)) {
-      return cache.get(absPath) ?? null
+    const cached = cache?.get(absPath)
+
+    if (cached) {
+      return cached
     }
 
     let buf
@@ -85,7 +92,7 @@ export default function serveStatic(
       return null
     }
 
-    const entry = { buf, type: mimeFor(absPath) }
+    const entry = { buf, headers: Object.freeze({ 'content-type': mimeFor(absPath) }) }
 
     if (cache) {
       if (cache.size >= cacheLimit) {
@@ -152,6 +159,6 @@ export default function serveStatic(
 
     // uWS strips the body for HEAD requests at the native level and keeps the
     // correct Content-Length, so GET and HEAD share the same reply path.
-    ctx.reply(200, { 'content-type': entry.type }, entry.buf)
+    ctx.reply(200, entry.headers, entry.buf)
   }
 }
