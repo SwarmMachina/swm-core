@@ -2382,11 +2382,18 @@ describe('HttpContext', () => {
       ctx.reset(res, req, server, 16)
 
       const body = ctx.body()
+      const timeoutGuard = setTimeout(() => {
+        finalized.reject(new Error('request timeout did not finalize the context'))
+      }, 1_000)
 
       void body.catch(() => {})
       ctx.startRequestTimeout(10)
 
-      await finalized.promise
+      try {
+        await finalized.promise
+      } finally {
+        clearTimeout(timeoutGuard)
+      }
 
       await rejects(body, (err) => httpError(err).status === 408 && httpError(err).message === 'Request Timeout')
       strictEqual(ctx.done, true)
