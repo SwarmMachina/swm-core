@@ -19,6 +19,9 @@ Thumbs.db
 
 # Temp
 dist/
+.scripts-dist/
+.test-dist/
+.benchmark-dist/
 tmp/
 temp/
 

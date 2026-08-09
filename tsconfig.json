@@ -1,0 +1,12 @@
+{
+  "extends": "@swarmmachina/standards/tsconfig",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.js", "src/**/*.ts", "src/**/*.d.ts"]
+}

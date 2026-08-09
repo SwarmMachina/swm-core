@@ -1,4 +1,16 @@
-import config from '@swarmmachina/standards/code-style/eslint.config.mjs'
+import config from '@swarmmachina/standards/eslint-typescript'
+
+config.push({
+  ignores: [
+    'dist/**',
+    '.scripts-dist/**',
+    '.test-dist/**',
+    '.benchmark-dist/**',
+    'release-artifact/**',
+    'src/index.d.ts',
+    'tests/fixtures/**'
+  ]
+})
 
 config.push({
   rules: {

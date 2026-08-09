@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.benchmark.json",
+  "compilerOptions": {
+    "noCheck": true,
+    "noEmit": false,
+    "outDir": ".benchmark-dist",
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "scripts/binding-candidate.ts",
+    "benchmark/**/*.ts",
+    "tests/helpers/candidate-binding-loader.ts",
+    "tests/helpers/register-candidate-binding-loader.ts"
+  ]
+}

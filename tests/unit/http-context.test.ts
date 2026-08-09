@@ -1,0 +1,2764 @@
+// noinspection JSCheckFunctionSignatures
+
+import { describe, test } from 'node:test'
+import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
+import { createMockReadable, createMockReq, createMockRes, isWriteHeaderCall } from '../helpers/mock-http.js'
+import BaseHttpContext from '../../src/http-context.js'
+import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../../src/constants.js'
+import type { HttpRequest, HttpResponse } from '@swarmmachina/swm-uws'
+
+interface HttpError extends Error {
+  status?: number
+}
+
+function httpError(error: unknown): HttpError {
+  if (!(error instanceof Error)) {
+    throw new TypeError('Expected an Error rejection')
+  }
+
+  return error as HttpError
+}
+
+function callLength(call: unknown): number {
+  return Array.isArray(call) ? call.length : -1
+}
+
+function at<T>(items: readonly T[], index: number): T {
+  const item = items[index]
+
+  if (item === undefined) {
+    throw new RangeError(`Expected item at index ${index}`)
+  }
+
+  return item
+}
+
+class HttpContext extends BaseHttpContext {
+  override reset(res: unknown, req: unknown, server: unknown = null, maxSize?: number): this {
+    return super.reset(res as HttpResponse, req as HttpRequest, server as never, maxSize)
+  }
+}
+
+describe('HttpContext', () => {
+  describe('reset()/clear()/release()', () => {
+    describe('reset()', () => {
+      test('should set res and req', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+
+        strictEqual(ctx.res, res)
+        strictEqual(ctx.req, req)
+      })
+
+      test('should reset replied/aborted/streaming/streamingStarted/onWritableCallback', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.replied = true
+        ctx.aborted = true
+        ctx.streaming = true
+        ctx.streamingStarted = true
+        ctx.onWritableCallback = () => {}
+
+        ctx.reset(res, req)
+
+        strictEqual(ctx.replied, false)
+        strictEqual(ctx.aborted, false)
+        strictEqual(ctx.streaming, false)
+        strictEqual(ctx.streamingStarted, false)
+        strictEqual(ctx.onWritableCallback, null)
+      })
+
+      test('should reset private fields and preserve server/maxSize wiring', async () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+        const server = { finalizeHttpContext() {} }
+
+        ctx.reset(res, req, server, 5000)
+        ctx.status(418)
+        ctx.ip()
+        ctx.method()
+        ctx.url()
+        ctx.contentLength()
+
+        ctx.reset(res, req, server, 5)
+
+        strictEqual(ctx.getStatus(200), STATUS_TEXT[200])
+        strictEqual(ctx.ip(), '')
+        strictEqual(ctx.method(), '')
+        strictEqual(ctx.url(), '')
+        strictEqual(ctx.contentLength(), null)
+
+        const bodyPromise = ctx.body()
+
+        res.pushData('123', false)
+        res.pushData('456', false)
+
+        await rejects(bodyPromise, (err) => {
+          strictEqual(httpError(err).message, 'Request body too large')
+
+          return true
+        })
+      })
+
+      test('should return this', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        strictEqual(ctx.reset(res, req), ctx)
+      })
+    })
+
+    describe('clear()', () => {
+      test('should keep done=true to prevent double finalize after pool release', () => {
+        const ctx = new HttpContext(null)
+
+        ctx.done = true
+        ctx.clear()
+
+        strictEqual(ctx.done, true)
+      })
+
+      test('should nullify res/req/finalize and reset caches', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+        const finalize = () => {}
+
+        ctx.reset(res, req, finalize)
+        ctx.ip()
+        ctx.method()
+        ctx.url()
+
+        ctx.clear()
+
+        strictEqual(ctx.res, null)
+        strictEqual(ctx.req, null)
+        strictEqual(ctx.ip(), '')
+        strictEqual(ctx.method(), '')
+        strictEqual(ctx.url(), '')
+      })
+
+      test('should reset all state flags', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.replied = true
+        ctx.aborted = true
+        ctx.streaming = true
+        ctx.streamingStarted = true
+        ctx.onWritableCallback = () => {}
+
+        ctx.clear()
+
+        strictEqual(ctx.replied, false)
+        strictEqual(ctx.aborted, false)
+        strictEqual(ctx.streaming, false)
+        strictEqual(ctx.streamingStarted, false)
+        strictEqual(ctx.onWritableCallback, null)
+      })
+    })
+
+    describe('release()', () => {
+      test('should call pool.release(this) if pool exists', () => {
+        const pool = {
+          releaseCalls: 0,
+          last: null as HttpContext | null,
+          release(ctx: HttpContext) {
+            this.releaseCalls++
+            this.last = ctx
+          }
+        }
+        const ctx = new HttpContext(pool)
+
+        ctx.release()
+
+        strictEqual(pool.releaseCalls, 1)
+        strictEqual(pool.last, ctx)
+      })
+
+      test('should do nothing if pool is null', () => {
+        const ctx = new HttpContext(null)
+
+        ctx.release()
+      })
+    })
+  })
+
+  describe('request metadata caching', () => {
+    describe('getIP()/ip()', () => {
+      test('should return empty string if res is null', () => {
+        const ctx = new HttpContext(null)
+
+        strictEqual(ctx.getIP(), '')
+        strictEqual(ctx.ip(), '')
+      })
+
+      test('should use the binary proxied address if available', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        res.setProxiedIp('1.2.3.4')
+        ctx.reset(res, req)
+
+        strictEqual(ctx.getIP(), '1.2.3.4')
+        strictEqual(res.getProxiedRemoteAddressCallCount(), 1)
+        strictEqual(res.getProxiedRemoteAddressAsTextCallCount(), 0)
+      })
+
+      test('should fallback to the binary remote address if proxied is empty', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        res.setRemoteIp('5.6.7.8')
+        ctx.reset(res, req)
+
+        strictEqual(ctx.getIP(), '5.6.7.8')
+        strictEqual(res.getProxiedRemoteAddressCallCount(), 1)
+        strictEqual(res.getRemoteAddressCallCount(), 1)
+        strictEqual(res.getRemoteAddressAsTextCallCount(), 0)
+      })
+
+      test('should cache result', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        res.setProxiedIp('1.2.3.4')
+        ctx.reset(res, req)
+
+        ctx.getIP()
+        ctx.ip()
+
+        strictEqual(res.getProxiedRemoteAddressCallCount(), 1)
+      })
+    })
+
+    describe('getMethod()/method()', () => {
+      test('should return empty string if req is null', () => {
+        const ctx = new HttpContext(null)
+
+        strictEqual(ctx.getMethod(), '')
+        strictEqual(ctx.method(), '')
+      })
+
+      test('should return req.getMethod() and cache it', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq({ method: 'POST' })
+
+        ctx.reset(res, req)
+
+        strictEqual(ctx.getMethod(), 'POST')
+        strictEqual(ctx.method(), 'POST')
+
+        strictEqual(req.calls.filter((c) => c[0] === 'getMethod').length, 1)
+      })
+    })
+
+    describe('getUrl()/url()', () => {
+      test('should return empty string if req is null', () => {
+        const ctx = new HttpContext(null)
+
+        strictEqual(ctx.getUrl(), '')
+        strictEqual(ctx.url(), '')
+      })
+
+      test('should return req.getUrl() and cache it', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq({ url: '/api/users' })
+
+        ctx.reset(res, req)
+
+        strictEqual(ctx.getUrl(), '/api/users')
+        strictEqual(ctx.url(), '/api/users')
+
+        strictEqual(req.calls.filter((c) => c[0] === 'getUrl').length, 1)
+      })
+    })
+
+    describe('getQuery()/fullQuery()', () => {
+      test('should return empty string if req is null', () => {
+        const ctx = new HttpContext(null)
+
+        strictEqual(ctx.getQuery(), '')
+        strictEqual(ctx.fullQuery(), '')
+      })
+
+      test('should return req.getQuery() with no key and cache it', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq({ fullQuery: 'id=123&name=alice' })
+
+        ctx.reset(res, req)
+
+        strictEqual(ctx.getQuery(), 'id=123&name=alice')
+        strictEqual(ctx.fullQuery(), 'id=123&name=alice')
+
+        strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
+      })
+
+      test('getQuery() + query(name) should read from the shared full-query cache', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq({ fullQuery: 'id=123&name=alice' })
+
+        ctx.reset(res, req)
+
+        strictEqual(ctx.getQuery(), 'id=123&name=alice')
+        strictEqual(ctx.query('name'), 'alice')
+        strictEqual(ctx.query('missing'), undefined)
+
+        strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
+        strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] !== undefined).length, 0)
+      })
+    })
+  })
+
+  describe('request reader caching', () => {
+    test('getHeader(name)/header(name) share the cache', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-type': 'application/json' } })
+
+      ctx.reset(res, req)
+
+      const v1 = ctx.getHeader('content-type')
+      const v2 = ctx.header('content-type')
+
+      strictEqual(v1, 'application/json')
+      strictEqual(v2, 'application/json')
+      strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
+    })
+
+    test('getHeader(name) caches a missing header as an empty string', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      const v1 = ctx.getHeader('x-missing')
+      const v2 = ctx.header('x-missing')
+
+      strictEqual(v1, '')
+      strictEqual(v1, v2)
+      strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
+    })
+
+    test('getHeader(name) lowercases the lookup name (uWS stores header names lowercase)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { authorization: 'Bearer abc' } })
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.getHeader('Authorization'), 'Bearer abc')
+    })
+
+    test('headers is a stable cached-only view that getHeader and getHeaders hydrate', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { authorization: 'Bearer abc', 'x-trace': 'trace' } })
+
+      ctx.reset(res, req)
+
+      const headers = ctx.headers
+
+      strictEqual(headers, ctx.headers)
+      deepStrictEqual({ ...headers }, {})
+      strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 0)
+
+      strictEqual(ctx.getHeader('Authorization'), 'Bearer abc')
+      strictEqual(ctx.getHeader('x-missing'), '')
+      deepStrictEqual({ ...headers }, { authorization: 'Bearer abc' })
+
+      deepStrictEqual({ ...ctx.getHeaders() }, { authorization: 'Bearer abc', 'x-trace': 'trace' })
+      deepStrictEqual({ ...headers }, { authorization: 'Bearer abc', 'x-trace': 'trace' })
+      strictEqual(headers, ctx.headers)
+      strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 1)
+    })
+
+    test('getHeaders() returns an isolated lowercase null-prototype snapshot of present headers', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({
+        headers: { 'Content-Type': 'application/json', 'X-Empty': '' }
+      })
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.getHeader('x-missing'), '')
+
+      const headers = ctx.getHeaders()
+
+      strictEqual(Object.getPrototypeOf(headers), null)
+      deepStrictEqual({ ...headers }, { 'content-type': 'application/json', 'x-empty': '' })
+      strictEqual(Object.hasOwn(headers, 'x-missing'), false)
+
+      headers['content-type'] = 'mutated'
+
+      strictEqual(ctx.getHeader('content-type'), 'application/json')
+      strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 1)
+      strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
+    })
+
+    test('request readers return safe defaults instead of throwing when req is null', () => {
+      const ctx = new HttpContext(null)
+
+      strictEqual(ctx.getQuery('id'), undefined)
+      strictEqual(ctx.getParameter(0), undefined)
+      strictEqual(ctx.getHeader('content-type'), '')
+      strictEqual(Object.getPrototypeOf(ctx.getHeaders()), null)
+      deepStrictEqual({ ...ctx.getHeaders() }, {})
+      strictEqual(ctx.query('id'), undefined)
+      strictEqual(ctx.param(0), undefined)
+      strictEqual(ctx.header('content-type'), '')
+    })
+
+    test('cacheHeaders() preloads headers and avoids getHeader()', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-type': 'application/json', 'x-trace-id': 'abc' } })
+
+      ctx.reset(res, req)
+      ctx.cacheHeaders()
+
+      strictEqual(ctx.getHeader('content-type'), 'application/json')
+      strictEqual(ctx.getHeader('x-trace-id'), 'abc')
+      strictEqual(ctx.getHeader('x-missing'), '')
+
+      strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 1)
+      strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 0)
+    })
+
+    test('cacheRequest() captures metadata and keeps only headers read synchronously', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({
+        method: 'get',
+        url: '/users/42',
+        fullQuery: 'expand=1',
+        headers: { authorization: 'Bearer token' },
+        parameters: ['42']
+      })
+      const server = { finalizeHttpContext() {} }
+
+      ctx.reset(res, req, server)
+      strictEqual(ctx.getHeader('authorization'), 'Bearer token')
+      ctx.cacheRequest(['id'])
+
+      strictEqual(ctx.getMethod(), 'get')
+      strictEqual(ctx.getUrl(), '/users/42')
+      strictEqual(ctx.getQuery(), 'expand=1')
+      strictEqual(ctx.getHeader('authorization'), 'Bearer token')
+      strictEqual(ctx.getParameter(0), '42')
+      strictEqual(ctx.getParameter('id'), '42')
+      deepStrictEqual(req.calls, [
+        ['getHeader', 'authorization'],
+        ['getMethod'],
+        ['getUrl'],
+        ['getQuery', undefined],
+        ['getParameter', 0]
+      ])
+    })
+
+    test('getQuery(name)/query(name) share the cache', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ query: { id: '123' } })
+
+      ctx.reset(res, req)
+
+      const v1 = ctx.getQuery('id')
+      const v2 = ctx.query('id')
+
+      strictEqual(v1, '123')
+      strictEqual(v2, '123')
+      strictEqual(req.calls.filter((c) => c[0] === 'getQuery').length, 1)
+    })
+
+    test('query(name) — caches undefined for missing key', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      const v1 = ctx.query('missing')
+      const v2 = ctx.query('missing')
+
+      strictEqual(v1, v2)
+      strictEqual(req.calls.filter((c) => c[0] === 'getQuery').length, 1)
+    })
+
+    test('cacheQuery() parses once and serves lookups from cache', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ fullQuery: 'id=123&name=alice&empty' })
+
+      ctx.reset(res, req)
+      ctx.cacheQuery()
+
+      strictEqual(ctx.query('id'), '123')
+      strictEqual(ctx.query('name'), 'alice')
+      strictEqual(ctx.query('empty'), '')
+      strictEqual(ctx.query('missing'), undefined)
+      strictEqual(ctx.query('missing'), undefined)
+
+      strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
+      strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] !== undefined).length, 0)
+    })
+
+    test('cacheQuery() keeps the first value for duplicate keys', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ fullQuery: 'id=1&id=2' })
+
+      ctx.reset(res, req)
+      ctx.cacheQuery()
+
+      strictEqual(ctx.query('id'), '1')
+    })
+
+    test('getParameter(i)/param(i) share the cache', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ parameters: ['user', '42'] })
+
+      ctx.reset(res, req)
+
+      const p0a = ctx.getParameter(0)
+      const p0b = ctx.param(0)
+      const p1 = ctx.getParameter(1)
+
+      strictEqual(p0a, 'user')
+      strictEqual(p0b, 'user')
+      strictEqual(p1, '42')
+      strictEqual(req.calls.filter((c) => c[0] === 'getParameter' && c[1] === 0).length, 1)
+      strictEqual(req.calls.filter((c) => c[0] === 'getParameter' && c[1] === 1).length, 1)
+    })
+
+    test('metadata caches do not inherit Object.prototype properties', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ fullQuery: 'constructor=query-value' })
+
+      req.getHeader = (name) => (name === 'constructor' ? 'header-value' : '')
+      req.getParameter = (name) => (name === 'constructor' ? 'param-value' : undefined)
+
+      ctx.reset(res, req)
+      ctx.cacheQuery()
+
+      strictEqual(ctx.header('constructor'), 'header-value')
+      strictEqual(ctx.query('constructor'), 'query-value')
+      strictEqual(ctx.param('constructor'), 'param-value')
+    })
+
+    test('reset() clears header/query/param caches', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req1 = createMockReq({
+        headers: { 'content-type': 'text/plain' },
+        query: { id: '1' },
+        parameters: ['a']
+      })
+      const req2 = createMockReq({
+        headers: { 'content-type': 'application/json' },
+        query: { id: '2' },
+        parameters: ['b']
+      })
+
+      ctx.reset(res, req1)
+
+      strictEqual(ctx.header('content-type'), 'text/plain')
+      strictEqual(ctx.query('id'), '1')
+      strictEqual(ctx.param(0), 'a')
+
+      ctx.reset(res, req2)
+
+      strictEqual(ctx.header('content-type'), 'application/json')
+      strictEqual(ctx.query('id'), '2')
+      strictEqual(ctx.param(0), 'b')
+
+      strictEqual(req2.calls.filter((c) => c[0] === 'getHeader').length, 1)
+      strictEqual(req2.calls.filter((c) => c[0] === 'getQuery').length, 1)
+      strictEqual(req2.calls.filter((c) => c[0] === 'getParameter').length, 1)
+    })
+  })
+
+  describe('getContentLength()/contentLength() parsing and cache', () => {
+    test('should return null if header is absent/empty/undefined', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req1 = createMockReq()
+      const req2 = createMockReq({ headers: { 'content-length': '' } })
+      const req3 = createMockReq({ headers: { 'content-length': undefined } })
+
+      ctx.reset(res, req1)
+      strictEqual(ctx.getContentLength(), null)
+
+      ctx.reset(res, req2)
+      strictEqual(ctx.getContentLength(), null)
+
+      ctx.reset(res, req3)
+      strictEqual(ctx.getContentLength(), null)
+    })
+
+    test('should parse valid numbers', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req1 = createMockReq({ headers: { 'content-length': '0' } })
+      const req2 = createMockReq({ headers: { 'content-length': '10' } })
+
+      ctx.reset(res, req1)
+      strictEqual(ctx.getContentLength(), 0)
+
+      ctx.reset(res, req2)
+      strictEqual(ctx.getContentLength(), 10)
+    })
+
+    test('should return null for invalid values', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const invalidValues = ['-1', '+1', ' 1', '1 ', '1.5', '1e3', 'abc', String(Number.MAX_SAFE_INTEGER + 1)]
+
+      for (const value of invalidValues) {
+        ctx.reset(res, createMockReq({ headers: { 'content-length': value } }))
+        strictEqual(ctx.getContentLength(), null, `${JSON.stringify(value)} must not be accepted`)
+      }
+    })
+
+    test('should cache result', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '42' } })
+
+      ctx.reset(res, req)
+
+      ctx.getContentLength()
+      ctx.contentLength()
+
+      strictEqual(req.calls.filter((c) => c[0] === 'getHeader' && c[1] === 'content-length').length, 1)
+    })
+  })
+
+  describe('setStatus()/status()/getStatus()', () => {
+    test('setStatus(code)/status(code) should return ctx and share the override', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      strictEqual(ctx.setStatus(418), ctx)
+
+      strictEqual(ctx.getStatus(200), STATUS_TEXT[418])
+
+      strictEqual(ctx.status(201), ctx)
+      strictEqual(ctx.getStatus(200), STATUS_TEXT[201])
+    })
+
+    test('getStatus should return 500 if statusFromCall is undefined/null and no override', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.getStatus(undefined), STATUS_TEXT[500])
+      strictEqual(ctx.getStatus(null), STATUS_TEXT[500])
+    })
+
+    test('getStatus should return "<code> Unknown" for an unlisted but explicit status code', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.getStatus(599), '599 Unknown')
+      strictEqual(ctx.getStatus(431), '431 Unknown')
+    })
+  })
+
+  describe('setHeader()/appendHeader()/setHeaders()', () => {
+    test('setHeader should stage header (no immediate write) and return ctx', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.setHeader('x', '1'), ctx)
+      strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 0)
+    })
+
+    test('setHeader should throw TypeError for non-string header name', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(
+        () => {
+          // @ts-expect-error -- verifies the runtime guard rejects non-string names.
+          ctx.setHeader(123, '1')
+        },
+        {
+          name: 'TypeError',
+          message: 'Header name must be a string'
+        }
+      )
+    })
+
+    test('setHeader should reject a value containing CRLF (header injection)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.setHeader('x-name', 'ok\r\nSet-Cookie: evil=1'), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
+      })
+    })
+
+    test('setHeader should overwrite previously staged values for the same header', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('set-cookie', 'a=1; Path=/')
+      ctx.setHeader('Set-Cookie', 'b=2; Path=/refresh')
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [['set-cookie', 'b=2; Path=/refresh']])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('appendHeader should stage repeated response headers in order', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      strictEqual(ctx.appendHeader('set-cookie', 'a=1; Path=/'), ctx)
+      strictEqual(ctx.appendHeader('set-cookie', 'b=2; Path=/refresh'), ctx)
+
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('appendHeader should reject a value containing CRLF (header injection)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.appendHeader('x-name', 'ok\r\nSet-Cookie: evil=1'), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
+      })
+    })
+
+    test('appendHeader should throw TypeError for non-string header name', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(
+        () => {
+          // @ts-expect-error -- verifies the runtime guard rejects non-string names.
+          ctx.appendHeader(123, '1')
+        },
+        {
+          name: 'TypeError',
+          message: 'Header name must be a string'
+        }
+      )
+    })
+
+    test('setHeaders(null/undefined) should do nothing', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      ctx.setHeaders(null)
+      ctx.setHeaders(undefined)
+
+      strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 0)
+    })
+
+    test('setHeaders with TEXT_PLAIN_HEADER should stage content-type', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      ctx.setHeaders(TEXT_PLAIN_HEADER)
+
+      const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
+
+      strictEqual(writeHeaderCalls.length, 0)
+    })
+
+    test('setHeaders with JSON_HEADER should stage content-type', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      ctx.setHeaders(JSON_HEADER)
+
+      const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
+
+      strictEqual(writeHeaderCalls.length, 0)
+    })
+
+    test('setHeaders with OCTET_STREAM_HEADER should stage content-type', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      ctx.setHeaders(OCTET_STREAM_HEADER)
+
+      const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
+
+      strictEqual(writeHeaderCalls.length, 0)
+    })
+
+    test('setHeaders should stage only non-null/undefined values', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      ctx.setHeaders({ a: '1', b: null, c: undefined, d: '2' })
+
+      const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
+
+      strictEqual(writeHeaderCalls.length, 0)
+    })
+
+    test('setHeaders should stage string[] values as separate header lines', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeaders({
+        'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh'],
+        'x-trace-id': 'abc'
+      })
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(
+        res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-trace-id' && value === 'abc'),
+        true
+      )
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeaders should reject a scalar value containing CRLF (header injection)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.setHeaders({ 'x-name': 'ok\r\nSet-Cookie: evil=1' }), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
+      })
+    })
+
+    test('setHeaders should reject a CRLF value inside a string[] header', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+
+      throws(() => ctx.setHeaders({ 'set-cookie': ['a=1; Path=/', 'ok\r\nSet-Cookie: evil=1'] }), {
+        name: 'TypeError',
+        message: 'Header value must not contain CR or LF'
+      })
+    })
+
+    test('setHeader before sendJson should not warn and header should be present', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('x-trace-id', 'abc')
+      ctx.sendJson({ ok: true })
+
+      const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
+
+      strictEqual(writeHeaderCalls.length, 2)
+      deepStrictEqual(writeHeaderCalls, [
+        ['writeHeader', 'x-trace-id', 'abc'],
+        ['writeHeader', 'content-type', 'application/json; charset=utf-8']
+      ])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('three setHeader calls should produce one correct response without warnings', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('x-a', '1')
+      ctx.setHeader('x-b', '2')
+      ctx.setHeader('x-c', '3')
+      ctx.sendText('ok')
+
+      strictEqual(res.calls.filter((c) => c[0] === 'cork').length, 1)
+      strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 4)
+      strictEqual(
+        res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-a' && value === '1'),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-b' && value === '2'),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, key, value]) => name === 'writeHeader' && key === 'x-c' && value === '3'),
+        true
+      )
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeader followed by appendHeader should keep both values for the same header', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeader('set-cookie', 'a=1; Path=/')
+      ctx.appendHeader('set-cookie', 'b=2; Path=/refresh')
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('appendHeader followed by setHeader should replace previously staged values', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.appendHeader('set-cookie', 'a=1; Path=/')
+      ctx.appendHeader('set-cookie', 'b=2; Path=/refresh')
+      ctx.setHeader('set-cookie', 'c=3; Path=/final')
+      ctx.sendText('ok')
+
+      const setCookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [['set-cookie', 'c=3; Path=/final']])
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeaders + sendJson should keep application/json content-type', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.setHeaders({ 'content-type': 'text/plain', 'x-foo': 'bar' })
+      ctx.sendJson({ ok: true })
+
+      const writeHeaderCalls = res.calls.filter((c) => c[0] === 'writeHeader')
+      const contentTypeCalls = writeHeaderCalls.filter((c) => c[1] === 'content-type')
+
+      strictEqual(contentTypeCalls.length, 1)
+      deepStrictEqual(contentTypeCalls[0], ['writeHeader', 'content-type', 'application/json; charset=utf-8'])
+      strictEqual(
+        writeHeaderCalls.some((c) => c[1] === 'x-foo' && c[2] === 'bar'),
+        true
+      )
+      strictEqual(res.getWarnings().length, 0)
+    })
+
+    test('setHeader after reply should be safe no-op', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.sendText('done')
+
+      const beforeCalls = res.calls.length
+
+      strictEqual(ctx.setHeader('x-late', '1'), ctx)
+
+      strictEqual(res.calls.length, beforeCalls)
+      strictEqual(
+        res.calls.some(([name, key]) => name === 'writeHeader' && key === 'x-late'),
+        false
+      )
+      strictEqual(res.getWarnings().length, 0)
+    })
+  })
+
+  describe('reply()', () => {
+    test('reply(200, TEXT_PLAIN_HEADER, "ok") should set replied and write status/headers/body', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.reply(200, TEXT_PLAIN_HEADER, 'ok')
+
+      strictEqual(ctx.replied, true)
+      strictEqual(at(res.calls, 0)[0], 'cork')
+      strictEqual(res.calls.filter((c) => c[0] === 'cork').length, 1)
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[200]),
+        true
+      )
+      strictEqual(
+        res.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'text/plain; charset=utf-8'
+        ),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'ok'),
+        true
+      )
+    })
+
+    test('reply(204, TEXT_PLAIN_HEADER, null) should call end() without argument', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.reply(204, TEXT_PLAIN_HEADER, null)
+
+      const endCalls = res.calls.filter((c) => c[0] === 'end')
+
+      strictEqual(endCalls.length, 1)
+      strictEqual(callLength(at(endCalls, 0)), 1)
+    })
+
+    test('reply uses the native response batch for prepared headers', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: { responseBatch: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      ctx.reply(201, JSON_HEADER, '{"ok":true}')
+
+      deepStrictEqual(res.calls, [
+        ['endBatch', STATUS_TEXT[201], ['content-type', 'application/json; charset=utf-8'], '{"ok":true}']
+      ])
+    })
+
+    test('reply keeps the compatibility path when headers were staged dynamically', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: { responseBatch: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      ctx.setHeader('x-dynamic', 'yes')
+      ctx.reply(200, JSON_HEADER, '{}')
+
+      strictEqual(
+        res.calls.some(([name]) => name === 'endBatch'),
+        false
+      )
+      strictEqual(
+        res.calls.some(([name]) => name === 'cork'),
+        true
+      )
+    })
+
+    test('reply should write repeated set-cookie headers as separate header lines', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.reply(
+        200,
+        {
+          'content-type': 'application/json; charset=utf-8',
+          'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+        },
+        '{"ok":true}'
+      )
+
+      const setCookieCalls = res.calls
+        .filter(isWriteHeaderCall)
+        .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+        .map(([, key, value]) => [key.toLowerCase(), value])
+
+      deepStrictEqual(setCookieCalls, [
+        ['set-cookie', 'a=1; Path=/'],
+        ['set-cookie', 'b=2; Path=/refresh']
+      ])
+      strictEqual(
+        res.calls.some(
+          ([name, key, value]) =>
+            name === 'writeHeader' && key === 'content-type' && value === 'application/json; charset=utf-8'
+        ),
+        true
+      )
+    })
+
+    test('should do nothing if ctx.replied is true', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.replied = true
+      ctx.reply(200, TEXT_PLAIN_HEADER, 'ok')
+
+      strictEqual(res.calls.length, 0)
+    })
+
+    test('should do nothing if ctx.aborted is true', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.aborted = true
+      ctx.reply(200, TEXT_PLAIN_HEADER, 'ok')
+
+      strictEqual(res.calls.length, 0)
+    })
+
+    test('should check aborted inside cork and not write if aborted', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes({
+        onCork: () => {
+          ctx.aborted = true
+        }
+      })
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.reply(200, TEXT_PLAIN_HEADER, 'ok')
+
+      strictEqual(res.calls.length, 1)
+      strictEqual(at(res.calls, 0)[0], 'cork')
+      strictEqual(res.calls.filter((c) => c[0] === 'writeStatus').length, 0)
+      strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 0)
+      strictEqual(res.calls.filter((c) => c[0] === 'end').length, 0)
+    })
+  })
+
+  describe('replyAndClose()', () => {
+    test('should send the response with closeConnection=true', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.replyAndClose(403, TEXT_PLAIN_HEADER, 'Forbidden')
+
+      strictEqual(ctx.replied, true)
+      deepStrictEqual(
+        res.calls.find(([name]) => name === 'end'),
+        ['end', 'Forbidden', true]
+      )
+    })
+
+    test('should close after a response without a body', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.replyAndClose(204, null, null)
+
+      deepStrictEqual(
+        res.calls.find(([name]) => name === 'end'),
+        ['end', undefined, true]
+      )
+    })
+
+    test('should bypass responseBatch because it cannot request connection close', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: { responseBatch: true },
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, req, server)
+      ctx.replyAndClose(429, JSON_HEADER, '{"error":"rate limit"}')
+
+      strictEqual(
+        res.calls.some(([name]) => name === 'endBatch'),
+        false
+      )
+      deepStrictEqual(
+        res.calls.find(([name]) => name === 'end'),
+        ['end', '{"error":"rate limit"}', true]
+      )
+    })
+
+    test('should no-op after a response has already been sent', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.reply(200, null, 'ok')
+      const callCount = res.calls.length
+
+      ctx.replyAndClose(403, null, 'late')
+
+      strictEqual(res.calls.length, callCount)
+    })
+  })
+
+  describe('terminate()', () => {
+    test('should force-close the transport and suppress fallback responses', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.terminate()
+
+      strictEqual(ctx.replied, true)
+      deepStrictEqual(res.calls, [['close']])
+    })
+
+    test('should be idempotent', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.terminate()
+      ctx.terminate()
+
+      strictEqual(res.calls.filter(([name]) => name === 'close').length, 1)
+    })
+  })
+
+  describe('send()/sendJson()/sendText()/sendBuffer()', () => {
+    test('send(null/undefined) should call reply(204, TEXT_PLAIN_HEADER, null)', () => {
+      const ctx = new HttpContext(null)
+      const res1 = createMockRes()
+      const res2 = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res1, req)
+      ctx.send(null)
+
+      strictEqual(res1.calls.filter((c) => c[0] === 'writeStatus' && c[1] === STATUS_TEXT[204]).length, 1)
+      const endCalls1 = res1.calls.filter((c) => c[0] === 'end')
+
+      strictEqual(endCalls1.length, 1)
+      strictEqual(callLength(endCalls1[0]), 1)
+
+      ctx.reset(res2, req)
+      ctx.send(undefined)
+
+      strictEqual(res2.calls.filter((c) => c[0] === 'writeStatus' && c[1] === STATUS_TEXT[204]).length, 1)
+      const endCalls2 = res2.calls.filter((c) => c[0] === 'end')
+
+      strictEqual(endCalls2.length, 1)
+      strictEqual(callLength(endCalls2[0]), 1)
+    })
+
+    test('send("str") should call reply(200, TEXT_PLAIN_HEADER, "str")', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.send('hello')
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[200]),
+        true
+      )
+      strictEqual(
+        res.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'text/plain; charset=utf-8'
+        ),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'hello'),
+        true
+      )
+    })
+
+    test('send(123) should call reply(200, TEXT_PLAIN_HEADER, "123")', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.send(123)
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === '123'),
+        true
+      )
+    })
+
+    test('send(Buffer/Uint8Array/ArrayBuffer) should use OCTET_STREAM_HEADER', () => {
+      const ctx = new HttpContext(null)
+      const res1 = createMockRes()
+      const res2 = createMockRes()
+      const res3 = createMockRes()
+      const req = createMockReq()
+      const buf = Buffer.from('test')
+      const u8 = new Uint8Array([1, 2, 3])
+      const ab = new ArrayBuffer(4)
+
+      ctx.reset(res1, req)
+      ctx.send(buf)
+
+      strictEqual(
+        res1.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'application/octet-stream'
+        ),
+        true
+      )
+
+      ctx.reset(res2, req)
+      ctx.send(u8)
+
+      strictEqual(
+        res2.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'application/octet-stream'
+        ),
+        true
+      )
+
+      ctx.reset(res3, req)
+      ctx.send(ab)
+
+      strictEqual(
+        res3.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'application/octet-stream'
+        ),
+        true
+      )
+    })
+
+    test('send({a:1}) should call reply(200, JSON_HEADER, JSON string)', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.send({ a: 1 })
+
+      strictEqual(
+        res.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'application/json; charset=utf-8'
+        ),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === '{"a":1}'),
+        true
+      )
+    })
+
+    test('sendJson({a:1}, 201) should use status 201 and JSON header', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.sendJson({ a: 1 }, 201)
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[201]),
+        true
+      )
+      strictEqual(
+        res.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'application/json; charset=utf-8'
+        ),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === '{"a":1}'),
+        true
+      )
+    })
+
+    test('sendText("x", 202) should use text/plain and status 202', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.sendText('x', 202)
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[202]),
+        true
+      )
+      strictEqual(
+        res.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'text/plain; charset=utf-8'
+        ),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'x'),
+        true
+      )
+    })
+
+    test('sendBuffer(buf, 203) should use octet-stream and status 203', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const buf = Buffer.from('test')
+
+      ctx.reset(res, req)
+      ctx.sendBuffer(buf, 203)
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[203]),
+        true
+      )
+      strictEqual(
+        res.calls.some(
+          ([name, ...args]) =>
+            name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'application/octet-stream'
+        ),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === buf),
+        true
+      )
+    })
+  })
+
+  describe('body()/buffer() - parsing only (no streaming)', () => {
+    test('should reject if aborted before body()', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req)
+      ctx.aborted = true
+
+      await rejects(ctx.body(), (err) => {
+        strictEqual(httpError(err).message, 'Request aborted')
+
+        return true
+      })
+    })
+
+    test('should reject if content-length > limit', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '5' } })
+
+      ctx.reset(res, req)
+
+      await rejects(ctx.body(4), (err) => {
+        strictEqual(httpError(err).message, 'Request body too large')
+
+        return true
+      })
+    })
+
+    test('content-length == 0 should resolve empty buffer and call onData with NOOP', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '0' } })
+
+      ctx.reset(res, req)
+
+      const result = await ctx.body()
+
+      strictEqual(result.length, 0)
+      strictEqual(Buffer.isBuffer(result), true)
+      strictEqual(res.calls.filter((c) => c[0] === 'onData').length, 1)
+      strictEqual(typeof res.onDataCb, 'function')
+    })
+
+    test('known length success: should resolve with all chunks', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req)
+
+      const bodyPromise = ctx.body()
+
+      res.pushData(Buffer.from([1, 2]), false)
+      res.pushData(Buffer.from([3, 4]), true)
+
+      const result = await bodyPromise
+
+      strictEqual(result.length, 4)
+      deepStrictEqual(Array.from(result), [1, 2, 3, 4])
+    })
+
+    test('known length sizeMismatch: too much data', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '2' } })
+
+      ctx.reset(res, req)
+
+      const bodyPromise = ctx.body()
+
+      res.pushData(Buffer.from([1, 2, 3]), true)
+
+      await rejects(bodyPromise, (err) => {
+        strictEqual(httpError(err).message, 'Request body size mismatch')
+
+        return true
+      })
+    })
+
+    test('known length sizeMismatch: isLast too early', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+
+      ctx.reset(res, req)
+
+      const bodyPromise = ctx.body()
+
+      res.pushData(Buffer.from([1, 2]), true)
+
+      await rejects(bodyPromise, (err) => {
+        strictEqual(httpError(err).message, 'Request body size mismatch')
+
+        return true
+      })
+    })
+
+    test('unknown length success: no content-length header', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, null, 10)
+
+      const bodyPromise = ctx.body()
+
+      res.pushData('ab', false)
+      res.pushData('cd', true)
+
+      const result = await bodyPromise
+
+      strictEqual(result.toString('utf8'), 'abcd')
+    })
+
+    test('unknown length too large: should reject', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, null, 3)
+
+      const bodyPromise = ctx.body()
+
+      res.pushData('ab', false)
+      res.pushData('cd', true)
+
+      await rejects(bodyPromise, (err) => {
+        strictEqual(httpError(err).message, 'Request body too large')
+
+        return true
+      })
+    })
+
+    test('body() memoization: should return same promise before resolve', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '2' } })
+
+      ctx.reset(res, req)
+
+      const promise1 = ctx.body()
+      const promise2 = ctx.body()
+
+      strictEqual(promise1, promise2)
+
+      res.pushData(Buffer.from([1, 2]), true)
+
+      await promise1
+    })
+
+    test('body() after resolve should return resolved promise with same buffer', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '2' } })
+
+      ctx.reset(res, req)
+
+      const promise1 = ctx.body()
+
+      res.pushData(Buffer.from([1, 2]), true)
+      const result1 = await promise1
+      const promise2 = ctx.body()
+      const result2 = await promise2
+
+      strictEqual(result1, result2)
+      strictEqual(Buffer.isBuffer(result2), true)
+    })
+
+    test('body() after reject should return rejected promise with same error', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '2' } })
+
+      ctx.reset(res, req)
+
+      const promise1 = ctx.body()
+
+      res.pushData(Buffer.from([1, 2, 3]), true)
+
+      await rejects(promise1, (err) => {
+        strictEqual(httpError(err).message, 'Request body size mismatch')
+
+        return true
+      })
+
+      await rejects(ctx.body(), (err) => {
+        strictEqual(httpError(err).message, 'Request body size mismatch')
+
+        return true
+      })
+    })
+
+    test('buffer() should be alias for body()', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '2' } })
+
+      ctx.reset(res, req)
+
+      const bodyPromise = ctx.body()
+      const bufferPromise = ctx.buffer()
+
+      strictEqual(bodyPromise, bufferPromise)
+
+      res.pushData(Buffer.from([1, 2]), true)
+
+      const bodyResult = await ctx.body()
+      const bufferResult = await ctx.buffer()
+
+      strictEqual(bodyResult, bufferResult)
+    })
+  })
+
+  describe('json()/text()', () => {
+    test('json() with empty buffer should return null', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '0' } })
+
+      ctx.reset(res, req)
+
+      const result = await ctx.json()
+
+      strictEqual(result, null)
+    })
+
+    test('json() with valid JSON should return object', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, null, 100)
+
+      const jsonPromise = ctx.json()
+
+      res.pushData('{"a":1,"b":"test"}', true)
+
+      const result = await jsonPromise
+
+      deepStrictEqual(result, { a: 1, b: 'test' })
+    })
+
+    test('json() with invalid JSON should throw Error Invalid JSON', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, null, 100)
+
+      const jsonPromise = ctx.json()
+
+      res.pushData('{invalid json}', true)
+
+      await rejects(jsonPromise, (err) => {
+        strictEqual(httpError(err).message.startsWith('Invalid JSON'), true)
+
+        return true
+      })
+    })
+
+    test('text() should return utf8 string from body', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, null, 100)
+
+      const textPromise = ctx.text()
+
+      res.pushData('hello', false)
+      res.pushData(' world', true)
+
+      const result = await textPromise
+
+      strictEqual(result, 'hello world')
+    })
+  })
+
+  describe('streaming (startStreaming/write/tryEnd/end/onWritable/getWriteOffset/stream)', () => {
+    describe('startStreaming()', () => {
+      test('should set replied=true, streaming=true, and write status+headers inside cork', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.startStreaming(200, TEXT_PLAIN_HEADER)
+
+        strictEqual(ctx.replied, true)
+        strictEqual(ctx.streaming, true)
+        strictEqual(ctx.streamingStarted, false)
+
+        strictEqual(res.calls.filter((c) => c[0] === 'onWritable').length, 1)
+        strictEqual(res.calls.filter((c) => c[0] === 'cork').length, 1)
+
+        strictEqual(
+          res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[200]),
+          true
+        )
+
+        strictEqual(
+          res.calls.some(
+            ([name, ...args]) =>
+              name === 'writeHeader' && args[0] === 'content-type' && args[1] === 'text/plain; charset=utf-8'
+          ),
+          true
+        )
+      })
+
+      test('should write repeated set-cookie headers as separate header lines', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.startStreaming(200, {
+          'content-type': 'text/plain; charset=utf-8',
+          'set-cookie': ['a=1; Path=/', 'b=2; Path=/refresh']
+        })
+
+        const setCookieCalls = res.calls
+          .filter(isWriteHeaderCall)
+          .filter(([, key]) => key.toLowerCase() === 'set-cookie')
+          .map(([, key, value]) => [key.toLowerCase(), value])
+
+        deepStrictEqual(setCookieCalls, [
+          ['set-cookie', 'a=1; Path=/'],
+          ['set-cookie', 'b=2; Path=/refresh']
+        ])
+      })
+
+      test('should no-op if ctx.replied=true', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.replied = true
+        ctx.startStreaming(200, TEXT_PLAIN_HEADER)
+
+        strictEqual(ctx.streaming, false)
+        strictEqual(res.calls.length, 0)
+      })
+
+      test('should no-op if ctx.aborted=true', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.aborted = true
+        ctx.startStreaming(200, TEXT_PLAIN_HEADER)
+
+        strictEqual(ctx.streaming, false)
+        strictEqual(res.calls.length, 0)
+      })
+    })
+
+    describe('write()', () => {
+      test('should throw if startStreaming() not called', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+
+        throws(
+          () => {
+            ctx.write('x')
+          },
+          {
+            message: 'Must call startStreaming() before write()'
+          }
+        )
+      })
+
+      test('should return false and not write if aborted', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.aborted = true
+
+        const result = ctx.write('x')
+
+        strictEqual(result, false)
+        strictEqual(res.calls.filter((c) => c[0] === 'write').length, 0)
+      })
+
+      test('should call res.write inside cork and return its boolean', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.startStreaming(200)
+
+        res.setWriteResultSequence([false, true])
+
+        const result1 = ctx.write('a')
+
+        strictEqual(result1, false)
+        strictEqual(ctx.streamingStarted, true)
+
+        const result2 = ctx.write('b')
+
+        strictEqual(result2, true)
+
+        const writeCalls = res.calls.filter((c) => c[0] === 'write')
+
+        strictEqual(writeCalls.length, 2)
+        deepStrictEqual(at(writeCalls, 0), ['write', 'a'])
+        deepStrictEqual(at(writeCalls, 1), ['write', 'b'])
+      })
+    })
+
+    describe('tryEnd()', () => {
+      test('should throw if startStreaming not called', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+
+        throws(
+          () => {
+            // @ts-expect-error -- precondition must run before byte-length validation.
+            ctx.tryEnd('x')
+          },
+          {
+            message: 'Must call startStreaming() before tryEnd()'
+          }
+        )
+      })
+
+      test('aborted -> [false,false] and no calls', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.aborted = true
+
+        // @ts-expect-error -- precondition must run before byte-length validation.
+        const result = ctx.tryEnd('x')
+
+        deepStrictEqual(result, [false, false])
+        strictEqual(res.calls.filter((c) => c[0] === 'tryEnd').length, 0)
+      })
+
+      test('should pass correct totalSize = getWriteOffset() + chunkLen', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.startStreaming(200)
+
+        res.setWriteOffset(10)
+        res.setTryEndResultSequence([[true, false]])
+
+        const chunk = 'abc'
+        const chunkLen = Buffer.byteLength(chunk)
+        const totalSize = ctx.getWriteOffset() + chunkLen
+
+        ctx.tryEnd(chunk, totalSize)
+
+        const tryEndCall = res.calls.find(([name, ...args]) => name === 'tryEnd' && args[0] === chunk)
+
+        strictEqual(tryEndCall !== undefined, true)
+        strictEqual(at(tryEndCall ?? [], 2), totalSize)
+      })
+
+      test('when done=true -> streaming becomes false and finalize called', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        let finalizeCallCount = 0
+
+        const finalizeHttpContext = () => {
+          finalizeCallCount++
+        }
+
+        ctx.reset(res, req, { finalizeHttpContext })
+        ctx.startStreaming(200)
+
+        res.setTryEndResultSequence([[true, true]])
+        const chunk = 'x'
+        const chunkLen = Buffer.byteLength(chunk)
+        const totalSize = ctx.getWriteOffset() + chunkLen
+
+        ctx.tryEnd('x', totalSize)
+
+        strictEqual(ctx.streaming, false)
+        strictEqual(finalizeCallCount, 1)
+      })
+    })
+
+    describe('end()', () => {
+      test('should throw if startStreaming not called', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+
+        throws(
+          () => {
+            ctx.end()
+          },
+          {
+            message: 'Must call startStreaming() before end()'
+          }
+        )
+      })
+
+      test('should end with chunk and call finalize, streaming=false', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        let finalizeCallCount = 0
+
+        const finalizeHttpContext = () => {
+          finalizeCallCount++
+        }
+
+        ctx.reset(res, req, { finalizeHttpContext })
+        ctx.startStreaming(200)
+
+        ctx.end('bye')
+
+        strictEqual(
+          res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'bye'),
+          true
+        )
+        strictEqual(ctx.streaming, false)
+        strictEqual(finalizeCallCount, 1)
+      })
+
+      test('end() with no chunk should call res.end() without args', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req, { finalizeHttpContext: () => {} })
+        ctx.startStreaming(200)
+
+        ctx.end()
+
+        const endCalls = res.calls.filter((c) => c[0] === 'end')
+
+        strictEqual(endCalls.length, 1)
+        strictEqual(callLength(at(endCalls, 0)), 1)
+      })
+    })
+
+    describe('onWritable()', () => {
+      test('should register onWritable wrapper and call provided callback once, then disable itself', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        let cbCallCount = 0
+        let lastOffset: number | null = null
+
+        const cbSpy = (offset: number) => {
+          cbCallCount++
+          lastOffset = offset
+        }
+
+        ctx.reset(res, req)
+        ctx.startStreaming(200)
+        ctx.onWritable(cbSpy)
+
+        strictEqual(res.calls.filter((c) => c[0] === 'onWritable').length, 1)
+
+        const result1 = res.triggerWritable(123)
+
+        strictEqual(cbCallCount, 1)
+        strictEqual(lastOffset, 123)
+        strictEqual(result1, false)
+
+        const result2 = res.triggerWritable(456)
+
+        strictEqual(cbCallCount, 1)
+        strictEqual(result2, false)
+      })
+
+      test('aborted -> onWritable should no-op and not register', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.aborted = true
+
+        ctx.onWritable(() => {})
+
+        strictEqual(res.calls.filter((c) => c[0] === 'onWritable').length, 0)
+      })
+    })
+
+    describe('getWriteOffset()', () => {
+      test('aborted -> 0', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        ctx.aborted = true
+        res.setWriteOffset(100)
+
+        strictEqual(ctx.getWriteOffset(), 0)
+      })
+
+      test('otherwise -> proxy to res.getWriteOffset()', () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        res.setWriteOffset(42)
+
+        strictEqual(ctx.getWriteOffset(), 42)
+
+        const getWriteOffsetCalls = res.calls.filter((c) => c[0] === 'getWriteOffset')
+
+        strictEqual(getWriteOffsetCalls.length, 1)
+      })
+    })
+
+    describe('stream(readable)', () => {
+      test('happy path, write always true', async () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req, { finalizeHttpContext: () => {} })
+        res.setWriteResultSequence([true, true, true])
+
+        const readable = createMockReadable()
+        const p = ctx.stream(readable, 200, TEXT_PLAIN_HEADER)
+
+        readable.emit('data', Buffer.from('a'))
+        readable.emit('data', Buffer.from('b'))
+        readable.emit('end')
+
+        await p
+
+        strictEqual(readable.getPauseCallCount(), 0)
+        strictEqual(readable.getResumeCallCount(), 0)
+
+        const writeCalls = res.calls.filter((c) => c[0] === 'write')
+
+        strictEqual(writeCalls.length, 2)
+        strictEqual(res.calls.filter((c) => c[0] === 'writeStatus').length, 1)
+        strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 1)
+        strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
+      })
+
+      test('settles before finalize returns the context to the pool', async () => {
+        const pool = {
+          release(current: HttpContext) {
+            current.clear()
+          }
+        }
+        const ctx = new HttpContext(pool)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req, {
+          finalizeHttpContext(current: HttpContext) {
+            current.release()
+          }
+        })
+
+        const readable = createMockReadable()
+        const promise = ctx.stream(readable, 200)
+
+        readable.emit('end')
+
+        await promise
+        strictEqual(ctx.done, true)
+      })
+
+      test('backpressure', async () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req, { finalizeHttpContext: () => {} })
+        res.setWriteResultSequence([false, true])
+
+        const readable = createMockReadable()
+        const p = ctx.stream(readable, 200)
+
+        readable.emit('data', 'a')
+
+        strictEqual(readable.getPauseCallCount(), 1)
+        strictEqual(readable.getResumeCallCount(), 0)
+
+        res.triggerWritable(100)
+
+        strictEqual(readable.getResumeCallCount(), 1)
+
+        readable.emit('data', 'b')
+        readable.emit('end')
+
+        await p
+
+        strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
+      })
+
+      test('aborted mid-stream', async () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req)
+        res.setWriteResultSequence([true])
+
+        const readable = createMockReadable()
+        const p = ctx.stream(readable, 200)
+
+        ctx.aborted = true
+        readable.emit('data', 'a')
+
+        await p
+
+        strictEqual(readable.getDestroyCallCount(), 1)
+        strictEqual(res.calls.filter((c) => c[0] === 'end').length, 0)
+      })
+
+      test('error event rejects and calls end() if not aborted', async () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        let finalizeCallCount = 0
+
+        const finalizeHttpContext = () => {
+          finalizeCallCount++
+        }
+
+        ctx.reset(res, req, { finalizeHttpContext })
+        res.setWriteResultSequence([true])
+
+        const readable = createMockReadable()
+        const p = ctx.stream(readable, 200)
+
+        readable.emit('data', 'a')
+        readable.emit('error', new Error('boom'))
+
+        await rejects(p, (err) => {
+          strictEqual(httpError(err).message, 'boom')
+
+          return true
+        })
+
+        strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
+        strictEqual(finalizeCallCount, 1)
+      })
+    })
+  })
+
+  describe('abort()', () => {
+    test('should set aborted=true, stop streaming flags, clear onWritableCallback, call finalizeHttpContext once', () => {
+      let finalizeCount = 0
+
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeCall() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.streaming = true
+      ctx.streamingStarted = true
+      ctx.onWritableCallback = () => {}
+
+      ctx.abort()
+
+      strictEqual(ctx.aborted, true)
+      strictEqual(ctx.streaming, false)
+      strictEqual(ctx.streamingStarted, false)
+      strictEqual(ctx.onWritableCallback, null)
+      strictEqual(finalizeCount, 1)
+
+      ctx.abort()
+
+      strictEqual(finalizeCount, 1)
+    })
+
+    test('abort during pending body() should reject body promise with Request aborted', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '4' } })
+      const server = {
+        finalizeHttpContext() {
+          /* noop */
+        },
+        safeCall() {
+          /* noop */
+        }
+      }
+
+      ctx.reset(res, req, server, 100)
+      const p = ctx.body()
+
+      ctx.abort()
+
+      await rejects(p, (err) => {
+        strictEqual(httpError(err).message, 'Request aborted')
+        strictEqual(httpError(err).status, 418)
+
+        return true
+      })
+    })
+  })
+
+  describe('request timeout', () => {
+    test('should reject body work, send 408 with close, report the error, and finalize', async () => {
+      const finalized = Promise.withResolvers<void>()
+      const reported: Array<readonly [unknown, ...unknown[]]> = []
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: {},
+        httpErrorHandler: () => {},
+        finalizeHttpContext() {
+          finalized.resolve()
+        },
+        safeCall(fn: (...args: unknown[]) => unknown, ...args: unknown[]) {
+          reported.push([fn, ...args])
+
+          return Promise.resolve()
+        }
+      }
+
+      ctx.reset(res, req, server, 16)
+
+      const body = ctx.body()
+
+      void body.catch(() => {})
+      ctx.startRequestTimeout(10)
+
+      await finalized.promise
+
+      await rejects(body, (err) => httpError(err).status === 408 && httpError(err).message === 'Request Timeout')
+      strictEqual(ctx.done, true)
+      strictEqual(ctx.replied, true)
+      strictEqual(reported.length, 1)
+      strictEqual(httpError(at(reported, 0)[2]).status, 408)
+      strictEqual(
+        res.calls.some(([name, value]) => name === 'writeStatus' && value === STATUS_TEXT[408]),
+        true
+      )
+      deepStrictEqual(
+        res.calls.find(([name]) => name === 'end'),
+        ['end', 'Request Timeout', true]
+      )
+    })
+
+    test('should cancel the timer when a response starts', async () => {
+      let finalized = 0
+
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        bindingCapabilities: {},
+        httpErrorHandler: () => {},
+        finalizeHttpContext() {
+          finalized++
+        },
+        safeCall() {
+          return Promise.resolve()
+        }
+      }
+
+      ctx.reset(res, req, server)
+      ctx.startRequestTimeout(10)
+      ctx.sendText('ok')
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      strictEqual(finalized, 0)
+      strictEqual(res.calls.filter(([name]) => name === 'end').length, 1)
+    })
+  })
+
+  describe('onResolve/onReject', () => {
+    test('onResolve should send(result) and finalize if not streaming', () => {
+      let finalizeCount = 0
+      let safeErrCount = 0
+
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeCall() {
+          safeErrCount++
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.onResolve('ok')
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[200]),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'ok'),
+        true
+      )
+      strictEqual(finalizeCount, 1)
+      strictEqual(safeErrCount, 0)
+    })
+
+    test('onResolve should call sendError + httpErrorHandler if send throws, and still finalize', () => {
+      let finalizeCount = 0
+      let safeErrCount = 0
+      let lastErr: Error | null = null
+
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        httpErrorHandler(ctx: HttpContext | null, err: Error) {
+          safeErrCount++
+          lastErr = err
+        },
+        safeCall(fn: (...args: unknown[]) => unknown, ...args: unknown[]) {
+          return fn(...args)
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+
+      const obj = {
+        toJSON() {
+          throw new Error('boom')
+        }
+      }
+
+      ctx.onResolve(obj)
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[500]),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'Internal Server Error'),
+        true
+      )
+      strictEqual(safeErrCount, 1)
+      strictEqual(httpError(lastErr).message, 'boom')
+      strictEqual(finalizeCount, 1)
+    })
+
+    test('onReject should sendError(err), call httpErrorHandler, and finalize if not streaming', () => {
+      let finalizeCount = 0
+      let safeErrCount = 0
+      let lastErr: Error | null = null
+
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        httpErrorHandler(ctx: HttpContext | null, err: Error) {
+          safeErrCount++
+          lastErr = err
+        },
+        safeCall(fn: (...args: unknown[]) => unknown, ...args: unknown[]) {
+          return fn(...args)
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      const err = Object.assign(new Error('bad'), { status: 400 })
+
+      ctx.onReject(err)
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[400]),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'bad'),
+        true
+      )
+      strictEqual(safeErrCount, 1)
+      strictEqual(lastErr, err)
+      strictEqual(finalizeCount, 1)
+    })
+
+    test('onResolve should NOT finalize when streaming=true', () => {
+      let finalizeCount = 0
+
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeCall() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.streaming = true
+
+      ctx.onResolve('ok')
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[200]),
+        true
+      )
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'end' && args[0] === 'ok'),
+        true
+      )
+      strictEqual(finalizeCount, 0)
+    })
+
+    test('onReject should NOT finalize when streaming=true', () => {
+      let finalizeCount = 0
+
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeCall() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.streaming = true
+
+      ctx.onReject(Object.assign(new Error('bad'), { status: 400 }))
+
+      strictEqual(
+        res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[400]),
+        true
+      )
+      strictEqual(finalizeCount, 0)
+    })
+
+    test('onResolve/onReject finalize when already replied, but no-op when aborted or done', () => {
+      let finalizeCount = 0
+
+      const server = {
+        finalizeHttpContext() {
+          finalizeCount++
+        },
+        safeCall() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(null)
+      const res1 = createMockRes()
+      const res2 = createMockRes()
+      const res3 = createMockRes()
+      const req = createMockReq()
+
+      // Already replied: must not write again, but MUST finalize, otherwise the
+      // context leaks (active counter never decremented -> graceful shutdown hangs).
+      ctx.reset(res1, req, server)
+      ctx.replied = true
+      ctx.onResolve('x')
+
+      strictEqual(res1.calls.length, 0)
+      strictEqual(finalizeCount, 1)
+
+      // onResolve already finalized (done=true), so onReject is now a no-op.
+      ctx.onReject(new Error('y'))
+      strictEqual(finalizeCount, 1)
+
+      // Aborted: full no-op (the abort path owns finalization).
+      finalizeCount = 0
+      ctx.reset(res2, req, server)
+      ctx.aborted = true
+      ctx.onResolve('x')
+      ctx.onReject(new Error('y'))
+
+      strictEqual(res2.calls.length, 0)
+      strictEqual(finalizeCount, 0)
+
+      // Done: full no-op.
+      finalizeCount = 0
+      ctx.reset(res3, req, server)
+      ctx.done = true
+      ctx.onResolve('x')
+      ctx.onReject(new Error('y'))
+
+      strictEqual(res3.calls.length, 0)
+      strictEqual(finalizeCount, 0)
+    })
+  })
+
+  describe('streaming edge-cases', () => {
+    test('stream() should set replied=true and streaming=true, and return resolved if already replied', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        finalizeHttpContext() {
+          /* noop */
+        },
+        safeCall() {
+          /* noop */
+        }
+      }
+
+      ctx.reset(res, req, server)
+      ctx.replied = true
+
+      const readable = createMockReadable()
+      const p = ctx.stream(readable, 200)
+
+      await p
+
+      strictEqual(res.calls.length, 0)
+    })
+
+    test('tryEnd done=true should set ctx.streaming=false (already exists) and must allow second startStreaming()', () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+      const server = {
+        finalizeHttpContext() {
+          /* noop */
+        },
+        safeCall() {
+          /* noop */
+        }
+      }
+
+      ctx.reset(res, req, server)
+      ctx.startStreaming(200)
+
+      res.setTryEndResultSequence([[true, true]])
+      const chunk = 'x'
+      const chunkLen = Buffer.byteLength(chunk)
+      const totalSize = ctx.getWriteOffset() + chunkLen
+
+      ctx.tryEnd('x', totalSize)
+
+      strictEqual(ctx.streaming, false)
+
+      const initialCallCount = res.calls.length
+
+      ctx.startStreaming(200)
+
+      strictEqual(ctx.streaming, false)
+      strictEqual(res.calls.length, initialCallCount)
+    })
+  })
+
+  describe('finalize() idempotency', () => {
+    /**
+     * @returns {{ ctx: HttpContext, server: { finalizeCalls: number }, pool: { releaseCalls: number } }}
+     */
+    function createFinalizeHarness() {
+      const pool = {
+        releaseCalls: 0,
+        /**
+         * @param {HttpContext} ctx
+         */
+        release(ctx: HttpContext) {
+          this.releaseCalls++
+          ctx.clear()
+        }
+      }
+      const server = {
+        finalizeCalls: 0,
+        /**
+         * @param {HttpContext} ctx
+         */
+        finalizeHttpContext(ctx: HttpContext) {
+          this.finalizeCalls++
+          ctx.release()
+        },
+        safeCall() {
+          /* noop */
+        }
+      }
+      const ctx = new HttpContext(pool)
+
+      return { ctx, server, pool }
+    }
+
+    test('should not call server.finalizeHttpContext twice if clear() happens during first finalize', () => {
+      const { ctx, server, pool } = createFinalizeHarness()
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, server)
+      ctx.startStreaming(200)
+
+      ctx.end('ok')
+
+      ctx.finalize()
+
+      strictEqual(server.finalizeCalls, 1)
+      strictEqual(pool.releaseCalls, 1)
+    })
+  })
+})

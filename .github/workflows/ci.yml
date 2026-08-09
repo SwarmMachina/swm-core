@@ -32,7 +32,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: pnpm/action-setup@v4
         with:
-          version: 11.3.0
+          version: 11.20.0
 
       - name: Verify workflow commit belongs to master
         run: git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/master
@@ -42,6 +42,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+
+      - name: Install release policy dependencies
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: pnpm install --frozen-lockfile
 
       - name: Verify release tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -65,7 +69,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11.3.0
+          version: 11.20.0
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -144,7 +148,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11.3.0
+          version: 11.20.0
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -168,7 +172,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11.3.0
+          version: 11.20.0
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -226,12 +230,15 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11.3.0
+          version: 11.20.0
 
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: Build immutable release artifact
         run: pnpm release:artifact

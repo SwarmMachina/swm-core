@@ -1673,9 +1673,7 @@ connections individually.
 ### Graceful Shutdown
 
 ```javascript
-const server = new Server({
-  /* ... */
-})
+const server = new Server({/* ... */})
 await server.listen()
 
 let shutdownPromise

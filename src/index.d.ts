@@ -482,7 +482,17 @@ export interface CommonServerOptions {
  * At least one protocol layer must be configured. `null` explicitly disables
  * a layer; an empty object enables that layer with default behavior.
  */
+type RemovedServerOptions = {
+  backend?: never
+  maxBodySize?: never
+  onHttpError?: never
+  prefetch?: never
+  router?: never
+  routes?: never
+}
+
 export type ServerOptions = CommonServerOptions &
+  RemovedServerOptions &
   ({ http: HttpOptions; ws?: WSOptions | null } | { http?: HttpOptions | null; ws: WSOptions })
 
 /**
