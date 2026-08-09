@@ -27,6 +27,27 @@ native binding.
 pnpm add @swarmmachina/swm-core
 ```
 
+### Migrating from 4.x
+
+Version 5 removes the short request aliases that duplicated the explicit
+`HttpContext` API. Update calls as follows:
+
+| 4.x alias                          | 5.x method               |
+| ---------------------------------- | ------------------------ |
+| `ctx.getHeader(name)` / `header()` | `ctx.getReqHeader(name)` |
+| `ctx.ip()`                         | `ctx.getIP()`            |
+| `ctx.method()`                     | `ctx.getMethod()`        |
+| `ctx.url()`                        | `ctx.getUrl()`           |
+| `ctx.fullQuery()`                  | `ctx.getQuery()`         |
+| `ctx.query(name)`                  | `ctx.getQuery(name)`     |
+| `ctx.param(name)`                  | `ctx.getParameter(name)` |
+| `ctx.contentLength()`              | `ctx.getContentLength()` |
+| `ctx.status(code)`                 | `ctx.setStatus(code)`    |
+
+The package now publishes compiled files from `dist/`. Root imports remain
+unchanged; unsupported deep imports from `@swarmmachina/swm-core/src/*` must be
+replaced with exports from the package root.
+
 ### Runtime requirements
 
 The server depends on the native `@swarmmachina/swm-uws` addon, which
@@ -93,7 +114,7 @@ const server = new Server({
         return null
       }
 
-      const token = ctx.getHeader('authorization')
+      const token = ctx.getReqHeader('authorization')
       const user = await findUserByToken(token)
 
       if (!user) {
@@ -123,7 +144,7 @@ const server = new Server({
         path: '/users',
         prefetch: true,
         before: async (ctx) => {
-          const user = await findUserByToken(ctx.getHeader('authorization'))
+          const user = await findUserByToken(ctx.getReqHeader('authorization'))
 
           if (!user) {
             ctx.setStatus(401).send({ error: 'Unauthorized' })
@@ -168,7 +189,7 @@ http: {
     // propagates the error when the user is allowed.
     void dataPromise.catch(() => {})
 
-    const token = ctx.getHeader('authorization')
+    const token = ctx.getReqHeader('authorization')
     const isBlocked = await checkUserInDatabase(token)
 
     if (isBlocked) {
@@ -400,7 +421,7 @@ complete set is actually required after an `await`.
 
 `ctx.headers` is a stable view of headers already retained or read. Accessing it
 does not enumerate the native request: without header prefetch it starts empty,
-and each successful `ctx.getHeader(name)` adds that field. `ctx.getHeaders()`
+and each successful `ctx.getReqHeader(name)` adds that field. `ctx.getHeaders()`
 collects the complete set and fills the same view.
 
 ```javascript
@@ -438,6 +459,182 @@ capacity of 100.
 `http.maxBodySize` and `ws.maxPayloadLength` are independent. Changing one does
 not change the limit for the other protocol.
 
+#### Configuration examples
+
+The following configurations cover every public `Server` option. Choose either
+`http.onRequest` or `http.routes`; they cannot be used together.
+
+**HTTP, transport policy, and root options**
+
+```javascript
+import Server from '@swarmmachina/swm-core'
+
+const server = new Server({
+  host: '127.0.0.1',
+  port: 3000,
+  onServerError: (error) => {
+    console.error('Transport error:', error)
+  },
+  transport: {
+    maxHeaderSize: 32 * 1024,
+    maxHeaderCount: 64,
+    headersTimeoutMs: 10_000,
+    keepAliveTimeoutMs: 60_000,
+    bodyIdleTimeoutMs: 15_000,
+    minBodyRateBytesPerSec: 1024,
+    responseWriteTimeoutMs: 30_000
+  },
+  http: {
+    prefetch: true,
+    prefetchHeaders: ['authorization', 'traceparent'],
+    maxBodySize: 2 * 1024 * 1024,
+    maxBodyBudget: 64 * 1024 * 1024,
+    requestTimeoutMs: 15_000,
+    onRequest: async (ctx) => {
+      const body = await ctx.json()
+
+      return {
+        trace: ctx.headers.traceparent,
+        body
+      }
+    },
+    onError: (ctx, error) => {
+      console.error(`Request failed: ${ctx.getMethod()} ${ctx.getUrl()}`, error)
+    }
+  },
+  ws: null
+})
+
+await server.listen()
+```
+
+Set `minBodyRateBytesPerSec: null` when the trusted ingress already enforces a
+body receive-rate policy. Omit `transport` to use the binding defaults.
+
+**Declarative routes**
+
+```javascript
+import Server from '@swarmmachina/swm-core'
+
+// db is the application's database client.
+const routeServer = new Server({
+  http: {
+    maxBodySize: 2 * 1024 * 1024,
+    maxBodyBudget: 32 * 1024 * 1024,
+    requestTimeoutMs: 10_000,
+    routes: [
+      {
+        method: 'post',
+        path: '/accounts/:accountId',
+        prefetch: true,
+        prefetchHeaders: ['authorization'],
+        maxBodySize: 256 * 1024,
+        before: [
+          async (ctx) => {
+            const token = ctx.headers.authorization
+
+            if (!token) {
+              return ctx.setStatus(401).send({ error: 'Unauthorized' })
+            }
+
+            const user = await db.users.findByAccessToken(token)
+            const accountId = ctx.getParameter('accountId')
+            const canWrite = user && (await db.accounts.canWrite(user.id, accountId))
+
+            if (!canWrite) {
+              return ctx.setStatus(403).send({ error: 'Forbidden' })
+            }
+          }
+        ],
+        handler: async (ctx) => {
+          const update = await ctx.json()
+
+          return db.accounts.update(ctx.getParameter('accountId'), update)
+        }
+      },
+      {
+        method: 'get',
+        path: '/health',
+        prefetch: false,
+        prefetchHeaders: false,
+        maxBodySize: 0,
+        handler: () => ({ ok: true })
+      }
+    ],
+    onError: (ctx, error) => {
+      console.error(`Route failed: ${ctx.getUrl()}`, error)
+    }
+  },
+  ws: null
+})
+
+await routeServer.listen()
+```
+
+`before` may be one function or an ordered array. A route limit may lower, but
+cannot exceed, `http.maxBodySize`.
+
+**WebSocket options and callbacks**
+
+```javascript
+import Server from '@swarmmachina/swm-core'
+
+const wsServer = new Server({
+  host: '127.0.0.1',
+  port: 3001,
+  http: null,
+  ws: {
+    maxPayloadLength: 64 * 1024,
+    maxBackpressure: 128 * 1024,
+    closeOnBackpressureLimit: true,
+    idleTimeoutSec: 30,
+    upgradeTimeoutMs: 5_000,
+    prefetchHeaders: ['authorization'],
+    onUpgrade: async (meta) => {
+      const token = meta.headers.authorization
+
+      if (!token) {
+        return null
+      }
+
+      const user = await authenticate(token)
+      return user ? { userId: user.id } : null
+    },
+    selectProtocol: (requested) => (requested.includes('chat.v1') ? 'chat.v1' : undefined),
+    connectionKey: (ctx) => ctx.data.userId,
+    onOpen: (ctx) => {
+      ctx.subscribe(`user:${ctx.key}`)
+    },
+    onMessage: (ctx, message, isBinary) => {
+      if (!isBinary) {
+        ctx.publish('chat', ctx.decode(message))
+      }
+    },
+    onDropped: (ctx, message, isBinary) => {
+      console.warn('Dropped message:', ctx.key, message.byteLength, isBinary)
+    },
+    onDrain: (ctx) => {
+      console.log('Writable again:', ctx.key)
+    },
+    onSubscription: (ctx, topic, newCount, oldCount) => {
+      console.log(ctx.key, ctx.decode(topic), oldCount, '->', newCount)
+    },
+    onClose: (ctx, code, reason) => {
+      console.log('Closed:', ctx.key, code, ctx.decode(reason))
+    },
+    onError: (ctx, error) => {
+      console.error('WebSocket error:', ctx?.key, error)
+    }
+  }
+})
+
+await wsServer.listen()
+```
+
+`onUpgrade` is required and must return an object to accept or `null` to reject
+the upgrade. `connectionKey` is optional; return `null` or `undefined` when a
+connection must not be addressable through `server.sendTo()`.
+
 #### JavaScript configuration typing
 
 IDE types load automatically from the package root import. For a configuration
@@ -459,136 +656,29 @@ Avoid deep imports from `@swarmmachina/swm-core/src/*`.
 
 ### HTTP body memory limits
 
-All numeric HTTP body-size and budget values are byte counts. Human-readable
-strings such as `"16MB"` or `"16 MiB"` are rejected. The default
-`http.maxBodySize` is `1024 * 1024` bytes (1 MiB) and the supported maximum is
-`64 * 1024 * 1024` bytes (64 MiB).
-
-The memory controls are distinct:
-
-1. A valid `Content-Length` above the request limit is rejected before body
-   allocation.
-2. `maxBodySize` (or the first body accessor's byte limit) bounds one request.
-3. `maxBodyBudget` bounds aggregate accounted body memory across concurrent
-   requests.
-
-Without prefetch, body collection starts only when application code calls
-`ctx.body()`, `ctx.buffer()`, `ctx.text()`, or `ctx.json()`. Prefetch starts it
-before user handlers. Both modes share the same default aggregate budget:
-`256 * 1024 * 1024` bytes (256 MiB). A finite default avoids making lazy mode an
-implicit unlimited escape hatch while still admitting four simultaneous
-worst-case 64 MiB bodies, or up to 256 reservations at the default 1 MiB
-per-request limit.
-
-An explicit finite value always wins. Explicit `0` means zero capacity: empty
-bodies work, but positive reservations fail with `503`. Explicit `null` is the
-intentional unlimited sentinel and should be reserved for a separately bounded
-environment.
-
-Why 256 MiB:
-
-- the supported per-request ceiling remains 64 MiB, so the default admits four
-  simultaneous worst-case reservations instead of only one;
-- at the default 1 MiB request limit it admits up to 256 full-size
-  reservations;
-- accounting stays finite in lazy mode as well as prefetch mode;
-- reserve, resize, and release remain O(1); the budget does not scan active
-  requests or sample RSS.
-
-The 64 MiB `maxBodySize` maximum is deliberate. Body accessors materialize a
-contiguous `Buffer`; uploads that legitimately exceed 64 MiB should use a
-streaming endpoint or object-storage upload flow instead of increasing the
-heap-facing body limit.
-
-The default is a library safety net, not a universal container-size
-recommendation. Choose an explicit value from the memory available after
-subtracting baseline RSS, V8 heap, outbound response/WebSocket capacity,
-native/kernel buffers, and operational headroom:
-
-```text
-body budget <= process memory limit
-               - measured baseline/high-water RSS
-               - non-body concurrency allowance
-               - required safety headroom
-
-known-length admission ~= floor(body budget / declared Content-Length)
-unknown-length admission = floor(body budget / effective collection limit)
-```
-
-If `maxBodyBudget` is smaller than `maxBodySize`, known-length bodies below the
-budget can still proceed. An unknown-length body reserves its full collection
-limit up front, so it will receive `503` when that limit cannot fit. Prefer a
-valid `Content-Length` for large requests when safe admission density matters.
-
-Example starting points—capacity-test them under the real workload:
-
-| Deployment shape                     | Suggested starting budget | Rationale                                                    |
-| ------------------------------------ | ------------------------- | ------------------------------------------------------------ |
-| Small 512 MiB container              | `64–128 MiB`              | Preserve room for V8, native buffers, and application state. |
-| General 1–2 GiB service              | Default `256 MiB`         | Four maximum-size bodies or many default-size API requests.  |
-| Dedicated upload/API worker          | Explicit `512 MiB+`       | Only after measuring RSS high-water and concurrency.         |
-| Externally hard-bounded test process | `null`                    | Disables this protection; not a normal production default.   |
-
-Use an explicit production budget after capacity planning:
+All values are byte counts. `maxBodySize` defaults to 1 MiB and cannot exceed
+64 MiB; it limits one request. `maxBodyBudget` defaults to 256 MiB and limits
+the aggregate retained and in-flight body memory across requests.
 
 ```javascript
 const server = new Server({
   http: {
-    prefetch: true,
-
-    // Body-size values are expressed in bytes.
-    maxBodySize: 16 * 1024 * 1024, // 16 MiB per request
-
-    // Prefetch may collect bodies before ctx.body() is called. Keep a global
-    // budget so concurrent connections cannot each reserve the full
-    // per-request limit independently.
-    maxBodyBudget: 512 * 1024 * 1024, // 512 MiB across accounted bodies
-
-    requestTimeoutMs: 30_000,
+    maxBodySize: 16 * 1024 * 1024,
+    maxBodyBudget: 256 * 1024 * 1024,
     onRequest
   }
 })
 ```
 
-The automatic-default form is:
+A valid `Content-Length` above `maxBodySize` is rejected before allocation.
+Exceeding `maxBodySize` returns `413`; exhausting `maxBodyBudget` returns `503`.
+`maxBodyBudget: 0` permits only empty bodies, while `null` disables the
+aggregate limit. The budget accounts for bodies only, not total process RSS.
 
-```javascript
-const server = new Server({
-  http: {
-    prefetch: true,
-
-    // Expressed in bytes. Because no global budget is supplied, swm-core
-    // applies its finite 256 MiB default in both lazy and prefetch modes.
-    // Set it explicitly when capacity planning calls for another value.
-    maxBodySize: 16 * 1024 * 1024, // 16 MiB per request
-    onRequest
-  }
-})
-```
-
-Known `Content-Length` bodies reserve their declared size. Unknown-length bodies
-reserve the collection limit up front. After materialization, excess reservation
-is reconciled to the exact retained allocation (including a grow buffer's
-backing capacity), and remains charged until context cleanup. Failure, abort,
-timeout, or reset releases the generation-owned reservation exactly once. Thus:
-
-```text
-accounted body memory <= effective global body budget
-```
-
-This is not an RSS cap. Allocator overhead and retained arenas, native and kernel
-socket buffers, temporary/body-conversion copies, V8 heap, response bodies, GC
-delay, and unrelated application memory can make process RSS higher. A budget
-exhaustion returns `503`; a request over its limit returns `413`.
-
-The normalized values are available read-only as
-`server.effectiveConfig.http.maxBodySize` and
-`server.effectiveConfig.http.maxBodyBudget`.
-
-`requestTimeoutMs` defaults to 30 seconds for asynchronous `before`/handler
-chains. A timeout releases body reservations, returns `408`, closes the
-connection, and ignores late results. It does not cancel application work; use
-`AbortController` when the downstream operation supports cancellation.
+Body accessors materialize a `Buffer`; use a streaming or object-storage upload
+flow for larger uploads. `requestTimeoutMs` defaults to 30 seconds; it releases
+the body reservation and returns `408`, but does not cancel application work.
+The normalized values are available on `server.effectiveConfig.http`.
 
 **Route Definition (for `routes` array):**
 
@@ -638,49 +728,27 @@ directly by swm-core and do not need to be included in the list.
 
 ### WebSocket payload and backpressure limits
 
-WebSocket input uses `maxPayloadLength`, not HTTP `maxBodySize`. All values
-below are byte counts:
+WebSocket input uses `maxPayloadLength`, not HTTP `maxBodySize`. All limits are
+byte counts:
 
 ```javascript
 const server = new Server({
   http: null,
   ws: {
-    // Incoming WebSocket messages use maxPayloadLength, not HTTP maxBodySize.
-    // All size values below are expressed in bytes.
     maxPayloadLength: 1024 * 32, // 32 KiB per incoming message
-
-    // Outgoing backpressure is limited independently for each WebSocket.
     maxBackpressure: 1024 * 64, // 64 KiB per slow connection
-    closeOnBackpressureLimit: true
+    closeOnBackpressureLimit: true,
+    onUpgrade: () => ({}) // Explicitly allow anonymous connections.
   }
 })
 ```
 
-`maxPayloadLength` is inbound and applies to each reconstructed text or binary
-message, including fragmented messages. The installed `swm-uws` transport has
-per-message compression disabled, so compressed-message semantics do not apply
-to that backend. An oversized message closes the connection before
-`onMessage` sees it.
-
-`maxBackpressure` is outbound and per socket. `send()`/`sendTo()` can report
-backpressure or a dropped message, `onDropped` observes drops, and `onDrain`
-reports recovery. The default `closeOnBackpressureLimit: true` removes slow
-consumers after a dropped message. Set it to `false` only when keeping the
-connection is more important than reconnection; messages above the limit are
-then dropped while the slow socket stays open.
-
-These controls are independent from HTTP body accounting. There is no
-process-wide WebSocket budget:
-
-```text
-allowed WebSocket backpressure can approach
-concurrent slow WebSockets × maxBackpressure
-```
-
-In production, enforce connection and upgrade-rate limits at the trusted
-ingress. Size the per-instance limit from load-tested RSS; monitor
-`server.activeWs`, RSS, dropped messages, and slow-consumer closes. Container
-memory limits are a final backstop, not admission control.
+`maxPayloadLength` applies to each reconstructed text or binary message;
+oversized messages close before `onMessage`. `maxBackpressure` applies per
+socket. `send()` and `sendTo()` report backpressure or dropped messages;
+`onDropped` observes drops and `onDrain` signals recovery. With the default
+`closeOnBackpressureLimit: true`, a dropped message closes the slow socket.
+Set it to `false` only when dropping messages is acceptable.
 
 `selectProtocol` runs synchronously after `onUpgrade` accepts. Return one of the
 requested tokens; returning `undefined` (or omitting the selector) negotiates no
@@ -830,22 +898,8 @@ console.log(server.connectionCount)
 
 The `ctx` object passed to `http.onRequest` and route handlers:
 
-Request metadata has a transport-style `get*` surface. The original concise
-readers remain supported and share the same per-request cache:
-
-| Transport-style reader      | Concise alias     |
-| --------------------------- | ----------------- |
-| `getIP()`                   | `ip()`            |
-| `getMethod()`               | `method()`        |
-| `getUrl()`                  | `url()`           |
-| `getQuery()`                | `fullQuery()`     |
-| `getQuery(name)`            | `query(name)`     |
-| `getParameter(indexOrName)` | `param(...)`      |
-| `getHeader(name)`           | `header(name)`    |
-| `getHeaders()`              | —                 |
-| `getContentLength()`        | `contentLength()` |
-
-`ctx.getHeader()` reads an incoming request header; `ctx.setHeader()` stages
+Request metadata uses explicit `get*` readers. `ctx.getReqHeader()` reads an
+incoming request header; `ctx.setHeader()` stages
 an outgoing response header.
 
 #### Properties
@@ -858,7 +912,7 @@ an outgoing response header.
 
 #### Methods
 
-##### `ctx.getMethod()` / `ctx.method()`
+##### `ctx.getMethod()`
 
 Get request lowercased method.
 
@@ -868,7 +922,7 @@ const method = ctx.getMethod()
 
 **Returns:** `string`
 
-##### `ctx.getUrl()` / `ctx.url()`
+##### `ctx.getUrl()`
 
 Get request url.
 
@@ -878,7 +932,7 @@ const url = ctx.getUrl()
 
 **Returns:** `string`
 
-##### `ctx.getIP()` / `ctx.ip()`
+##### `ctx.getIP()`
 
 Get network source metadata. A valid PROXY Protocol source address is preferred;
 otherwise the TCP peer address is returned. IPv4-mapped IPv6 is normalized and
@@ -909,7 +963,7 @@ Internet -> public listener accepting arbitrary PROXY headers
 
 The same trust boundary applies to `ws.onUpgrade(meta).ip()`.
 
-##### `ctx.getQuery(name)` / `ctx.query(name)`
+##### `ctx.getQuery(name)`
 
 Get query parameter value.
 
@@ -919,7 +973,7 @@ const page = ctx.getQuery('page') // ?page=1
 
 **Returns:** `string | undefined` - `undefined` when the parameter is absent
 
-##### `ctx.getQuery()` / `ctx.fullQuery()`
+##### `ctx.getQuery()`
 
 Get full raw query string.
 
@@ -929,7 +983,7 @@ const q = ctx.getQuery() // page=1&limit=20
 
 **Returns:** `string`
 
-##### `ctx.getParameter(indexOrName)` / `ctx.param(indexOrName)`
+##### `ctx.getParameter(indexOrName)`
 
 Get URL parameter by index or name (for pattern matching in the `routes` API).
 
@@ -947,12 +1001,12 @@ const postId = ctx.getParameter('postId')
 
 **Returns:** `string | undefined` - `undefined` when the parameter is absent
 
-##### `ctx.getHeader(name)` / `ctx.header(name)`
+##### `ctx.getReqHeader(name)`
 
 Get request header value.
 
 ```javascript
-const auth = ctx.getHeader('authorization')
+const auth = ctx.getReqHeader('authorization')
 ```
 
 Header names are case-insensitive. A missing header returns an empty string.
@@ -980,7 +1034,7 @@ const auth = headers.authorization
 
 **Returns:** `Record<string, string>`
 
-##### `ctx.getContentLength()` / `ctx.contentLength()`
+##### `ctx.getContentLength()`
 
 Get a valid non-negative `Content-Length` value. Returns `null` when the header
 is absent or invalid.
@@ -1042,7 +1096,7 @@ const text = await ctx.text()
 
 **Returns:** `Promise<string>`
 
-##### `ctx.setStatus(code)` / `ctx.status(code)`
+##### `ctx.setStatus(code)`
 
 Set response status code. Returns context for chaining.
 
@@ -1707,7 +1761,7 @@ A route may declare `before` — one function or an array — run before its
 
 ```javascript
 const requireAuth = (ctx) => {
-  if (ctx.getHeader('authorization') !== 'Bearer secret') {
+  if (ctx.getReqHeader('authorization') !== 'Bearer secret') {
     ctx.setStatus(401).send('Unauthorized') // replying short-circuits the chain
   }
 }
@@ -1844,8 +1898,9 @@ const server = new Server({
 ```
 
 Options: `spa` (fall back to `index`), `index` (default `'index.html'`), `cache`
-(default `true`; set `false` in dev to pick up edits), `cacheLimit` (max cached
-files, default `128`), `maxAge` (`Cache-Control` seconds). Misses return `404`,
+(default `true`; set `false` in dev to pick up edits), `cacheLimit` (non-negative
+safe integer; max cached files, default `128`; `0` disables the in-memory cache),
+`maxAge` (`Cache-Control` seconds). Misses return `404`,
 traversal `403`, non-`GET`/`HEAD` `405`.
 
 ### Backpressure Handling
@@ -1880,209 +1935,8 @@ const server = new Server({
 ## Testing
 
 ```bash
-# Run tests
 pnpm test
-
-# Run tests with coverage
-pnpm test:coverage
 ```
-
-Benchmark measurement, statistics, profiling, orchestration and regression
-primitives are provided by
-[`@swarmmachina/benchkit`](https://github.com/SwarmMachina/benchkit).
-Persistent WebSocket echo load is generated directly by Benchkit. The local
-`benchmark/helpers/` directory contains only the swm-core-specific HTTP
-compatibility adapter, target lifecycle helpers and WebSocket upgrade churn
-generator. Use `--workers` with the WebSocket echo and payload benchmarks to
-fix the number of Benchkit load-generator worker threads; reports include that
-count together with generator ELU and RSS.
-
-Body-prefetch performance comparison (balanced lazy/prefetch order, including
-p95/p99, ELU and memory):
-
-```bash
-BODY_PREFETCH_RUNS=3 \
-BODY_PREFETCH_WARMUP=2 \
-BODY_PREFETCH_DURATION=6 \
-BODY_PREFETCH_CONNECTIONS=100 \
-BODY_PREFETCH_GET_PIPELINING=10 \
-BODY_PREFETCH_BODY_PIPELINING=1 \
-BODY_PREFETCH_SAMPLE_MS=250 \
-pnpm bench:body-prefetch
-```
-
-The generated JSON and Markdown reports are written to
-`benchmark/profiles/body-prefetch/`.
-
-Aggregate body-budget and async request-timeout overhead (balanced enabled/off
-order, p95/p99, ELU and memory):
-
-```bash
-BODY_SAFETY_RUNS=3 \
-BODY_SAFETY_WARMUP=2 \
-BODY_SAFETY_DURATION=6 \
-BODY_SAFETY_CONNECTIONS=100 \
-BODY_SAFETY_SAMPLE_MS=250 \
-pnpm bench:body-safety
-```
-
-This compares explicit unlimited (`maxBodyBudget: null`) with
-`256 * 1024 * 1024` bytes on a prefetched body workload, and
-`requestTimeoutMs: 0` with `30000` on an async-handler workload. Reports are
-written to `benchmark/profiles/body-safety/`.
-
-Prepared-response batching has a separate balanced off/on gate:
-
-```bash
-RESPONSE_BATCH_RUNS=4 \
-RESPONSE_BATCH_WARMUP=2 \
-RESPONSE_BATCH_DURATION=6 \
-RESPONSE_BATCH_CONNECTIONS=100 \
-RESPONSE_BATCH_PIPELINING=10 \
-RESPONSE_BATCH_SAMPLE_MS=250 \
-pnpm bench:response-batch
-```
-
-It measures sync JSON and reusable prepared-header responses, including paired
-throughput, p95/p99, ELU, RSS, and errors. Reports are written to
-`benchmark/profiles/response-batch/`. `pnpm bench:response-batch:gate` exits
-non-zero unless every scenario meets the documented default-eligibility
-thresholds.
-
-## Native binding regression gate
-
-The runtime is `@swarmmachina/swm-uws@0.6.0`. The regression gate runs the
-shared `swm-core` HTTP and WebSocket contract against the dev-only
-`uWebSockets.js@20.69.0` reference. Tests that require swm-uws-only transport
-or request-prefetch capabilities are covered by the full installed and
-sibling/RC gates instead of being treated as upstream compatibility failures.
-
-```bash
-pnpm test:e2e:bindings
-pnpm test:e2e:binding-candidate
-pnpm bench:bindings
-pnpm bench:bindings:deep
-```
-
-`test:e2e:binding-candidate` loads `../swm-uws` by default, verifies its
-manifest/native version and all six required capabilities, then runs the full
-HTTP/WebSocket e2e suite through that exact binding. For an unpacked release
-candidate elsewhere, invoke the underlying Node gate directly while the target
-version is still prospective. This avoids asking the package manager to fetch
-an unpublished registry tarball before the gate starts:
-
-```bash
-SWM_UWS_CANDIDATE=/path/to/swm-uws-rc node scripts/test-runtime-binding.js
-```
-
-After the dependency version is published and installed, the equivalent
-`pnpm test:e2e:binding-candidate` alias is safe to use.
-
-CI checks out tag `v<dependency version>`; manual workflows can override the
-candidate branch or tag with `swm_uws_ref`.
-
-`bench:bindings` is the CI gate; `bench:bindings:deep` is the longer diagnostic
-run. Both use balanced AB/BA ordering and write JSON under `benchmark/profiles/`.
-Parameters can be overridden with `BINDING_BENCH_*` or `DEEP_BINDING_*`.
-
-To advance the runtime binding and its upstream reference together, run:
-
-```bash
-pnpm deps:update:bindings 0.6.0 v20.69.0
-node scripts/test-runtime-binding.js
-```
-
-The updater changes both pins and the lockfile; do not edit them independently.
-For a coordinated minor release, publish the binding first, then rerun the
-updater so the lockfile records the registry `sha512` integrity. A prospective
-version without published integrity may be used with the sibling/RC runtime
-gate, but `release:artifact` rejects it by design.
-
-### Native capabilities
-
-After `listen()`, `server.bindingCapabilities` exposes the six binding flags
-after process-level selection:
-
-```javascript
-await server.listen()
-console.log(server.bindingCapabilities)
-```
-
-| Capability            | Core default               | Core use / short example                                                                                                                   |
-| --------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `beginWrite`          | enabled                    | Internal streaming path behind `ctx.startStreaming()`.                                                                                     |
-| `collectBody`         | enabled                    | Native collection behind `await ctx.body()` and body prefetch.                                                                             |
-| `httpTransportConfig` | enabled                    | `new Server({ transport: { maxHeaderCount: 64 }, http: {} })`.                                                                             |
-| `requestPrefetch`     | enabled                    | `prefetchHeaders: ['authorization']` retains only named fields.                                                                            |
-| `responseBatch`       | **experimental, disabled** | Prepared `ctx.reply()` path. The 0.6.0 gate measured −2.33% sync JSON and −10.10% prepared-header paired throughput, so it is not default. |
-| `requestPause`        | **unused, disabled**       | Advertised by the binding, but swm-core has no request-flow-control consumer yet.                                                          |
-
-`SWM_UWS_NATIVE_FAST_PATHS=0` disables every native extension. A comma-separated
-list selects exact paths. Experimental `responseBatch` can be tested without
-enabling `requestPause`:
-
-```bash
-SWM_UWS_NATIVE_FAST_PATHS=beginWrite,collectBody,httpTransportConfig,requestPrefetch,responseBatch \
-node server.js
-```
-
-`SWM_UWS_NATIVE_FAST_PATHS=all` enables all advertised paths, including both
-experimental/unused paths; it is intended for diagnostics, not the default
-production profile.
-
-## Regression profiling (CI)
-
-`pnpm profile:ci` checks HTTP, body-parser and WebSocket performance against
-`benchmark/baselines/*.json`. CI runs it on release tags and manual dispatches.
-
-The self-hosted `regression-gate` runs, in order:
-
-1. regression profile;
-2. native-binding comparison;
-3. framework comparison (report only).
-
-Reports are uploaded as CI artifacts when available.
-
-## Release
-
-CI publishes only tags matching the package version (`vX.Y.Z`). The tagged commit
-must belong to `master`, and `package.json` and `pnpm-lock.yaml` must agree.
-
-CI packs once, verifies the tarball and checksum, then publishes that exact
-artifact with npm provenance. A retry succeeds only when the existing npm
-package has the same integrity. Manual dispatch runs all gates without publishing.
-
-For a local release rehearsal, first ensure `release-artifact/` is empty, then
-run `pnpm release:gate` followed by `pnpm release:artifact`. The directory is
-intentionally fail-closed so stale tarballs cannot be mixed with a new manifest.
-Actual provenance publication belongs to the supported cloud-hosted tag
-workflow, not a local terminal.
-
-Rollback by moving `latest` to a known-good version and deprecating the bad one.
-Never reuse a published version or release tag.
-
-### Self-hosted runner
-
-Use an ephemeral runner in the `swm-ci` group with the `bench` label. Run it as an
-unprivileged user, allow only outbound HTTPS, and do not expose production
-secrets. Fork pull requests do not use this runner.
-
-Register it from repository Settings → Actions → Runners:
-
-```bash
-./config.sh --url https://github.com/<owner>/<repo> --token <RUNNER_TOKEN> --labels bench --ephemeral
-sudo ./svc.sh install <user>
-sudo ./svc.sh start
-```
-
-Use the performance governor and keep the host idle during benchmarks:
-
-```bash
-sudo cpupower frequency-set -g performance
-```
-
-After changing hardware, recalibrate `benchmark/baselines/*.json` from several
-green runs (`min` ≈ low × 0.9; `max` ≈ high × 1.15).
 
 ## Stability
 
