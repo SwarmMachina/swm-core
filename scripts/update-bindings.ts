@@ -90,10 +90,16 @@ writeFileSync(
 )
 
 try {
-  execFileSync('pnpm', ['install', '--lockfile-only', '--no-frozen-lockfile', '--ignore-scripts'], {
-    cwd: root,
-    stdio: 'inherit'
-  })
+  // HyperExpress 7.0.2 has a pinned Git subdependency. The runtime binding's
+  // registry integrity is still fetched and verified below before this update succeeds.
+  execFileSync(
+    'pnpm',
+    ['--config.blockExoticSubdeps=false', 'install', '--lockfile-only', '--no-frozen-lockfile', '--ignore-scripts'],
+    {
+      cwd: root,
+      stdio: 'inherit'
+    }
+  )
 
   const publishedIntegrity = getPublishedBindingIntegrity(nextSwmVersion)
 
