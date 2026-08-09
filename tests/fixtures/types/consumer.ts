@@ -165,7 +165,7 @@ export function verifyHttpContextReaders(ctx: HttpContext): void {
   const fullQuery: string = ctx.getQuery()
   const queryValue: string | undefined = ctx.getQuery('page')
   const parameter: string | undefined = ctx.getParameter('id')
-  const header: string = ctx.getHeader('x-test')
+  const header: string = ctx.getReqHeader('x-test')
   const prefetchedHeaders: Readonly<Record<string, string>> = ctx.headers
   const headers: Record<string, string> = ctx.getHeaders()
   const contentLength: number | null = ctx.getContentLength()
@@ -181,16 +181,15 @@ export function verifyHttpContextReaders(ctx: HttpContext): void {
   void headers
   void contentLength
 
-  ctx.ip()
-  ctx.method()
-  ctx.url()
-  ctx.fullQuery()
-  ctx.query('page')
-  ctx.param('id')
-  ctx.header('x-test')
-  ctx.contentLength()
+  ctx.getIP()
+  ctx.getMethod()
+  ctx.getUrl()
+  ctx.getQuery()
+  ctx.getQuery('page')
+  ctx.getParameter('id')
+  ctx.getReqHeader('x-test')
+  ctx.getContentLength()
   ctx.setStatus(201)
-  ctx.status(201)
 }
 
 // @ts-expect-error prefetch belongs to the HTTP application options

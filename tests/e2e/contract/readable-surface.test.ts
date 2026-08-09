@@ -56,10 +56,8 @@ const READABLE_SURFACE = {
     'aborted',
     'body',
     'buffer',
-    'contentLength',
-    'fullQuery',
     'getContentLength',
-    'getHeader',
+    'getReqHeader',
     'getHeaders',
     'getIP',
     'getMethod',
@@ -67,16 +65,10 @@ const READABLE_SURFACE = {
     'getQuery',
     'getUrl',
     'getWriteOffset',
-    'header',
     'headers',
-    'ip',
     'json',
-    'method',
-    'param',
-    'query',
     'replied',
-    'text',
-    'url'
+    'text'
   ],
   UpgradeMeta: ['aborted', 'getHeader', 'getParameter', 'getQuery', 'headers', 'ip', 'url'],
   WSContext: ['data', 'decode', 'key', 'ws'],
@@ -102,10 +94,8 @@ const READABLE_SURFACE = {
 }
 const CORE_READ_METHODS = {
   HttpContext: [
-    'contentLength',
-    'fullQuery',
     'getContentLength',
-    'getHeader',
+    'getReqHeader',
     'getHeaders',
     'getIP',
     'getMethod',
@@ -113,13 +103,7 @@ const CORE_READ_METHODS = {
     'getQuery',
     'getUrl',
     'getWriteOffset',
-    'header',
-    'headers',
-    'ip',
-    'method',
-    'param',
-    'query',
-    'url'
+    'headers'
   ],
   WSContext: ['decode'],
   Server: ['activeHttp', 'activeWs', 'connectionCount', 'getConnection', 'getSubscribersCount', 'hasConnection']
@@ -319,10 +303,9 @@ test(
       cover(
         'HttpContext',
         'aborted',
-        'contentLength',
-        'fullQuery',
+        'buffer',
         'getContentLength',
-        'getHeader',
+        'getReqHeader',
         'getHeaders',
         'getIP',
         'getMethod',
@@ -330,24 +313,12 @@ test(
         'getQuery',
         'getUrl',
         'getWriteOffset',
-        'header',
         'headers',
-        'ip',
-        'method',
-        'param',
-        'query',
-        'replied',
-        'url'
+        'replied'
       )
 
-      assert.equal(ctx.ip(), ctx.getIP())
-      assert.equal(ctx.method(), ctx.getMethod())
-      assert.equal(ctx.url(), ctx.getUrl())
-      assert.equal(ctx.fullQuery(), ctx.getQuery())
-      assert.equal(ctx.query('one'), ctx.getQuery('one'))
-      assert.equal(ctx.param(0), ctx.getParameter(0))
-      assert.equal(ctx.header('x-contract'), ctx.getHeader('x-contract'))
-      assert.equal(ctx.contentLength(), ctx.getContentLength())
+      const requestHeader = ctx.getReqHeader('x-contract')
+
       assert.equal(ctx.headers, ctx.headers)
       assert.equal(ctx.headers['x-contract'], 'Value')
 
@@ -357,7 +328,7 @@ test(
       assert.equal(Object.getPrototypeOf(headers), null)
       assert.equal(Object.hasOwn(headers, 'x-missing'), false)
       headers['x-contract'] = 'mutated'
-      assert.equal(ctx.getHeader('x-contract'), 'Value')
+      assert.equal(ctx.getReqHeader('x-contract'), 'Value')
 
       const response = ctx.res
 
@@ -377,9 +348,9 @@ test(
         missing: ctx.getQuery('missing'),
         paramIndex: ctx.getParameter(0),
         paramName: ctx.getParameter('name'),
-        header: ctx.getHeader('x-contract'),
+        header: requestHeader,
         headerFromSnapshot,
-        missingHeader: ctx.getHeader('x-missing'),
+        missingHeader: ctx.getReqHeader('x-missing'),
         contentLength: ctx.getContentLength() ?? 0,
         writeOffset: ctx.getWriteOffset(),
         replied: ctx.replied,
@@ -406,9 +377,9 @@ test(
               httpObservations.push({ sync, repeated, async })
 
               cover('HttpContext', 'body', 'buffer', 'text', 'json')
-              const body = await ctx.body()
+              await ctx.body()
 
-              assert.equal(await ctx.buffer(), body)
+              assert.deepEqual(await ctx.buffer(), Buffer.from('{"ok":true}'))
               assert.equal(await ctx.text(), '{"ok":true}')
               assert.deepEqual(await ctx.json(), { ok: true })
 

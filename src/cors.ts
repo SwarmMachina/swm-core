@@ -11,7 +11,7 @@ interface CorsOptions {
 
 interface CorsContext {
   appendHeader(name: string, value: string): CorsContext
-  method(): string
+  getMethod(): string
   reply(status: number, headers: null, body: null): unknown
   setHeader(name: string, value: string): CorsContext
 }
@@ -38,7 +38,7 @@ export default function cors(options: CorsOptions = {}): (ctx: CorsContext) => b
       ctx.setHeader('access-control-allow-credentials', 'true')
     }
 
-    if (ctx.method() !== 'options') {
+    if (ctx.getMethod() !== 'options') {
       return false
     }
 

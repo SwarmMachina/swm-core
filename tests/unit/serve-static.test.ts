@@ -16,9 +16,9 @@ interface CapturedResponse {
 
 interface FakeContext {
   captured: CapturedResponse
-  method(): string
-  url(): string
-  status(code: number): this
+  getMethod(): string
+  getUrl(): string
+  setStatus(code: number): this
   setHeader(key: string, value: string): this
   send(body: string | Buffer): void
   reply(status: number, headers: Record<string, string>, body: string | Buffer): void
@@ -54,9 +54,9 @@ function fakeCtx(url: string, method = 'get'): FakeContext {
 
   return {
     captured,
-    method: () => method,
-    url: () => url,
-    status(code: number) {
+    getMethod: () => method,
+    getUrl: () => url,
+    setStatus(code: number) {
       captured.status = code
 
       return this

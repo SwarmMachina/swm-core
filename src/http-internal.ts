@@ -25,7 +25,7 @@ export interface HttpBodyContext {
     readonly httpBodyBudget: HttpBodyBudget | null
     readonly bindingCapabilities: HttpBindingCapabilities
   } | null
-  contentLength(): number | null
+  getContentLength(): number | null
 }
 
 /** Minimal response lifecycle surface used by ResStreamer. */

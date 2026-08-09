@@ -20,7 +20,7 @@ test('routes mode: GET /users/:id => 200 with id param', async () => {
         method: 'get',
         path: '/users/:id',
         handler: (ctx) => {
-          return ctx.param(0) || ''
+          return ctx.getParameter(0) || ''
         }
       }
     ]

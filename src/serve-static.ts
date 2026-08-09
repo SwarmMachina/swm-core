@@ -10,12 +10,12 @@ interface ServeStaticOptions {
 }
 
 interface StaticContext {
-  method(): string
+  getMethod(): string
   reply(status: number, headers: Record<string, string>, body: Buffer): unknown
   send(body: string): unknown
   setHeader(name: string, value: string): StaticContext
-  status(code: number): StaticContext
-  url(): string
+  setStatus(code: number): StaticContext
+  getUrl(): string
 }
 
 interface StaticEntry {
@@ -103,10 +103,10 @@ export default function serveStatic(
   }
 
   return async function handleStatic(ctx: StaticContext): Promise<void> {
-    const method = ctx.method()
+    const method = ctx.getMethod()
 
     if (method !== 'get' && method !== 'head') {
-      ctx.status(405).send('Method Not Allowed')
+      ctx.setStatus(405).send('Method Not Allowed')
 
       return
     }
@@ -114,9 +114,9 @@ export default function serveStatic(
     let pathname
 
     try {
-      pathname = decodeURIComponent(ctx.url())
+      pathname = decodeURIComponent(ctx.getUrl())
     } catch {
-      ctx.status(400).send('Bad Request')
+      ctx.setStatus(400).send('Bad Request')
 
       return
     }
@@ -129,7 +129,7 @@ export default function serveStatic(
     const absPath = resolve(rootDir, rel)
 
     if (absPath !== rootDir && !absPath.startsWith(rootDir + sep)) {
-      ctx.status(403).send('Forbidden')
+      ctx.setStatus(403).send('Forbidden')
 
       return
     }
@@ -141,7 +141,7 @@ export default function serveStatic(
     }
 
     if (!entry) {
-      ctx.status(404).send('Not Found')
+      ctx.setStatus(404).send('Not Found')
 
       return
     }

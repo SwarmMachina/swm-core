@@ -54,12 +54,12 @@ test('server prefetch: onRequest can await a database check before ctx.json()', 
   server = await startHttpServer({
     prefetch: true,
     onRequest: async (ctx) => {
-      const token = ctx.header('authorization')
+      const token = ctx.getReqHeader('authorization')
 
       await delay(30)
 
       if (token !== 'Bearer allowed') {
-        ctx.status(401)
+        ctx.setStatus(401)
 
         return { error: 'unauthorized' }
       }
@@ -158,7 +158,7 @@ test('prefetch can reject a user without consuming body in application code', as
     prefetch: true,
     onRequest: async (ctx) => {
       await delay(10)
-      ctx.status(401)
+      ctx.setStatus(401)
 
       return { error: 'unauthorized' }
     }
@@ -199,7 +199,7 @@ test('aborted prefetch does not poison the next pooled request', { timeout: 3000
   server = await startHttpServer({
     prefetch: true,
     onRequest: async (ctx) => {
-      if (ctx.url() === '/health') {
+      if (ctx.getUrl() === '/health') {
         return 'ok'
       }
 

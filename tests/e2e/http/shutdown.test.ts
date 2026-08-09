@@ -63,7 +63,7 @@ test('shutdown: finalizes context after async handler replies itself (no leak)',
         method: 'get',
         path: '/self-reply',
         handler: async (ctx) => {
-          ctx.status(401).send('nope')
+          ctx.setStatus(401).send('nope')
         }
       }
     ]

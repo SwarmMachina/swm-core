@@ -16,7 +16,7 @@ afterEach(async () => {
 test('onRequest mode: GET /ping => 200 "pong"', async () => {
   server = await startHttpServer({
     onRequest: (ctx) => {
-      if (ctx.url() === '/ping') {
+      if (ctx.getUrl() === '/ping') {
         return 'pong'
       }
     }
@@ -31,8 +31,8 @@ test('onRequest mode: GET /ping => 200 "pong"', async () => {
 test('onRequest mode: GET /echo?q=1 => 200 "1"', async () => {
   server = await startHttpServer({
     onRequest: (ctx) => {
-      if (ctx.url().startsWith('/echo')) {
-        return ctx.query('q') || ''
+      if (ctx.getUrl().startsWith('/echo')) {
+        return ctx.getQuery('q') || ''
       }
     }
   })
@@ -46,7 +46,7 @@ test('onRequest mode: GET /echo?q=1 => 200 "1"', async () => {
 test('onRequest mode: POST /echo => 404 {ok:false}', async () => {
   server = await startHttpServer({
     onRequest: async (ctx) => {
-      if (ctx.url().startsWith('/echo') && ctx.method() === 'post') {
+      if (ctx.getUrl().startsWith('/echo') && ctx.getMethod() === 'post') {
         const body = await ctx.json()
 
         return ctx.sendJson({ ok: false, body }, 404)
@@ -67,15 +67,15 @@ test('onRequest mode: req access after async boundary', async () => {
   server = await startHttpServer({
     prefetchHeaders: ['x-test'],
     onRequest: async (ctx) => {
-      if (ctx.url().startsWith('/req-after-await')) {
+      if (ctx.getUrl().startsWith('/req-after-await')) {
         await new Promise((resolve) => setTimeout(resolve, 5))
 
         return {
-          method: ctx.method(),
-          url: ctx.url(),
-          query: ctx.query('q'),
-          header: ctx.header('x-test'),
-          inheritedHeader: ctx.header('constructor')
+          method: ctx.getMethod(),
+          url: ctx.getUrl(),
+          query: ctx.getQuery('q'),
+          header: ctx.getReqHeader('x-test'),
+          inheritedHeader: ctx.getReqHeader('constructor')
         }
       }
     }
@@ -105,12 +105,12 @@ test('routes mode: custom 404', async () => {
         method: 'any',
         path: '/*',
         handler: (ctx) => {
-          console.log(ctx.url())
+          console.log(ctx.getUrl())
           ctx.sendJson(
             {
               ok: false,
               error: 'Not found',
-              url: ctx.url()
+              url: ctx.getUrl()
             },
             404
           )

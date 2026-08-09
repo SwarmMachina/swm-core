@@ -569,10 +569,6 @@ export default class HttpContext {
     return this.#ip
   }
 
-  ip(): string {
-    return this.getIP()
-  }
-
   getMethod(): string {
     if (!this.req) {
       return ''
@@ -587,10 +583,6 @@ export default class HttpContext {
     return this.#method
   }
 
-  method(): string {
-    return this.getMethod()
-  }
-
   getUrl(): string {
     if (!this.req) {
       return ''
@@ -603,10 +595,6 @@ export default class HttpContext {
     this.#url = this.req.getUrl()
 
     return this.#url
-  }
-
-  url(): string {
-    return this.getUrl()
   }
 
   /**
@@ -635,10 +623,6 @@ export default class HttpContext {
     this.#fullQueryParsed = false
 
     return this.#fullQuery
-  }
-
-  fullQuery(): string {
-    return this.getQuery()
   }
 
   /**
@@ -686,10 +670,6 @@ export default class HttpContext {
     return value
   }
 
-  query(name: string): string | undefined {
-    return this.getQuery(name)
-  }
-
   /**
    * @param {number|string} i
    * @returns {string|undefined}
@@ -717,10 +697,6 @@ export default class HttpContext {
     return value
   }
 
-  param(i: number | string): string | undefined {
-    return this.getParameter(i)
-  }
-
   /**
    * @param {string[]} [names]
    */
@@ -743,7 +719,7 @@ export default class HttpContext {
    * @param {string} name
    * @returns {string}
    */
-  getHeader(name: string): string {
+  getReqHeader(name: string): string {
     const headerName = name.toLowerCase()
     const headers = this.#headers
 
@@ -842,16 +818,12 @@ export default class HttpContext {
     return headers
   }
 
-  header(name: string): string {
-    return this.getHeader(name)
-  }
-
   getContentLength(): number | null {
     if (this.#contentLength !== undefined) {
       return this.#contentLength
     }
 
-    const clh = this.getHeader('content-length')
+    const clh = this.getReqHeader('content-length')
 
     if (clh === '') {
       this.#contentLength = null
@@ -878,10 +850,6 @@ export default class HttpContext {
     return this.#contentLength
   }
 
-  contentLength(): number | null {
-    return this.getContentLength()
-  }
-
   /**
    * @param {number} code
    * @returns {HttpContext}
@@ -890,10 +858,6 @@ export default class HttpContext {
     this.#statusOverride = code
 
     return this
-  }
-
-  status(code: number): this {
-    return this.setStatus(code)
   }
 
   /**

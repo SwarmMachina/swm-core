@@ -69,7 +69,7 @@ export function makeHttpScenarios(): HttpLeakScenario[] {
                 collect(body)
 
                 // BodyParser retains the raw buffer until the pooled context is cleared.
-                collect(await ctx.buffer())
+                collect(await ctx.body())
 
                 return { ok: true, id: body.id }
               }
@@ -107,7 +107,7 @@ export function makeHttpScenarios(): HttpLeakScenario[] {
                 const body = (await ctx.json()) as { id: number }
 
                 collect(body)
-                collect(await ctx.buffer())
+                collect(await ctx.body())
 
                 return { ok: true, id: body.id }
               }
@@ -298,7 +298,7 @@ export function makeHttpScenarios(): HttpLeakScenario[] {
 
                 try {
                   await new Promise((resolve) => setImmediate(resolve))
-                  await ctx.buffer()
+                  await ctx.body()
                 } catch {
                   // Aborted upload: the body promise is expected to reject.
                 }

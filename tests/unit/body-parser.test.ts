@@ -709,6 +709,24 @@ describe('BodyParser', () => {
   })
 
   describe('body() - memoization', () => {
+    test('buffer() should share the body collector promise', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '2' } })
+
+      ctx.reset(res, req)
+      parser.reset(ctx)
+
+      const bodyPromise = parser.body()
+      const bufferPromise = parser.buffer()
+
+      strictEqual(bufferPromise, bodyPromise)
+
+      res.pushData(Buffer.from([1, 2]), true)
+      await bufferPromise
+    })
+
     test('should return same promise for multiple calls before resolve', async () => {
       const parser = new BodyParser()
       const ctx = new HttpContext(null)

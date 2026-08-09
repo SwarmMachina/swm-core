@@ -573,10 +573,10 @@ export interface HttpContext {
    * Lazy stable view of retained or already-read request headers.
    *
    * Reading this property does not enumerate the native request. Without
-   * header prefetch it starts empty; successful {@link HttpContext.getHeader}
+   * header prefetch it starts empty; successful {@link HttpContext.getReqHeader}
    * calls add their values. Prefetched fields are present immediately, and
    * {@link HttpContext.getHeaders} fills the view with the complete set.
-   * Mutations are local to the view and do not change `getHeader()` results.
+   * Mutations are local to the view and do not change `getReqHeader()` results.
    */
   readonly headers: Record<string, string>
 
@@ -623,20 +623,11 @@ export interface HttpContext {
    */
   getIP(): string
 
-  /** Concise alias for {@link HttpContext.getIP}. */
-  ip(): string
-
   /** Returns the lowercase HTTP request method. */
   getMethod(): string
 
-  /** Concise alias for {@link HttpContext.getMethod}. */
-  method(): string
-
   /** Returns the URL path without the query string. */
   getUrl(): string
-
-  /** Concise alias for {@link HttpContext.getUrl}. */
-  url(): string
 
   /** Returns the complete query string without a leading `?`. */
   getQuery(): string
@@ -644,24 +635,15 @@ export interface HttpContext {
   /** Returns the first value for a query key, or `undefined`. */
   getQuery(name: string): string | undefined
 
-  /** Concise alias for the zero-argument {@link HttpContext.getQuery} overload. */
-  fullQuery(): string
-
-  /** Concise alias for the named {@link HttpContext.getQuery} overload. */
-  query(name: string): string | undefined
-
   /** Returns a positional or named route parameter, or `undefined`. */
   getParameter(indexOrName: number | string): string | undefined
-
-  /** Concise alias for {@link HttpContext.getParameter}. */
-  param(indexOrName: number | string): string | undefined
 
   /**
    * Returns a request header value.
    *
    * Header names are case-insensitive. Missing fields return an empty string.
    */
-  getHeader(name: string): string
+  getReqHeader(name: string): string
 
   /**
    * Returns a shallow copy of all request headers.
@@ -676,9 +658,6 @@ export interface HttpContext {
    */
   getHeaders(): Record<string, string>
 
-  /** Concise alias for {@link HttpContext.getHeader}. */
-  header(name: string): string
-
   /**
    * Returns a strictly parsed non-negative `Content-Length`.
    *
@@ -687,14 +666,8 @@ export interface HttpContext {
    */
   getContentLength(): number | null
 
-  /** Concise alias for {@link HttpContext.getContentLength}. */
-  contentLength(): number | null
-
   /** Sets the status code used by the next response helper. */
   setStatus(code: number): this
-
-  /** Concise alias for {@link HttpContext.setStatus}. */
-  status(code: number): this
 
   /**
    * Stages a response header, replacing earlier values for the same name.

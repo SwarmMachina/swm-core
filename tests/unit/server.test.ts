@@ -1044,8 +1044,8 @@ describe('Server', () => {
             const headers = ctx.headers
 
             return {
-              authorization: ctx.getHeader('authorization'),
-              omitted: ctx.getHeader('x-omitted'),
+              authorization: ctx.getReqHeader('authorization'),
+              omitted: ctx.getReqHeader('x-omitted'),
               headers,
               stableHeaders: headers === ctx.headers
             }
@@ -1197,7 +1197,7 @@ describe('Server', () => {
               handler: async (ctx) => {
                 await Promise.resolve()
 
-                return ctx.getHeader('authorization')
+                return ctx.getReqHeader('authorization')
               }
             }
           ]
@@ -1331,8 +1331,8 @@ describe('Server', () => {
           path: '/users/:id',
           handler: async (ctx) => {
             await Promise.resolve()
-            paramById = ctx.param('id')
-            paramByIndex = ctx.param(0)
+            paramById = ctx.getParameter('id')
+            paramByIndex = ctx.getParameter(0)
           }
         }
       ]

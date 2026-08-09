@@ -81,7 +81,7 @@ test('before can short-circuit; handler is skipped and context does not leak', a
       method: 'get',
       path: '/*',
       before: (ctx) => {
-        ctx.status(401).send('unauthorized')
+        ctx.setStatus(401).send('unauthorized')
       },
       handler: () => {
         handlerCalled = true

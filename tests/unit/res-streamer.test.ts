@@ -423,7 +423,7 @@ describe('ResStreamer', () => {
       const req = createMockReq()
 
       ctx.reset(res, req)
-      ctx.status(404)
+      ctx.setStatus(404)
       streamer.reset(ctx, res)
       streamer.begin(200)
 

@@ -445,7 +445,7 @@ export default class BodyParser {
     this.#state = 'collecting'
     this.#collectionLimit = limit
 
-    const contentLength = ctx.contentLength()
+    const contentLength = ctx.getContentLength()
 
     if (ctx.aborted) {
       this.#reject(CACHED_ERRORS.aborted, 'aborted')
@@ -627,6 +627,10 @@ export default class BodyParser {
     }
 
     return this.#bodyPromise.then((body) => this.#checkLimit(body, limit))
+  }
+
+  buffer(maxSize?: number): Promise<Buffer> {
+    return this.body(maxSize)
   }
 
   abort(): void {

@@ -48,7 +48,7 @@ for (const prefetch of [false, true]) {
       maxBodySize: 1024 * 1024,
       maxBodyBudget: 1024 * 1024,
       onRequest: async (ctx) => {
-        const hold = ctx.header('x-hold') === 'yes'
+        const hold = ctx.getReqHeader('x-hold') === 'yes'
         const data = await ctx.body()
 
         if (hold) {
@@ -96,7 +96,7 @@ test('request timeout returns 408 and releases prefetched body capacity', { time
     onRequest: async (ctx) => {
       const data = await ctx.text()
 
-      if (ctx.url() === '/slow') {
+      if (ctx.getUrl() === '/slow') {
         handlerBlocked.resolve()
         await releaseHandler.promise
       }

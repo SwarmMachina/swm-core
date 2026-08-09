@@ -96,8 +96,8 @@ async function runCore(port: number, options: CoreOptions = {}) {
   const { default: Server, prepareHeaders } = await import('../src/index.js')
   const preparedHeaders = prepareHeaders(HEADERS_TEST.responseHeaders)
   const onRequest: Handler = (ctx) => {
-    const method = ctx.method()
-    const url = ctx.url()
+    const method = ctx.getMethod()
+    const url = ctx.getUrl()
 
     if (method === 'get' && url === '/base-sync') {
       return BASE_SYNC_TEST.payload
@@ -137,7 +137,7 @@ async function runCore(port: number, options: CoreOptions = {}) {
       return Promise.resolve('ok')
     }
 
-    ctx.status(404)
+    ctx.setStatus(404)
 
     return 'Not Found'
   }

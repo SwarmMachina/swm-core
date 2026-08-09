@@ -80,19 +80,19 @@ describe('HttpContext', () => {
         const server = { finalizeHttpContext() {} }
 
         ctx.reset(res, req, server, 5000)
-        ctx.status(418)
-        ctx.ip()
-        ctx.method()
-        ctx.url()
-        ctx.contentLength()
+        ctx.setStatus(418)
+        ctx.getIP()
+        ctx.getMethod()
+        ctx.getUrl()
+        ctx.getContentLength()
 
         ctx.reset(res, req, server, 5)
 
         strictEqual(ctx.getStatus(200), STATUS_TEXT[200])
-        strictEqual(ctx.ip(), '')
-        strictEqual(ctx.method(), '')
-        strictEqual(ctx.url(), '')
-        strictEqual(ctx.contentLength(), null)
+        strictEqual(ctx.getIP(), '')
+        strictEqual(ctx.getMethod(), '')
+        strictEqual(ctx.getUrl(), '')
+        strictEqual(ctx.getContentLength(), null)
 
         const bodyPromise = ctx.body()
 
@@ -132,17 +132,17 @@ describe('HttpContext', () => {
         const finalize = () => {}
 
         ctx.reset(res, req, finalize)
-        ctx.ip()
-        ctx.method()
-        ctx.url()
+        ctx.getIP()
+        ctx.getMethod()
+        ctx.getUrl()
 
         ctx.clear()
 
         strictEqual(ctx.res, null)
         strictEqual(ctx.req, null)
-        strictEqual(ctx.ip(), '')
-        strictEqual(ctx.method(), '')
-        strictEqual(ctx.url(), '')
+        strictEqual(ctx.getIP(), '')
+        strictEqual(ctx.getMethod(), '')
+        strictEqual(ctx.getUrl(), '')
       })
 
       test('should reset all state flags', () => {
@@ -194,12 +194,12 @@ describe('HttpContext', () => {
   })
 
   describe('request metadata caching', () => {
-    describe('getIP()/ip()', () => {
+    describe('getIP()', () => {
       test('should return empty string if res is null', () => {
         const ctx = new HttpContext(null)
 
         strictEqual(ctx.getIP(), '')
-        strictEqual(ctx.ip(), '')
+        strictEqual(ctx.getIP(), '')
       })
 
       test('should use the binary proxied address if available', () => {
@@ -238,18 +238,18 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         ctx.getIP()
-        ctx.ip()
+        ctx.getIP()
 
         strictEqual(res.getProxiedRemoteAddressCallCount(), 1)
       })
     })
 
-    describe('getMethod()/method()', () => {
+    describe('getMethod()', () => {
       test('should return empty string if req is null', () => {
         const ctx = new HttpContext(null)
 
         strictEqual(ctx.getMethod(), '')
-        strictEqual(ctx.method(), '')
+        strictEqual(ctx.getMethod(), '')
       })
 
       test('should return req.getMethod() and cache it', () => {
@@ -260,18 +260,18 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         strictEqual(ctx.getMethod(), 'POST')
-        strictEqual(ctx.method(), 'POST')
+        strictEqual(ctx.getMethod(), 'POST')
 
         strictEqual(req.calls.filter((c) => c[0] === 'getMethod').length, 1)
       })
     })
 
-    describe('getUrl()/url()', () => {
+    describe('getUrl()', () => {
       test('should return empty string if req is null', () => {
         const ctx = new HttpContext(null)
 
         strictEqual(ctx.getUrl(), '')
-        strictEqual(ctx.url(), '')
+        strictEqual(ctx.getUrl(), '')
       })
 
       test('should return req.getUrl() and cache it', () => {
@@ -282,18 +282,18 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         strictEqual(ctx.getUrl(), '/api/users')
-        strictEqual(ctx.url(), '/api/users')
+        strictEqual(ctx.getUrl(), '/api/users')
 
         strictEqual(req.calls.filter((c) => c[0] === 'getUrl').length, 1)
       })
     })
 
-    describe('getQuery()/fullQuery()', () => {
+    describe('getQuery()', () => {
       test('should return empty string if req is null', () => {
         const ctx = new HttpContext(null)
 
         strictEqual(ctx.getQuery(), '')
-        strictEqual(ctx.fullQuery(), '')
+        strictEqual(ctx.getQuery(), '')
       })
 
       test('should return req.getQuery() with no key and cache it', () => {
@@ -304,12 +304,12 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         strictEqual(ctx.getQuery(), 'id=123&name=alice')
-        strictEqual(ctx.fullQuery(), 'id=123&name=alice')
+        strictEqual(ctx.getQuery(), 'id=123&name=alice')
 
         strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
       })
 
-      test('getQuery() + query(name) should read from the shared full-query cache', () => {
+      test('getQuery() overloads should read from the shared full-query cache', () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq({ fullQuery: 'id=123&name=alice' })
@@ -317,8 +317,8 @@ describe('HttpContext', () => {
         ctx.reset(res, req)
 
         strictEqual(ctx.getQuery(), 'id=123&name=alice')
-        strictEqual(ctx.query('name'), 'alice')
-        strictEqual(ctx.query('missing'), undefined)
+        strictEqual(ctx.getQuery('name'), 'alice')
+        strictEqual(ctx.getQuery('missing'), undefined)
 
         strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
         strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] !== undefined).length, 0)
@@ -327,47 +327,47 @@ describe('HttpContext', () => {
   })
 
   describe('request reader caching', () => {
-    test('getHeader(name)/header(name) share the cache', () => {
+    test('getReqHeader(name) shares the cache', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({ headers: { 'content-type': 'application/json' } })
 
       ctx.reset(res, req)
 
-      const v1 = ctx.getHeader('content-type')
-      const v2 = ctx.header('content-type')
+      const v1 = ctx.getReqHeader('content-type')
+      const v2 = ctx.getReqHeader('content-type')
 
       strictEqual(v1, 'application/json')
       strictEqual(v2, 'application/json')
       strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
     })
 
-    test('getHeader(name) caches a missing header as an empty string', () => {
+    test('getReqHeader(name) caches a missing header as an empty string', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
 
       ctx.reset(res, req)
 
-      const v1 = ctx.getHeader('x-missing')
-      const v2 = ctx.header('x-missing')
+      const v1 = ctx.getReqHeader('x-missing')
+      const v2 = ctx.getReqHeader('x-missing')
 
       strictEqual(v1, '')
       strictEqual(v1, v2)
       strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
     })
 
-    test('getHeader(name) lowercases the lookup name (uWS stores header names lowercase)', () => {
+    test('getReqHeader(name) lowercases the lookup name (uWS stores header names lowercase)', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({ headers: { authorization: 'Bearer abc' } })
 
       ctx.reset(res, req)
 
-      strictEqual(ctx.getHeader('Authorization'), 'Bearer abc')
+      strictEqual(ctx.getReqHeader('Authorization'), 'Bearer abc')
     })
 
-    test('headers is a stable cached-only view that getHeader and getHeaders hydrate', () => {
+    test('headers is a stable cached-only view that getReqHeader and getHeaders hydrate', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({ headers: { authorization: 'Bearer abc', 'x-trace': 'trace' } })
@@ -380,8 +380,8 @@ describe('HttpContext', () => {
       deepStrictEqual({ ...headers }, {})
       strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 0)
 
-      strictEqual(ctx.getHeader('Authorization'), 'Bearer abc')
-      strictEqual(ctx.getHeader('x-missing'), '')
+      strictEqual(ctx.getReqHeader('Authorization'), 'Bearer abc')
+      strictEqual(ctx.getReqHeader('x-missing'), '')
       deepStrictEqual({ ...headers }, { authorization: 'Bearer abc' })
 
       deepStrictEqual({ ...ctx.getHeaders() }, { authorization: 'Bearer abc', 'x-trace': 'trace' })
@@ -399,7 +399,7 @@ describe('HttpContext', () => {
 
       ctx.reset(res, req)
 
-      strictEqual(ctx.getHeader('x-missing'), '')
+      strictEqual(ctx.getReqHeader('x-missing'), '')
 
       const headers = ctx.getHeaders()
 
@@ -409,7 +409,7 @@ describe('HttpContext', () => {
 
       headers['content-type'] = 'mutated'
 
-      strictEqual(ctx.getHeader('content-type'), 'application/json')
+      strictEqual(ctx.getReqHeader('content-type'), 'application/json')
       strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 1)
       strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 1)
     })
@@ -419,15 +419,15 @@ describe('HttpContext', () => {
 
       strictEqual(ctx.getQuery('id'), undefined)
       strictEqual(ctx.getParameter(0), undefined)
-      strictEqual(ctx.getHeader('content-type'), '')
+      strictEqual(ctx.getReqHeader('content-type'), '')
       strictEqual(Object.getPrototypeOf(ctx.getHeaders()), null)
       deepStrictEqual({ ...ctx.getHeaders() }, {})
-      strictEqual(ctx.query('id'), undefined)
-      strictEqual(ctx.param(0), undefined)
-      strictEqual(ctx.header('content-type'), '')
+      strictEqual(ctx.getQuery('id'), undefined)
+      strictEqual(ctx.getParameter(0), undefined)
+      strictEqual(ctx.getReqHeader('content-type'), '')
     })
 
-    test('cacheHeaders() preloads headers and avoids getHeader()', () => {
+    test('cacheHeaders() preloads headers and avoids getReqHeader()', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({ headers: { 'content-type': 'application/json', 'x-trace-id': 'abc' } })
@@ -435,9 +435,9 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
       ctx.cacheHeaders()
 
-      strictEqual(ctx.getHeader('content-type'), 'application/json')
-      strictEqual(ctx.getHeader('x-trace-id'), 'abc')
-      strictEqual(ctx.getHeader('x-missing'), '')
+      strictEqual(ctx.getReqHeader('content-type'), 'application/json')
+      strictEqual(ctx.getReqHeader('x-trace-id'), 'abc')
+      strictEqual(ctx.getReqHeader('x-missing'), '')
 
       strictEqual(req.calls.filter((c) => c[0] === 'forEach').length, 1)
       strictEqual(req.calls.filter((c) => c[0] === 'getHeader').length, 0)
@@ -456,13 +456,13 @@ describe('HttpContext', () => {
       const server = { finalizeHttpContext() {} }
 
       ctx.reset(res, req, server)
-      strictEqual(ctx.getHeader('authorization'), 'Bearer token')
+      strictEqual(ctx.getReqHeader('authorization'), 'Bearer token')
       ctx.cacheRequest(['id'])
 
       strictEqual(ctx.getMethod(), 'get')
       strictEqual(ctx.getUrl(), '/users/42')
       strictEqual(ctx.getQuery(), 'expand=1')
-      strictEqual(ctx.getHeader('authorization'), 'Bearer token')
+      strictEqual(ctx.getReqHeader('authorization'), 'Bearer token')
       strictEqual(ctx.getParameter(0), '42')
       strictEqual(ctx.getParameter('id'), '42')
       deepStrictEqual(req.calls, [
@@ -474,7 +474,7 @@ describe('HttpContext', () => {
       ])
     })
 
-    test('getQuery(name)/query(name) share the cache', () => {
+    test('getQuery(name) shares the cache', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({ query: { id: '123' } })
@@ -482,22 +482,22 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
 
       const v1 = ctx.getQuery('id')
-      const v2 = ctx.query('id')
+      const v2 = ctx.getQuery('id')
 
       strictEqual(v1, '123')
       strictEqual(v2, '123')
       strictEqual(req.calls.filter((c) => c[0] === 'getQuery').length, 1)
     })
 
-    test('query(name) — caches undefined for missing key', () => {
+    test('getQuery(name) caches undefined for missing key', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
 
       ctx.reset(res, req)
 
-      const v1 = ctx.query('missing')
-      const v2 = ctx.query('missing')
+      const v1 = ctx.getQuery('missing')
+      const v2 = ctx.getQuery('missing')
 
       strictEqual(v1, v2)
       strictEqual(req.calls.filter((c) => c[0] === 'getQuery').length, 1)
@@ -511,11 +511,11 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
       ctx.cacheQuery()
 
-      strictEqual(ctx.query('id'), '123')
-      strictEqual(ctx.query('name'), 'alice')
-      strictEqual(ctx.query('empty'), '')
-      strictEqual(ctx.query('missing'), undefined)
-      strictEqual(ctx.query('missing'), undefined)
+      strictEqual(ctx.getQuery('id'), '123')
+      strictEqual(ctx.getQuery('name'), 'alice')
+      strictEqual(ctx.getQuery('empty'), '')
+      strictEqual(ctx.getQuery('missing'), undefined)
+      strictEqual(ctx.getQuery('missing'), undefined)
 
       strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] === undefined).length, 1)
       strictEqual(req.calls.filter((c) => c[0] === 'getQuery' && c[1] !== undefined).length, 0)
@@ -529,10 +529,10 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
       ctx.cacheQuery()
 
-      strictEqual(ctx.query('id'), '1')
+      strictEqual(ctx.getQuery('id'), '1')
     })
 
-    test('getParameter(i)/param(i) share the cache', () => {
+    test('getParameter(i) shares the cache', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq({ parameters: ['user', '42'] })
@@ -540,7 +540,7 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
 
       const p0a = ctx.getParameter(0)
-      const p0b = ctx.param(0)
+      const p0b = ctx.getParameter(0)
       const p1 = ctx.getParameter(1)
 
       strictEqual(p0a, 'user')
@@ -561,9 +561,9 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
       ctx.cacheQuery()
 
-      strictEqual(ctx.header('constructor'), 'header-value')
-      strictEqual(ctx.query('constructor'), 'query-value')
-      strictEqual(ctx.param('constructor'), 'param-value')
+      strictEqual(ctx.getReqHeader('constructor'), 'header-value')
+      strictEqual(ctx.getQuery('constructor'), 'query-value')
+      strictEqual(ctx.getParameter('constructor'), 'param-value')
     })
 
     test('reset() clears header/query/param caches', () => {
@@ -582,15 +582,15 @@ describe('HttpContext', () => {
 
       ctx.reset(res, req1)
 
-      strictEqual(ctx.header('content-type'), 'text/plain')
-      strictEqual(ctx.query('id'), '1')
-      strictEqual(ctx.param(0), 'a')
+      strictEqual(ctx.getReqHeader('content-type'), 'text/plain')
+      strictEqual(ctx.getQuery('id'), '1')
+      strictEqual(ctx.getParameter(0), 'a')
 
       ctx.reset(res, req2)
 
-      strictEqual(ctx.header('content-type'), 'application/json')
-      strictEqual(ctx.query('id'), '2')
-      strictEqual(ctx.param(0), 'b')
+      strictEqual(ctx.getReqHeader('content-type'), 'application/json')
+      strictEqual(ctx.getQuery('id'), '2')
+      strictEqual(ctx.getParameter(0), 'b')
 
       strictEqual(req2.calls.filter((c) => c[0] === 'getHeader').length, 1)
       strictEqual(req2.calls.filter((c) => c[0] === 'getQuery').length, 1)
@@ -598,7 +598,7 @@ describe('HttpContext', () => {
     })
   })
 
-  describe('getContentLength()/contentLength() parsing and cache', () => {
+  describe('getContentLength() parsing and cache', () => {
     test('should return null if header is absent/empty/undefined', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -648,14 +648,14 @@ describe('HttpContext', () => {
       ctx.reset(res, req)
 
       ctx.getContentLength()
-      ctx.contentLength()
+      ctx.getContentLength()
 
       strictEqual(req.calls.filter((c) => c[0] === 'getHeader' && c[1] === 'content-length').length, 1)
     })
   })
 
-  describe('setStatus()/status()/getStatus()', () => {
-    test('setStatus(code)/status(code) should return ctx and share the override', () => {
+  describe('setStatus()/getStatus()', () => {
+    test('setStatus(code) should return ctx and share the override', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
@@ -665,7 +665,7 @@ describe('HttpContext', () => {
 
       strictEqual(ctx.getStatus(200), STATUS_TEXT[418])
 
-      strictEqual(ctx.status(201), ctx)
+      strictEqual(ctx.setStatus(201), ctx)
       strictEqual(ctx.getStatus(200), STATUS_TEXT[201])
     })
 
@@ -1525,7 +1525,7 @@ describe('HttpContext', () => {
     })
   })
 
-  describe('body()/buffer() - parsing only (no streaming)', () => {
+  describe('body() - parsing only (no streaming)', () => {
     test('should reject if aborted before body()', async () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -1677,6 +1677,22 @@ describe('HttpContext', () => {
       await promise1
     })
 
+    test('buffer() should share the body collector promise', async () => {
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '2' } })
+
+      ctx.reset(res, req)
+
+      const bodyPromise = ctx.body()
+      const bufferPromise = ctx.buffer()
+
+      strictEqual(bufferPromise, bodyPromise)
+
+      res.pushData(Buffer.from([1, 2]), true)
+      await bufferPromise
+    })
+
     test('body() after resolve should return resolved promise with same buffer', async () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -1717,26 +1733,6 @@ describe('HttpContext', () => {
 
         return true
       })
-    })
-
-    test('buffer() should be alias for body()', async () => {
-      const ctx = new HttpContext(null)
-      const res = createMockRes()
-      const req = createMockReq({ headers: { 'content-length': '2' } })
-
-      ctx.reset(res, req)
-
-      const bodyPromise = ctx.body()
-      const bufferPromise = ctx.buffer()
-
-      strictEqual(bodyPromise, bufferPromise)
-
-      res.pushData(Buffer.from([1, 2]), true)
-
-      const bodyResult = await ctx.body()
-      const bufferResult = await ctx.buffer()
-
-      strictEqual(bodyResult, bufferResult)
     })
   })
 
