@@ -788,11 +788,10 @@ describe('Server', () => {
       strictEqual(server.wsProtocolSelector, selectProtocol)
     })
 
-    test('should initialize context pools', () => {
+    test('should initialize the HTTP context pool', () => {
       const server = makeServer({ onRequest: () => {} })
 
       strictEqual(server.httpContextPool !== null, true)
-      strictEqual(server.wsContextPool !== null, true)
     })
 
     test('should initialize internal state', () => {
@@ -1671,27 +1670,27 @@ describe('Server', () => {
       strictEqual(ctx2.ws, ws)
     })
 
-    test('should call release on context when deleted', () => {
+    test('should delete the runtime reference and clear context state', () => {
       const server = makeServer({
         onRequest: () => {},
         ws: {}
       })
       const ws = createMockWebSocket()
       const ctx = server.getWsContext(ws)
+      const clear = ctx.clear.bind(ctx)
 
-      let called = 0
+      let clearCalls = 0
 
-      const orig = ctx.release.bind(ctx)
-
-      ctx.release = () => {
-        called++
-
-        return orig()
+      ctx.clear = () => {
+        clearCalls++
+        clear()
       }
 
       server.deleteWsContext(ws)
 
-      strictEqual(called, 1)
+      strictEqual(clearCalls, 1)
+      strictEqual(ctx.ws, null)
+      strictEqual(server.getWsContext(ws) !== ctx, true)
     })
 
     test('should handle deleteWsContext when no context exists', () => {

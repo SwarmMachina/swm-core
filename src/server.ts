@@ -109,7 +109,6 @@ export default class Server {
   declare app: NativeApp | null
   declare socket: unknown | null
   declare httpContextPool: HttpRuntime['contextPool']
-  declare wsContextPool: WebSocketRuntime['contextPool']
   declare registerHttp: HttpRuntime['register']
   declare finalizeHttpContext: HttpRuntime['finalizeHttpContext']
   declare handleWithContext: HttpRuntime['handleWithContext']
@@ -262,7 +261,6 @@ export default class Server {
     // Contexts intentionally retain the Server facade. Direct runtime callback
     // references keep that contract without adding a proxy call to hot paths.
     this.httpContextPool = this.#httpRuntime.contextPool
-    this.wsContextPool = this.#wsRuntime.contextPool
     this.registerHttp = this.#httpRuntime.register
     this.finalizeHttpContext = this.#httpRuntime.finalizeHttpContext
     this.handleWithContext = this.#httpRuntime.handleWithContext

@@ -1,5 +1,4 @@
 import WSContext from '../ws-context.js'
-import ContextPool from '../context-pool.js'
 import { isPromise, validateWsClose } from './utils.js'
 import WebSocketUpgradeRuntime, { WS_CONTEXT_DATA } from './ws-upgrade.js'
 
@@ -53,17 +52,12 @@ export default class WebSocketRuntime {
   readonly #upgradeRuntime: WebSocketUpgradeRuntime
   readonly #wsContexts = new WeakMap<NativeWebSocket, WSContext>()
   readonly #connections = new Map<WSKey, NativeWebSocket>()
-  readonly contextPool: ContextPool<WSContext>
   readonly onUpgrade: WebSocketUpgradeRuntime['handle']
 
   constructor(server: WebSocketServer, lifecycle: LifecycleState) {
     this.#server = server
     this.#lifecycle = lifecycle
     this.#upgradeRuntime = new WebSocketUpgradeRuntime(server, lifecycle)
-
-    // WSContext instances are never reused across connections. A retained
-    // post-close reference must fail instead of targeting another socket.
-    this.contextPool = new ContextPool((pool) => new WSContext(pool), 0)
 
     this.register = this.register.bind(this)
     this.onUpgrade = this.#upgradeRuntime.handle
@@ -94,7 +88,7 @@ export default class WebSocketRuntime {
 
     this.#lifecycle.activeWs++
 
-    const ctx = this.contextPool.acquire().reset(this.#server, ws, ws[WS_CONTEXT_DATA]!)
+    const ctx = new WSContext().reset(this.#server, ws, ws[WS_CONTEXT_DATA]!)
 
     this.#wsContexts.set(ws, ctx)
 
@@ -170,10 +164,9 @@ export default class WebSocketRuntime {
     const ctx = this.#wsContexts.get(ws)
 
     if (ctx) {
-      this.#unregisterConnection(ctx, ws)
-
-      ctx.release()
       this.#wsContexts.delete(ws)
+      this.#unregisterConnection(ctx, ws)
+      ctx.clear()
       this.#lifecycle.activeWs--
     }
   }

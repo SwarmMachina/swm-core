@@ -5,6 +5,10 @@ import { strictEqual, deepStrictEqual, throws } from 'node:assert/strict'
 import BaseWSContext, { type RawWebSocket, type WebSocketData, type WSServer } from '../../src/ws-context.js'
 
 class WSContext extends BaseWSContext {
+  constructor() {
+    super()
+  }
+
   override reset(server: unknown, ws: unknown, userData: object | null): this {
     return super.reset(server as WSServer, ws as RawWebSocket, userData as object)
   }
@@ -22,34 +26,22 @@ function at<T>(items: readonly T[], index: number): T {
 
 describe('WSContext', () => {
   describe('constructor', () => {
-    test('should save pool and initialize server/ws/data/key to null', () => {
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+    test('should initialize server/ws/data/key to null', () => {
+      const ctx = new WSContext()
 
-      strictEqual(ctx.pool, pool)
       strictEqual(ctx.server, null)
       strictEqual(ctx.ws, null)
       strictEqual(ctx.data, null)
       strictEqual(ctx.key, null)
     })
-
-    test('should handle null pool', () => {
-      const ctx = new WSContext(null)
-
-      strictEqual(ctx.pool, null)
-      strictEqual(ctx.server, null)
-      strictEqual(ctx.ws, null)
-      strictEqual(ctx.data, null)
-    })
   })
 
   describe('reset', () => {
     test('should set server, ws, and data', () => {
-      const pool = { release: () => {} }
       const server = { publish: () => {} }
       const ws = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const userData = { userId: 123 }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
       const result = ctx.reset(server, ws, userData)
 
       strictEqual(ctx.server, server)
@@ -59,25 +51,23 @@ describe('WSContext', () => {
     })
 
     test('should return this for chaining', () => {
-      const pool = { release: () => {} }
       const server = { publish: () => {} }
       const ws = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const userData = { userId: 456 }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
       const result = ctx.reset(server, ws, userData)
 
       strictEqual(result, ctx)
     })
 
     test('should overwrite existing values', () => {
-      const pool = { release: () => {} }
       const server1 = { publish: () => {} }
       const server2 = { publish: () => {} }
       const ws1 = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const ws2 = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const userData1 = { userId: 1 }
       const userData2 = { userId: 2 }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server1, ws1, userData1)
 
@@ -94,19 +84,17 @@ describe('WSContext', () => {
   })
 
   describe('clear', () => {
-    test('should reset server/ws/data/key to null but keep pool', () => {
-      const pool = { release: () => {} }
+    test('should reset server/ws/data/key to null', () => {
       const server = { publish: () => {} }
       const ws = { send: () => {}, end: () => {}, subscribe: () => {}, unsubscribe: () => {} }
       const userData = { userId: 789 }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server, ws, userData)
       ctx.key = 'user-789'
 
       ctx.clear()
 
-      strictEqual(ctx.pool, pool)
       strictEqual(ctx.server, null)
       strictEqual(ctx.ws, null)
       strictEqual(ctx.data, null)
@@ -114,19 +102,16 @@ describe('WSContext', () => {
     })
 
     test('should work on already cleared context', () => {
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.clear()
 
-      strictEqual(ctx.pool, pool)
       strictEqual(ctx.server, null)
       strictEqual(ctx.ws, null)
       strictEqual(ctx.data, null)
     })
 
     test('after clear, methods should throw again due to null ws/server', () => {
-      const pool = { release: () => {} }
       const server = { publish: () => {} }
       const ws = {
         send: () => {},
@@ -134,7 +119,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server, ws, null)
       ctx.clear()
@@ -191,52 +176,9 @@ describe('WSContext', () => {
     })
   })
 
-  describe('release', () => {
-    test('should call pool.release with context when pool is set', () => {
-      const releaseCalls: BaseWSContext[] = []
-      const pool = {
-        release: (ctx: BaseWSContext) => {
-          releaseCalls.push(ctx)
-        }
-      }
-      const ctx = new WSContext(pool)
-
-      ctx.release()
-
-      strictEqual(releaseCalls.length, 1)
-      strictEqual(at(releaseCalls, 0), ctx)
-    })
-
-    test('should not call anything when pool is null', () => {
-      const ctx = new WSContext(null)
-
-      ctx.release()
-    })
-
-    test('should call pool.release exactly once per call', () => {
-      const releaseCalls: BaseWSContext[] = []
-      const pool = {
-        release: (ctx: BaseWSContext) => {
-          releaseCalls.push(ctx)
-        }
-      }
-      const ctx = new WSContext(pool)
-
-      ctx.release()
-      ctx.release()
-      ctx.release()
-
-      strictEqual(releaseCalls.length, 3)
-      strictEqual(at(releaseCalls, 0), ctx)
-      strictEqual(at(releaseCalls, 1), ctx)
-      strictEqual(at(releaseCalls, 2), ctx)
-    })
-  })
-
   describe('send', () => {
     test('should throw Error when ws is null (no reset)', () => {
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       throws(
         () => {
@@ -261,8 +203,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -286,8 +227,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -311,8 +251,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -336,8 +275,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -362,8 +300,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -388,8 +325,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -409,8 +345,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -435,8 +370,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -459,8 +393,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -481,8 +414,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -507,8 +439,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -534,8 +465,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -558,8 +488,7 @@ describe('WSContext', () => {
 
   describe('end', () => {
     test('should throw Error when ws is null (no reset)', () => {
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       throws(
         () => {
@@ -582,8 +511,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -604,8 +532,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -626,8 +553,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -648,8 +574,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -664,7 +589,7 @@ describe('WSContext', () => {
     })
 
     test('should reject reserved or out-of-range close codes', () => {
-      const ctx = new WSContext(null)
+      const ctx = new WSContext()
       const ws = { end: () => {} }
 
       ctx.reset({}, ws, null)
@@ -680,7 +605,7 @@ describe('WSContext', () => {
     })
 
     test('should reject non-string or oversized close reasons', () => {
-      const ctx = new WSContext(null)
+      const ctx = new WSContext()
       const ws = { end: () => {} }
 
       ctx.reset({}, ws, null)
@@ -704,7 +629,7 @@ describe('WSContext', () => {
 
   describe('terminate', () => {
     test('should throw Error when ws is null', () => {
-      const ctx = new WSContext(null)
+      const ctx = new WSContext()
 
       throws(() => ctx.terminate(), {
         name: 'Error',
@@ -718,7 +643,7 @@ describe('WSContext', () => {
       const ws = {
         close: () => closeCalls++
       }
-      const ctx = new WSContext(null)
+      const ctx = new WSContext()
 
       ctx.reset({}, ws, null)
       ctx.terminate()
@@ -729,8 +654,7 @@ describe('WSContext', () => {
 
   describe('subscribe', () => {
     test('should throw Error when ws is null (no reset)', () => {
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       throws(
         () => {
@@ -755,8 +679,7 @@ describe('WSContext', () => {
         },
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -774,8 +697,7 @@ describe('WSContext', () => {
         subscribe: () => false,
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -796,8 +718,7 @@ describe('WSContext', () => {
         },
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -812,8 +733,7 @@ describe('WSContext', () => {
 
   describe('unsubscribe', () => {
     test('should throw Error when ws is null (no reset)', () => {
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       throws(
         () => {
@@ -838,8 +758,7 @@ describe('WSContext', () => {
           return true
         }
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -857,8 +776,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => false
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -879,8 +797,7 @@ describe('WSContext', () => {
           return true
         }
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset({ publish: () => {} }, ws, null)
 
@@ -895,14 +812,13 @@ describe('WSContext', () => {
 
   describe('publish', () => {
     test('should throw Error when server is null (no reset)', () => {
-      const pool = { release: () => {} }
       const ws = {
         send: () => {},
         end: () => {},
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(null, ws, null)
 
@@ -932,8 +848,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server, ws, null)
 
@@ -961,8 +876,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server, ws, null)
 
@@ -986,8 +900,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server, ws, null)
 
@@ -1011,8 +924,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server, ws, null)
 
@@ -1047,8 +959,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server, ws, null)
 
@@ -1075,8 +986,7 @@ describe('WSContext', () => {
         subscribe: () => {},
         unsubscribe: () => {}
       }
-      const pool = { release: () => {} }
-      const ctx = new WSContext(pool)
+      const ctx = new WSContext()
 
       ctx.reset(server, ws, null)
 
@@ -1102,41 +1012,41 @@ describe('WSContext', () => {
 
   describe('decode', () => {
     test('should decode an ArrayBuffer to a UTF-8 string', () => {
-      const ctx = new WSContext({ release: () => {} })
+      const ctx = new WSContext()
       const bytes = new TextEncoder().encode('héllo')
 
       strictEqual(ctx.decode(bytes.buffer), 'héllo')
     })
 
     test('should decode an ArrayBufferView (Uint8Array) to a UTF-8 string', () => {
-      const ctx = new WSContext({ release: () => {} })
+      const ctx = new WSContext()
       const bytes = new TextEncoder().encode('world')
 
       strictEqual(ctx.decode(bytes), 'world')
     })
 
     test('should not require reset (pure helper, independent of ws/server)', () => {
-      const ctx = new WSContext(null)
+      const ctx = new WSContext()
 
       strictEqual(ctx.decode(new TextEncoder().encode('x')), 'x')
     })
 
     test('should decode a non-Uint8Array view via its underlying bytes', () => {
-      const ctx = new WSContext(null)
+      const ctx = new WSContext()
       const bytes = new TextEncoder().encode('hi!!')
 
       strictEqual(ctx.decode(new Uint16Array(bytes.buffer, 0, 2)), 'hi!!')
     })
 
     test('should decode a DataView via its underlying bytes', () => {
-      const ctx = new WSContext(null)
+      const ctx = new WSContext()
       const bytes = new TextEncoder().encode('world')
 
       strictEqual(ctx.decode(new DataView(bytes.buffer)), 'world')
     })
 
     test('should respect byteOffset/length of a subarray view', () => {
-      const ctx = new WSContext(null)
+      const ctx = new WSContext()
       const bytes = new TextEncoder().encode('xxhello')
 
       strictEqual(ctx.decode(bytes.subarray(2)), 'hello')

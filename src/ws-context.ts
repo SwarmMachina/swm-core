@@ -2,10 +2,6 @@ import { validateWsClose } from './server/utils.js'
 
 export type WebSocketData = string | ArrayBuffer | ArrayBufferView
 
-export interface WSContextPool {
-  release(context: WSContext): void
-}
-
 export interface WSServer {
   publish(topic: string, message: WebSocketData, isBinary?: boolean): boolean
 }
@@ -26,14 +22,12 @@ export interface RawWebSocket {
 }
 
 export default class WSContext {
-  declare pool: WSContextPool | null
   declare server: WSServer | null
   declare ws: RawWebSocket | null
   declare data: object | null
   declare key: string | number | null
 
-  constructor(pool: WSContextPool | null) {
-    this.pool = pool
+  constructor() {
     this.server = null
     this.ws = null
     this.data = null
@@ -62,12 +56,6 @@ export default class WSContext {
     }
 
     return Buffer.from(message).toString()
-  }
-
-  release(): void {
-    if (this.pool) {
-      this.pool.release(this)
-    }
   }
 
   send(data: WebSocketData, isBinary?: boolean): number {
