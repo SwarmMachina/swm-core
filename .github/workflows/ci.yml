@@ -6,6 +6,11 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      classify_release_scope:
+        description: Classify changes from the previous release tag and dry-run the matching release path
+        required: false
+        default: false
+        type: boolean
       swm_uws_ref:
         description: Optional swm-uws release-candidate branch or tag
         required: false
@@ -21,6 +26,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+    outputs:
+      requires_performance: ${{ steps.release_scope.outputs.requires_performance }}
 
     steps:
       - name: Checkout
@@ -29,7 +36,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup pnpm
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.classify_release_scope == true
         uses: pnpm/action-setup@v4
         with:
           version: 11.20.0
@@ -38,18 +45,42 @@ jobs:
         run: git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/master
 
       - name: Setup release policy runtime
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.classify_release_scope == true
         uses: actions/setup-node@v6
         with:
           node-version: '22'
 
       - name: Install release policy dependencies
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.classify_release_scope == true
         run: pnpm install --frozen-lockfile
 
       - name: Verify release tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
         run: pnpm release:verify-tag "$GITHUB_REF_NAME"
+
+      - name: Build release policy scripts for a manual dry run
+        if: inputs.classify_release_scope == true && startsWith(github.ref, 'refs/tags/v') == false
+        run: pnpm build:scripts
+
+      - name: Classify release performance scope
+        id: release_scope
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* || "${{ inputs.classify_release_scope }}" == "true" ]]; then
+            requires_performance="$(node .scripts-dist/release-performance-scope.js "$GITHUB_SHA")"
+          else
+            echo "[release-scope] manual CI always includes performance gates" >&2
+            requires_performance=true
+          fi
+
+          case "$requires_performance" in
+            true|false) ;;
+            *)
+              echo "invalid release performance scope: $requires_performance" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "requires_performance=$requires_performance" >> "$GITHUB_OUTPUT"
 
   test:
     runs-on: ubuntu-latest
@@ -161,7 +192,8 @@ jobs:
       group: swm-ci
       labels: bench
     timeout-minutes: 60
-    needs: [test, swm-uws-bookworm]
+    needs: [source-policy, test, swm-uws-bookworm]
+    if: needs['source-policy'].outputs.requires_performance == 'true'
     permissions:
       contents: read
 
@@ -219,7 +251,13 @@ jobs:
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: regression-gate
+    needs: [source-policy, test, swm-uws-bookworm, regression-gate]
+    if: >-
+      always() &&
+      needs['source-policy'].result == 'success' &&
+      needs.test.result == 'success' &&
+      needs['swm-uws-bookworm'].result == 'success' &&
+      (needs['regression-gate'].result == 'success' || needs['regression-gate'].result == 'skipped')
     permissions:
       contents: read
 
