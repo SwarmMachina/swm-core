@@ -292,7 +292,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: package
-    if: success() && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      always() &&
+      needs.package.result == 'success' &&
+      startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       id-token: write
