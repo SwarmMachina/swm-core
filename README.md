@@ -654,6 +654,22 @@ const server = new Server(options)
 Global declarations and a `compilerOptions.types` entry are not required.
 Avoid deep imports from `@swarmmachina/swm-core/src/*`.
 
+For an existing JSDoc codebase that uses `Swm.*`, opt in to the type-only
+namespace once per project or entry point:
+
+```javascript
+/// <reference types="@swarmmachina/swm-core/global" />
+
+/**
+ * @typedef {object} ContextState
+ * @property {?Swm.HttpContext} req
+ * @property {?Swm.HttpContext} res
+ */
+```
+
+The namespace contains types only. It does not create or declare a runtime
+`globalThis.Swm` value.
+
 ### HTTP body memory limits
 
 All values are byte counts. `maxBodySize` defaults to 1 MiB and cannot exceed

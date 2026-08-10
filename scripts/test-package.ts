@@ -9,7 +9,7 @@ const temp = makeTempDir('swm-package-')
 interface PackedPackageManifest extends PackageManifest {
   main?: string
   types?: string
-  exports?: { '.': string | Record<string, string> }
+  exports?: Record<string, string | Record<string, string>>
 }
 
 /**
@@ -26,12 +26,13 @@ function normalized(path: string): string {
  */
 function metadataPaths(pkg: PackedPackageManifest): string[] {
   const paths = [pkg.main, pkg.types]
-  const rootExport = pkg.exports?.['.']
 
-  if (typeof rootExport === 'string') {
-    paths.push(rootExport)
-  } else if (rootExport && typeof rootExport === 'object') {
-    paths.push(...Object.values(rootExport).filter((value): value is string => typeof value === 'string'))
+  for (const entry of Object.values(pkg.exports ?? {})) {
+    if (typeof entry === 'string') {
+      paths.push(entry)
+    } else {
+      paths.push(...Object.values(entry).filter((value): value is string => typeof value === 'string'))
+    }
   }
 
   return [...new Set(paths.filter((value): value is string => typeof value === 'string').map(normalized))]
@@ -39,7 +40,7 @@ function metadataPaths(pkg: PackedPackageManifest): string[] {
 
 try {
   const packages: Array<[string, string[]]> = [
-    [root, ['package.json', 'dist/index.js', 'dist/index.d.ts', 'dist/remote-address.js']],
+    [root, ['package.json', 'dist/index.js', 'dist/index.d.ts', 'dist/global.d.ts', 'dist/remote-address.js']],
     [bindingRoot, ['package.json', 'lib/index.js', 'lib/index.d.ts', 'lib/load-native.js']]
   ]
 
