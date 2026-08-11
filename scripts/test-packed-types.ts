@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import ts from 'typescript'
 
@@ -63,6 +63,44 @@ function assertJavaScriptIdeTypes(consumer: string, compilerOptions: ts.Compiler
   assert.match(defaultValue ?? '', /268_435_456.*256 MiB/)
 }
 
+/**
+ * Verifies that the opt-in `Swm.*` namespace exposes the package types
+ * directly instead of showing the old internal `Core.*` aliases in editors.
+ * @param {string} consumer
+ * @param {object} compilerOptions
+ */
+function assertJavaScriptNamespaceTypes(consumer: string, compilerOptions: ts.CompilerOptions): void {
+  const file = join(consumer, 'fixtures/jsdoc-consumer.js')
+  const source = readFileSync(file, 'utf8')
+  const host = {
+    getScriptFileNames: () => [file],
+    getScriptVersion: () => '0',
+    getScriptSnapshot: (path: string) => {
+      const text = ts.sys.readFile(path)
+
+      return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text)
+    },
+    getCurrentDirectory: () => consumer,
+    getCompilationSettings: () => compilerOptions,
+    getDefaultLibFileName: (options: ts.CompilerOptions) => ts.getDefaultLibFilePath(options),
+    fileExists: ts.sys.fileExists,
+    readFile: ts.sys.readFile,
+    readDirectory: ts.sys.readDirectory,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+    realpath: ts.sys.realpath
+  }
+  const service = ts.createLanguageService(host)
+  const position = source.indexOf('Swm.HttpContext') + 'Swm.'.length
+  const quickInfo = service.getQuickInfoAtPosition(file, position)
+  const display = ts.displayPartsToString(quickInfo?.displayParts)
+  const documentation = ts.displayPartsToString(quickInfo?.documentation)
+
+  assert.ok(quickInfo, 'JavaScript IDE quick info is missing for Swm.HttpContext')
+  assert.equal(display, 'interface HttpContext')
+  assert.match(documentation, /Per-request context passed to HTTP handlers\./)
+}
+
 try {
   const artifacts = join(temp, 'artifacts')
   const consumer = join(temp, 'consumer')
@@ -112,6 +150,11 @@ try {
   assertJavaScriptIdeTypes(consumer, {
     ...shared,
     checkJs: false,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext
+  })
+  assertJavaScriptNamespaceTypes(consumer, {
+    ...shared,
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext
   })
