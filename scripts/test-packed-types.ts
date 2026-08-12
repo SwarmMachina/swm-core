@@ -8,6 +8,33 @@ import { bindingRoot, makeTempDir, pack, root } from './package-test-helpers.js'
 
 const temp = makeTempDir('swm-packed-types-')
 
+function createLanguageService(
+  consumer: string,
+  file: string,
+  compilerOptions: ts.CompilerOptions
+): ts.LanguageService {
+  const host = {
+    getScriptFileNames: () => [file],
+    getScriptVersion: () => '0',
+    getScriptSnapshot: (path: string) => {
+      const text = ts.sys.readFile(path)
+
+      return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text)
+    },
+    getCurrentDirectory: () => consumer,
+    getCompilationSettings: () => compilerOptions,
+    getDefaultLibFileName: (options: ts.CompilerOptions) => ts.getDefaultLibFilePath(options),
+    fileExists: ts.sys.fileExists,
+    readFile: ts.sys.readFile,
+    readDirectory: ts.sys.readDirectory,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+    realpath: ts.sys.realpath
+  }
+
+  return ts.createLanguageService(host)
+}
+
 /**
  * Verifies the same completion and hover path used by editors backed by the
  * TypeScript Language Service, including VS Code.
@@ -27,25 +54,7 @@ function assertJavaScriptIdeTypes(consumer: string, compilerOptions: ts.Compiler
 
   writeFileSync(file, source)
 
-  const host = {
-    getScriptFileNames: () => [file],
-    getScriptVersion: () => '0',
-    getScriptSnapshot: (path: string) => {
-      const text = ts.sys.readFile(path)
-
-      return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text)
-    },
-    getCurrentDirectory: () => consumer,
-    getCompilationSettings: () => compilerOptions,
-    getDefaultLibFileName: (options: ts.CompilerOptions) => ts.getDefaultLibFilePath(options),
-    fileExists: ts.sys.fileExists,
-    readFile: ts.sys.readFile,
-    readDirectory: ts.sys.readDirectory,
-    directoryExists: ts.sys.directoryExists,
-    getDirectories: ts.sys.getDirectories,
-    realpath: ts.sys.realpath
-  }
-  const service = ts.createLanguageService(host)
+  const service = createLanguageService(consumer, file, compilerOptions)
   const position = source.indexOf('maxB') + 'maxB'.length
   const completions = service.getCompletionsAtPosition(file, position, {})
   const names = new Set(completions?.entries.map((entry) => entry.name))
@@ -72,25 +81,7 @@ function assertJavaScriptIdeTypes(consumer: string, compilerOptions: ts.Compiler
 function assertJavaScriptNamespaceTypes(consumer: string, compilerOptions: ts.CompilerOptions): void {
   const file = join(consumer, 'fixtures/jsdoc-consumer.js')
   const source = readFileSync(file, 'utf8')
-  const host = {
-    getScriptFileNames: () => [file],
-    getScriptVersion: () => '0',
-    getScriptSnapshot: (path: string) => {
-      const text = ts.sys.readFile(path)
-
-      return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text)
-    },
-    getCurrentDirectory: () => consumer,
-    getCompilationSettings: () => compilerOptions,
-    getDefaultLibFileName: (options: ts.CompilerOptions) => ts.getDefaultLibFilePath(options),
-    fileExists: ts.sys.fileExists,
-    readFile: ts.sys.readFile,
-    readDirectory: ts.sys.readDirectory,
-    directoryExists: ts.sys.directoryExists,
-    getDirectories: ts.sys.getDirectories,
-    realpath: ts.sys.realpath
-  }
-  const service = ts.createLanguageService(host)
+  const service = createLanguageService(consumer, file, compilerOptions)
   const position = source.indexOf('Swm.HttpContext') + 'Swm.'.length
   const quickInfo = service.getQuickInfoAtPosition(file, position)
   const display = ts.displayPartsToString(quickInfo?.displayParts)
