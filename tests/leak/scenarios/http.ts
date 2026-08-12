@@ -77,7 +77,7 @@ export function makeHttpScenarios(): HttpLeakScenario[] {
           ]
         }
       },
-      async run({ baseUrl }, collect, i) {
+      async run({ baseUrl }, _collect, i) {
         const res = await fetch(`${baseUrl}/echo`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -115,7 +115,7 @@ export function makeHttpScenarios(): HttpLeakScenario[] {
           ]
         }
       },
-      async run({ baseUrl }, collect, i) {
+      async run({ baseUrl }, _collect, i) {
         const res = await fetch(`${baseUrl}/echo`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -192,7 +192,7 @@ export function makeHttpScenarios(): HttpLeakScenario[] {
           ]
         }
       },
-      async run({ baseUrl }, collect, i) {
+      async run({ baseUrl }, _collect, i) {
         const path = i % 2 === 0 ? '/boom-sync' : '/boom-async'
         const res = await fetch(`${baseUrl}${path}`)
 
@@ -207,7 +207,7 @@ export function makeHttpScenarios(): HttpLeakScenario[] {
           routes: [{ method: 'get', path: '/exists', handler: () => 'ok' }]
         }
       },
-      async run({ baseUrl }, collect, i) {
+      async run({ baseUrl }, _collect, i) {
         const res = await fetch(`${baseUrl}/missing-${i}`)
 
         await res.arrayBuffer()

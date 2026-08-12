@@ -34,17 +34,3 @@ export async function reqBin(url: string, opt: RequestInit = {}) {
 
   return { status: res.status, headers: res.headers, buf }
 }
-
-/**
- * @param {string} url
- * @returns {Promise<{status: number, headers: Headers, text: string}>}
- */
-export async function reqRaw(url: string) {
-  const res = await fetch(url, { headers: { connection: 'close' } })
-
-  return {
-    status: res.status,
-    text: await res.text(),
-    headers: res.headers
-  }
-}

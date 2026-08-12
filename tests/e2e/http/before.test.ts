@@ -53,10 +53,10 @@ test('before array runs in order', async () => {
       method: 'get',
       path: '/*',
       before: [
-        (ctx) => {
+        (_ctx) => {
           order.push('a')
         },
-        async (ctx) => {
+        async (_ctx) => {
           order.push('b')
         }
       ],
