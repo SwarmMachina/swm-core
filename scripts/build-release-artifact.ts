@@ -7,10 +7,8 @@ import { verifyRepositoryRelease } from './verify-release.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, 'release-artifact')
-const PUBLISH_SCRIPT = 'publish-release-artifact.js'
 const REQUIRED_FILES = ['LICENSE', 'README.md', 'package.json', 'dist/index.d.ts', 'dist/index.js']
 const ALLOWED_ROOT_FILES = new Set(['LICENSE', 'README.md', 'package.json'])
-const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url))
 
 export interface PackedFile {
   path?: string
@@ -88,8 +86,6 @@ async function main() {
   const sha256 = createHash('sha256').update(tarball).digest('hex')
   const sha512 = createHash('sha512').update(tarball).digest('hex')
   const integrity = `sha512-${createHash('sha512').update(tarball).digest('base64')}`
-  const publishScript = await fs.readFile(path.join(SCRIPTS_DIR, PUBLISH_SCRIPT))
-  const publishScriptSha256 = createHash('sha256').update(publishScript).digest('hex')
   const manifest = {
     schemaVersion: 'swm-release-artifact/v1',
     name: metadata.name,
@@ -105,11 +101,7 @@ async function main() {
 
   await Promise.all([
     fs.writeFile(path.join(OUT_DIR, 'release-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`),
-    fs.writeFile(
-      path.join(OUT_DIR, 'SHA256SUMS'),
-      `${sha256}  ${filename}\n${publishScriptSha256}  ${PUBLISH_SCRIPT}\n`
-    ),
-    fs.writeFile(path.join(OUT_DIR, PUBLISH_SCRIPT), publishScript)
+    fs.writeFile(path.join(OUT_DIR, 'SHA256SUMS'), `${sha256}  ${filename}\n`)
   ])
 
   console.log(`[release] built ${filename} (${tarball.length} bytes, sha256=${manifest.sha256})`)

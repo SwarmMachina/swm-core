@@ -4,7 +4,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const ARTIFACT_DIR = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const ARTIFACT_DIR = path.resolve(process.env.RELEASE_ARTIFACT_DIR ?? path.dirname(fileURLToPath(import.meta.url)))
 
 /**
  * @param {string} output
@@ -49,14 +50,22 @@ function readPublishedIntegrity(spec: string): { found: boolean; integrity?: str
  */
 async function main() {
   const manifest = JSON.parse(await fs.readFile(path.join(ARTIFACT_DIR, 'release-manifest.json'), 'utf8'))
+  const trustedPackage = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8'))
 
   if (
+    manifest.schemaVersion !== 'swm-release-artifact/v1' ||
     typeof manifest.name !== 'string' ||
     typeof manifest.version !== 'string' ||
+    typeof manifest.tag !== 'string' ||
+    (manifest.gitSha !== null && typeof manifest.gitSha !== 'string') ||
     typeof manifest.filename !== 'string' ||
     path.basename(manifest.filename) !== manifest.filename
   ) {
     throw new Error('release manifest contains an invalid package identity')
+  }
+
+  if (manifest.name !== trustedPackage.name || manifest.version !== trustedPackage.version) {
+    throw new Error('release artifact does not match the trusted checkout package identity')
   }
 
   const tarballPath = path.join(ARTIFACT_DIR, manifest.filename)
@@ -71,6 +80,10 @@ async function main() {
 
   if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== `v${manifest.version}`) {
     throw new Error(`release tag does not match artifact version ${manifest.version}`)
+  }
+
+  if (process.env.GITHUB_SHA && manifest.gitSha !== process.env.GITHUB_SHA) {
+    throw new Error('release artifact does not match the trusted checkout commit')
   }
 
   const published = readPublishedIntegrity(spec)

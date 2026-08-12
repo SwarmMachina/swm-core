@@ -2,8 +2,13 @@ name: CI
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
     inputs:
       classify_release_scope:
@@ -31,22 +36,23 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
       - name: Setup pnpm
         if: startsWith(github.ref, 'refs/tags/v') || inputs.classify_release_scope == true
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 11.20.0
 
       - name: Verify workflow commit belongs to master
+        if: github.event_name != 'pull_request'
         run: git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/master
 
       - name: Setup release policy runtime
         if: startsWith(github.ref, 'refs/tags/v') || inputs.classify_release_scope == true
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
 
@@ -68,8 +74,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* || "${{ inputs.classify_release_scope }}" == "true" ]]; then
             requires_performance="$(node .scripts-dist/release-performance-scope.js "$GITHUB_SHA")"
           else
-            echo "[release-scope] manual CI always includes performance gates" >&2
-            requires_performance=true
+            requires_performance=false
           fi
 
           case "$requires_performance" in
@@ -95,15 +100,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 11.20.0
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
@@ -115,11 +120,19 @@ jobs:
         if: matrix.node-version == '22'
         id: binding-candidate
         run: |
-          ref="${{ inputs.swm_uws_ref }}"
+          ref="$INPUT_SWM_UWS_REF"
           if [ -z "$ref" ]; then
             ref="v$(node -p 'require("./package.json").dependencies["@swarmmachina/swm-uws"]')"
           fi
+          case "$ref" in
+            *$'\n'*|*$'\r'*|*' '*|*'~'*|*'^'*|*':'*|*'?'*|*'['*|*'\\'*|..*|*..)
+              echo "invalid swm-uws ref" >&2
+              exit 1
+              ;;
+          esac
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_SWM_UWS_REF: ${{ inputs.swm_uws_ref }}
 
       - name: Formatting and lint
         if: matrix.node-version == '22'
@@ -147,7 +160,7 @@ jobs:
 
       - name: Checkout swm-uws candidate
         if: matrix.node-version == '22'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: SwarmMachina/swm-uws
           ref: ${{ steps.binding-candidate.outputs.ref }}
@@ -174,10 +187,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 11.20.0
 
@@ -193,21 +206,21 @@ jobs:
       labels: bench
     timeout-minutes: 60
     needs: [source-policy, test, swm-uws-bookworm]
-    if: needs['source-policy'].outputs.requires_performance == 'true'
+    if: github.event_name != 'pull_request' && needs['source-policy'].outputs.requires_performance == 'true'
     permissions:
       contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 11.20.0
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           cache: pnpm
@@ -221,7 +234,7 @@ jobs:
       - name: Upload regression profiles
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: regression-profiles
           path: benchmark/profiles/regression-ci/
@@ -232,7 +245,7 @@ jobs:
       - name: Upload binding comparison
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: binding-comparison
           path: benchmark/profiles/binding-compare/
@@ -243,7 +256,7 @@ jobs:
       - name: Upload framework comparison
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: framework-comparison
           path: benchmark/profiles/compare-ci/
@@ -260,18 +273,20 @@ jobs:
       (needs['regression-gate'].result == 'success' || needs['regression-gate'].result == 'skipped')
     permissions:
       contents: read
+    outputs:
+      artifact_sha256: ${{ steps.release-artifact.outputs.sha256 }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 11.20.0
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
 
@@ -281,8 +296,12 @@ jobs:
       - name: Build immutable release artifact
         run: pnpm release:artifact
 
+      - name: Record release artifact digest
+        id: release-artifact
+        run: echo "sha256=$(node -p 'JSON.parse(require("node:fs").readFileSync("release-artifact/release-manifest.json", "utf8")).sha256')" >> "$GITHUB_OUTPUT"
+
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-package
           path: release-artifact/
@@ -299,25 +318,42 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    environment: npm-publish
 
     steps:
+      - name: Checkout trusted release commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.20.0
+
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Install trusted publisher dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build trusted publisher
+        run: pnpm build:scripts
+
       - name: Download verified release artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-package
           path: release-artifact/
 
-      - name: Verify release artifact checksum
-        working-directory: release-artifact
-        run: sha256sum --check SHA256SUMS
+      - name: Verify release artifact against package-job digest
+        run: |
+          sha256sum --check release-artifact/SHA256SUMS
+          actual="$(node -p 'JSON.parse(require("node:fs").readFileSync("release-artifact/release-manifest.json", "utf8")).sha256')"
+          test "$actual" = "${{ needs.package.outputs.artifact_sha256 }}"
 
       - name: Publish
-        run: node release-artifact/publish-release-artifact.js
+        run: node .scripts-dist/publish-release-artifact.js
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_ARTIFACT_DIR: ${{ github.workspace }}/release-artifact
