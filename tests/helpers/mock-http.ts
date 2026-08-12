@@ -27,7 +27,10 @@ interface MockResControls {
   getWarnings(): string[]
   endBatch(status: string, headerLines: string[], body?: NativeData): this
   beginWrite(): void
+  collectBodyWithLength(maxSize: number, cb: CollectBodyCallback): number | undefined
+  discardBody(): void
   pushCollectedBody(data: ArrayLike<number> | null): void
+  setCollectedBodyLength(length: number | undefined): void
   setWriteResultSequence(results: boolean[]): void
   setWriteResult(fn: (chunk: unknown) => boolean): void
   setTryEndResultSequence(results: Array<readonly [boolean, boolean]>): void
@@ -72,6 +75,7 @@ export function createMockRes(options: MockResOptions = {}): MockRes {
 
   let onDataCb: DataCallback | null = null
   let collectBodyCb: CollectBodyCallback | null = null
+  let collectedBodyLength: number | undefined
   let getProxiedRemoteAddressAsTextCallCount = 0
   let getRemoteAddressAsTextCallCount = 0
   let getProxiedRemoteAddressCallCount = 0
@@ -184,12 +188,25 @@ export function createMockRes(options: MockResOptions = {}): MockRes {
       calls.push(['collectBody', maxSize])
       collectBodyCb = cb
     },
+    collectBodyWithLength(maxSize: number, cb: CollectBodyCallback): number | undefined {
+      calls.push(['collectBodyWithLength', maxSize])
+      collectBodyCb = cb
+
+      return collectedBodyLength
+    },
+    discardBody(): void {
+      calls.push(['discardBody'])
+      collectBodyCb = null
+    },
     pushCollectedBody(data: ArrayLike<number> | null): void {
       if (!collectBodyCb) {
         throw new Error('collectBody not called yet')
       }
 
       collectBodyCb(data === null ? null : Uint8Array.from(data).buffer)
+    },
+    setCollectedBodyLength(length: number | undefined): void {
+      collectedBodyLength = length
     },
     onData(cb: DataCallback): void {
       calls.push(['onData'])

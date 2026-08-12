@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import { strictEqual, throws } from 'node:assert/strict'
-import BodyBudget from '../../src/body-budget.js'
+import BodyBudget from '../../src/http/body-budget.js'
 
 describe('BodyBudget', () => {
   test('reserves, resizes, and releases aggregate retained capacity', () => {

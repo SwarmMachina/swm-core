@@ -3,12 +3,12 @@ import { strict as assert } from 'node:assert'
 import { getFreePort } from '@swarmmachina/benchkit'
 import Server, { cors } from '../../../src/index.js'
 import { reqText } from '../../helpers/http-client.js'
-import type HttpContext from '../../../src/http-context.js'
+import type HttpContext from '../../../src/http/context.js'
 
 let server: Server | null = null
 
 /**
- * @param {(ctx: import('../../../src/http-context.js').default) => boolean} applyCors
+ * @param {(ctx: import('../../../src/http/context.js').default) => boolean} applyCors
  * @returns {Promise<string>}
  */
 async function start(applyCors: (ctx: HttpContext) => boolean): Promise<string> {

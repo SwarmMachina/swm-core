@@ -99,7 +99,7 @@ test('http leak: retained memory does not grow across sustained churn', async (t
   closed = true
 })
 
-test('http leak: serveStatic cache stays bounded', async () => {
+test('http leak: serveStatic cache stays byte-bounded', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'swm-leak-static-'))
   const fileCount = 120
   const fileSize = 64 * 1024
@@ -108,7 +108,9 @@ test('http leak: serveStatic cache stays bounded', async () => {
     writeFileSync(join(dir, `f${i}.txt`), Buffer.alloc(fileSize, i & 0xff))
   }
 
-  const handle = await startHttpServer({ onRequest: serveStatic(dir, { cacheLimit: 16 }) })
+  const handle = await startHttpServer({
+    onRequest: serveStatic(dir, { cacheLimit: fileCount, cacheByteLimit: 1024 * 1024 })
+  })
 
   try {
     // Warmup fills the cache up to its limit.
@@ -128,7 +130,7 @@ test('http leak: serveStatic cache stays bounded', async () => {
 
     const growth = (await measureRetainedBytes()) - before
 
-    // Bounded cache holds 16 * 64KB = 1MB; an unbounded one would retain
+    // The byte budget holds 16 * 64KB = 1MB even though the count limit allows
     // all 120 files (7.5MB).
     assert.ok(growth < 2.5 * 1024 * 1024, `serveStatic retained ${growth} bytes - cache looks unbounded`)
   } finally {

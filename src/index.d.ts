@@ -189,7 +189,7 @@ export interface WSOptions {
    * and binary messages close the connection before `onMessage` runs.
    *
    * @defaultValue `1_048_576` (1 MiB)
-   * @remarks Must be a safe integer from `0` through `67_108_864`.
+   * @remarks Must be a safe integer from `1` through `67_108_864`.
    */
   maxPayloadLength?: number
 
@@ -220,7 +220,7 @@ export interface WSOptions {
    * Idle timeout in seconds.
    *
    * @defaultValue `15`
-   * @remarks The native transport requires a value of at least `5`.
+   * @remarks Must be a safe integer from `8` through `960`.
    */
   idleTimeoutSec?: number
 
@@ -273,8 +273,9 @@ export interface WSOptions {
   /**
    * Called when the peer closes or the transport terminates the connection.
    *
-   * `message` contains the close reason bytes. The underlying socket is no
-   * longer writable. Throwing or rejecting still allows lifecycle cleanup.
+   * `message` contains an owned copy of the close reason bytes and remains
+   * readable across `await`. The underlying socket is no longer writable.
+   * Throwing or rejecting still allows lifecycle cleanup.
    */
   onClose?: (ctx: WSContext, code: number, message: ArrayBuffer) => any
 
@@ -388,10 +389,11 @@ export interface HttpBaseOptions {
   /**
    * Timeout for asynchronous HTTP hook/handler chains, in milliseconds.
    *
-   * A timeout returns HTTP 408, closes the connection, releases body
-   * reservations, and ignores late Promise results. It does not cancel the
-   * application's Promise; use an `AbortController` for cancellable downstream
-   * work.
+   * Before a response starts, a timeout returns HTTP 408 and closes the
+   * connection. After an early response, it finalizes the request without
+   * sending a second response. In both cases it releases body reservations and
+   * ignores late Promise results. It does not cancel the application's Promise;
+   * use an `AbortController` for cancellable downstream work.
    *
    * @defaultValue `30_000`
    * @remarks Non-zero values must be from `100` through `300_000`.
@@ -402,8 +404,9 @@ export interface HttpBaseOptions {
    * Handles request parsing, timeout, and application errors.
    *
    * The framework still performs its controlled response and lifecycle
-   * cleanup. Errors thrown or rejected by this hook are contained so they
-   * cannot escape into native transport callbacks.
+   * cleanup. Request metadata is retained until an async hook settles, so it
+   * cannot observe a later pooled request. Errors thrown or rejected by this
+   * hook are contained so they cannot escape into native transport callbacks.
    */
   onError?: (ctx: HttpContext, err: Error) => any | Promise<any>
 }
@@ -554,6 +557,7 @@ export interface EffectiveServerConfig {
 export interface NativeCapabilities {
   readonly beginWrite: boolean
   readonly collectBody: boolean
+  readonly collectBodyLength?: boolean
   readonly httpTransportConfig: boolean
   readonly requestPause: boolean
   readonly requestPrefetch: boolean
@@ -1020,11 +1024,44 @@ export interface ServeStaticOptions {
   cache?: boolean
 
   /**
-   * Maximum number of cached files before FIFO eviction.
+   * Maximum number of cached files before LRU eviction.
    *
    * @defaultValue `128`
    */
   cacheLimit?: number
+
+  /**
+   * Maximum total bytes retained by the in-memory LRU.
+   *
+   * @defaultValue `67108864` (64 MiB)
+   */
+  cacheByteLimit?: number
+
+  /**
+   * Maximum size of one file loaded into memory. Larger files are treated as
+   * misses; stream them explicitly with {@link HttpContext.stream} instead.
+   *
+   * @defaultValue `16777216` (16 MiB)
+   */
+  maxFileSize?: number
+
+  /**
+   * Maximum bytes read concurrently across distinct cache misses. Identical
+   * simultaneous misses share one read. Must be at least `maxFileSize` when
+   * both values are set.
+   *
+   * @defaultValue The larger of `67108864` (64 MiB) and `maxFileSize`.
+   */
+  maxInflightBytes?: number
+
+  /**
+   * Maximum number of distinct filesystem loads in progress. Identical
+   * simultaneous misses share one slot. `0` rejects every uncached load with
+   * `503 Service Unavailable`.
+   *
+   * @defaultValue `32`
+   */
+  maxInflightFiles?: number
 
   /** `Cache-Control: public, max-age=<seconds>` lifetime. */
   maxAge?: number
@@ -1034,7 +1071,7 @@ export interface ServeStaticOptions {
  * Creates a handler that serves files below `root`.
  *
  * Mount the returned handler on a wildcard `/*` route. Resolved paths remain
- * confined to `root`; cache storage is bounded by
- * {@link ServeStaticOptions.cacheLimit}.
+ * confined to the canonical `root`; file reads and cache storage are bounded
+ * by byte limits as well as {@link ServeStaticOptions.cacheLimit}.
  */
 export function serveStatic(root: string, options?: ServeStaticOptions): (ctx: HttpContext) => Promise<void>

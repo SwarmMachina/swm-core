@@ -47,10 +47,10 @@ describe('release performance scope', () => {
   })
 
   test('requires performance for runtime source changes', () => {
-    const result = classifyReleasePerformance(['src/http-context.ts'], baseManifest, baseManifest)
+    const result = classifyReleasePerformance(['src/http/context.ts'], baseManifest, baseManifest)
 
     equal(result.requiresPerformance, true)
-    deepStrictEqual(result.reasons, ['src/http-context.ts may affect runtime performance'])
+    deepStrictEqual(result.reasons, ['src/http/context.ts may affect runtime performance'])
   })
 
   test('requires performance for dependency graph changes', () => {

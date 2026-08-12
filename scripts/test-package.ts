@@ -40,7 +40,7 @@ function metadataPaths(pkg: PackedPackageManifest): string[] {
 
 try {
   const packages: Array<[string, string[]]> = [
-    [root, ['package.json', 'dist/index.js', 'dist/index.d.ts', 'dist/global.d.ts', 'dist/remote-address.js']],
+    [root, ['package.json', 'dist/index.js', 'dist/index.d.ts', 'dist/global.d.ts', 'dist/net/remote-address.js']],
     [bindingRoot, ['package.json', 'lib/index.js', 'lib/index.d.ts', 'lib/load-native.js']]
   ]
 

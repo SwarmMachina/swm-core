@@ -457,7 +457,8 @@ values are capped at 300000 ms, and `maxHeaderCount` is capped at the native
 capacity of 100.
 
 `http.maxBodySize` and `ws.maxPayloadLength` are independent. Changing one does
-not change the limit for the other protocol.
+not change the limit for the other protocol. `ws.maxPayloadLength` must be at
+least one byte.
 
 #### Configuration examples
 
@@ -692,8 +693,10 @@ Exceeding `maxBodySize` returns `413`; exhausting `maxBodyBudget` returns `503`.
 aggregate limit. The budget accounts for bodies only, not total process RSS.
 
 Body accessors materialize a `Buffer`; use a streaming or object-storage upload
-flow for larger uploads. `requestTimeoutMs` defaults to 30 seconds; it releases
-the body reservation and returns `408`, but does not cancel application work.
+flow for larger uploads. `requestTimeoutMs` defaults to 30 seconds. Before a
+response starts it releases the body reservation and returns `408`; after an
+early response it finalizes the request without a second response. It does not
+cancel application work.
 The normalized values are available on `server.effectiveConfig.http`.
 
 **Route Definition (for `routes` array):**
@@ -715,13 +718,13 @@ The normalized values are available on `server.effectiveConfig.http`.
 | `maxPayloadLength`         | `Number`                   | `1048576`                                | Maximum bytes in one incoming WebSocket message (1 MiB default, 64 MiB max).                                                                                                                                                                                             |
 | `maxBackpressure`          | `Number`                   | `65536`                                  | Maximum permitted outgoing backpressure in bytes per WebSocket.                                                                                                                                                                                                          |
 | `closeOnBackpressureLimit` | `Boolean`                  | `true`                                   | Close a slow WebSocket when an outgoing message is dropped at the backpressure limit.                                                                                                                                                                                    |
-| `idleTimeoutSec`           | `Number`                   | `15`                                     | Idle timeout in seconds (min: 5).                                                                                                                                                                                                                                        |
+| `idleTimeoutSec`           | `Number`                   | `15`                                     | Idle timeout in seconds (integer: 8-960).                                                                                                                                                                                                                                |
 | `upgradeTimeoutMs`         | `Number`                   | `10000`                                  | Deadline for an asynchronous `onUpgrade` decision in milliseconds (0-300000). `0` schedules a zero-delay timeout; it does not disable the deadline.                                                                                                                      |
 | `prefetchHeaders`          | `false`/`'all'`/`String[]` | omitted                                  | Retain selected HTTP upgrade headers for asynchronous `onUpgrade` authorization.                                                                                                                                                                                         |
 | `onOpen`                   | `Function`                 | `(ctx) => {}`                            | Called when client connects.                                                                                                                                                                                                                                             |
 | `onMessage`                | `Function`                 | `(ctx, message, isBinary) => {}`         | Called when message received.                                                                                                                                                                                                                                            |
 | `onDropped`                | `Function`                 | `(ctx, message, isBinary) => {}`         | Called when an outgoing message is dropped because the connection exceeded its backpressure limit. Copy `message` synchronously if it is needed after the callback returns or across an `await`.                                                                         |
-| `onClose`                  | `Function`                 | `(ctx, code, message) => {}`             | Called when client disconnects.                                                                                                                                                                                                                                          |
+| `onClose`                  | `Function`                 | `(ctx, code, message) => {}`             | Called when client disconnects. `message` is copied and remains readable across `await`.                                                                                                                                                                                 |
 | `onDrain`                  | `Function`                 | `(ctx) => {}`                            | Called when socket is writable again.                                                                                                                                                                                                                                    |
 | `onError`                  | `Function`                 | `(ctx, error) => {}`                     | Called on WebSocket error.                                                                                                                                                                                                                                               |
 | `onUpgrade`                | `Function`                 | **required**                             | Authorize the upgrade. Return `null` to reject with `403`, or a flat object to accept; that exact object becomes `ctx.data`. Async handlers can safely use `meta` after an `await`.                                                                                      |
@@ -1124,7 +1127,7 @@ ctx.setStatus(201).send({ created: true })
 
 ##### `ctx.setHeader(key, value)`
 
-Set or replace a staged response header. Header names are case-insensitive. Repeated `setHeader()` calls replace previously staged values for the same header. An array emits one header field per item in order, which is useful for repeatable fields such as `Set-Cookie`; matching `node:http`, `Cookie` array values are joined with `; `. Null or undefined scalar values are silently ignored.
+Set or replace a staged response header. Header names are case-insensitive HTTP tokens; invalid names and CR/LF in values throw before crossing into the native transport. Repeated `setHeader()` calls replace previously staged values for the same header. An array emits one header field per item in order, which is useful for repeatable fields such as `Set-Cookie`; matching `node:http`, `Cookie` array values are joined with `; `. Null or undefined scalar values are silently ignored.
 
 ```javascript
 ctx.setHeader('x-header-any', 'string-value').setStatus(201).send({ created: true })
@@ -1447,10 +1450,10 @@ await.
 what guarantees the fail-loud behavior below. Do not reason about `WSContext`
 by analogy to `HttpContext`.
 
-| Context       | Allocated per…            | Valid for…                    | Safe to retain?                              |
-| ------------- | ------------------------- | ----------------------------- | -------------------------------------------- |
-| `HttpContext` | request (pooled, reused)  | a single request/response     | No — released when the response is finalized |
-| `WSContext`   | connection (never reused) | the whole connection lifetime | Yes, for the connection; not past `onClose`  |
+| Context       | Allocated per…            | Valid for…                                 | Safe to retain?                                          |
+| ------------- | ------------------------- | ------------------------------------------ | -------------------------------------------------------- |
+| `HttpContext` | request (pooled, reused)  | response plus pending `http.onError` hooks | No — released after finalization and pending error hooks |
+| `WSContext`   | connection (never reused) | the whole connection lifetime              | Yes, for the connection; not past `onClose`              |
 
 - **One instance per connection.** The _same_ `WSContext` is passed to every
   callback of a given connection (`onOpen`, `onMessage`, `onClose`, `onDrain`,
@@ -1892,8 +1895,8 @@ explicit `origin`.
 ### Serving Static Files
 
 `serveStatic(root, options)` returns a handler for a wildcard `/*` route (specific
-routes still take precedence). It guards against path traversal, sets Content-Type
-by extension, and caches file contents in memory.
+routes still take precedence). It confines canonical file paths to `root`, sets
+Content-Type by extension, and caches file contents in a byte-bounded LRU.
 
 ```javascript
 import Server, { serveStatic } from '@swarmmachina/swm-core'
@@ -1918,8 +1921,21 @@ const server = new Server({
 Options: `spa` (fall back to `index`), `index` (default `'index.html'`), `cache`
 (default `true`; set `false` in dev to pick up edits), `cacheLimit` (non-negative
 safe integer; max cached files, default `128`; `0` disables the in-memory cache),
-`maxAge` (`Cache-Control` seconds). Misses return `404`,
-traversal `403`, non-`GET`/`HEAD` `405`.
+`cacheByteLimit` (default 64 MiB), `maxFileSize` (default 16 MiB),
+`maxInflightBytes` (at least `maxFileSize`, default the larger of 64 MiB and
+`maxFileSize`), `maxInflightFiles` (default `32`; `0` rejects uncached loads),
+and `maxAge` (`Cache-Control` seconds).
+Identical simultaneous misses share one read. Files above `maxFileSize` return
+`404`; use `ctx.stream()` explicitly for larger assets. Traversal and symlink
+escapes return `403`, and non-`GET`/`HEAD` requests return `405`.
+
+The handler opens canonical targets with no-follow semantics and verifies the
+opened file before reading it. The supported security boundary requires the
+static tree to be non-writable by untrusted users: Node.js does not expose a
+portable descriptor-relative `openat2` equivalent that can make attacker-driven
+path mutation race-free. On Linux the open descriptor is additionally verified
+through `/proc/self/fd`; if that filesystem is unavailable, the request fails
+closed with `403`.
 
 ### Backpressure Handling
 

@@ -1,9 +1,12 @@
 import { test, before, after } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import serveStatic from '../../src/serve-static.js'
+import serveStatic from '../../src/static/serve-static.js'
+
+import type { FileHandle } from 'node:fs/promises'
 
 let rootDir = ''
 
@@ -138,6 +141,45 @@ test('serveStatic: path traversal is rejected with 403', async () => {
   assert.strictEqual(ctx.captured.body, 'Forbidden')
 })
 
+test('serveStatic: symlink escapes outside the canonical root are rejected', async () => {
+  const outsideDir = mkdtempSync(join(tmpdir(), 'swm-static-outside-'))
+  const outsideFile = join(outsideDir, 'secret.txt')
+
+  writeFileSync(outsideFile, 'not public')
+  symlinkSync(outsideFile, join(rootDir, 'leak.txt'))
+
+  try {
+    const handler = serveStatic(rootDir)
+    const ctx = fakeCtx('/leak.txt')
+
+    await handler(ctx)
+
+    assert.strictEqual(ctx.captured.status, 403)
+    assert.strictEqual(ctx.captured.body, 'Forbidden')
+  } finally {
+    rmSync(join(rootDir, 'leak.txt'), { force: true })
+    rmSync(outsideDir, { recursive: true, force: true })
+  }
+})
+
+test('serveStatic: symlinks whose real path stays inside the root remain supported', async () => {
+  const link = join(rootDir, 'app-link.js')
+
+  symlinkSync(join(rootDir, 'assets', 'app.js'), link)
+
+  try {
+    const handler = serveStatic(rootDir)
+    const ctx = fakeCtx('/app-link.js')
+
+    await handler(ctx)
+
+    assert.strictEqual(ctx.captured.status, 200)
+    assert.strictEqual(bodyText(ctx.captured.body), 'console.log(1)')
+  } finally {
+    rmSync(link, { force: true })
+  }
+})
+
 test('serveStatic: non-GET/HEAD method returns 405', async () => {
   const handler = serveStatic(rootDir)
   const ctx = fakeCtx('/index.html', 'post')
@@ -189,6 +231,144 @@ test('serveStatic: bounded cache evicts oldest and re-reads from disk', async ()
   rmSync(dir, { recursive: true, force: true })
 })
 
+test('serveStatic: byte-bounded cache uses LRU eviction', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'swm-static-byte-cache-'))
+
+  writeFileSync(join(dir, 'a.txt'), 'AA')
+  writeFileSync(join(dir, 'b.txt'), 'BB')
+  writeFileSync(join(dir, 'c.txt'), 'CC')
+  const handler = serveStatic(dir, { cacheLimit: 3, cacheByteLimit: 4 })
+
+  for (const path of ['/a.txt', '/b.txt', '/a.txt', '/c.txt']) {
+    await handler(fakeCtx(path))
+  }
+
+  writeFileSync(join(dir, 'b.txt'), 'B2')
+  const ctx = fakeCtx('/b.txt')
+
+  await handler(ctx)
+  assert.strictEqual(bodyText(ctx.captured.body), 'B2')
+
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('serveStatic: rejects files above maxFileSize before reading them', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'swm-static-max-file-'))
+
+  writeFileSync(join(dir, 'large.txt'), '12345')
+  const handler = serveStatic(dir, { maxFileSize: 4 })
+  const ctx = fakeCtx('/large.txt')
+
+  await handler(ctx)
+
+  assert.strictEqual(ctx.captured.status, 404)
+  assert.strictEqual(ctx.captured.body, 'Not Found')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('serveStatic: deduplicates simultaneous uncached reads', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'swm-static-dedupe-'))
+
+  writeFileSync(join(dir, 'asset.txt'), 'shared')
+  const handler = serveStatic(dir, { cache: false, maxInflightFiles: 1 })
+  const first = fakeCtx('/asset.txt')
+  const second = fakeCtx('/asset.txt')
+
+  await Promise.all([handler(first), handler(second)])
+
+  assert.strictEqual(first.captured.body, second.captured.body)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('serveStatic: maxInflightFiles rejects excess distinct filesystem loads', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'swm-static-inflight-files-'))
+
+  writeFileSync(join(dir, 'a.txt'), 'A')
+  writeFileSync(join(dir, 'b.txt'), 'B')
+  const handler = serveStatic(dir, {
+    cache: false,
+    maxFileSize: 1,
+    maxInflightBytes: 2,
+    maxInflightFiles: 1
+  })
+  const first = fakeCtx('/a.txt')
+  const excess = fakeCtx('/b.txt')
+
+  await Promise.all([handler(first), handler(excess)])
+
+  assert.strictEqual(first.captured.status, 200)
+  assert.strictEqual(excess.captured.status, 503)
+  assert.strictEqual(excess.captured.headers['retry-after'], '1')
+  assert.strictEqual(excess.captured.body, 'Service Unavailable')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('serveStatic: maxInflightBytes bounds distinct concurrent reads', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'swm-static-inflight-bytes-'))
+
+  writeFileSync(join(dir, 'a.txt'), 'AA')
+  writeFileSync(join(dir, 'b.txt'), 'BB')
+  const handler = serveStatic(dir, {
+    cache: false,
+    maxFileSize: 2,
+    maxInflightBytes: 2,
+    maxInflightFiles: 2
+  })
+  const first = fakeCtx('/a.txt')
+  const second = fakeCtx('/b.txt')
+  const probe = await open(join(dir, 'a.txt'), 'r')
+  const fileHandlePrototype = Object.getPrototypeOf(probe) as {
+    read(
+      this: FileHandle,
+      buffer: Buffer,
+      offset: number,
+      length: number,
+      position: number
+    ): Promise<{ bytesRead: number; buffer: Buffer }>
+  }
+  const originalRead = fileHandlePrototype.read
+
+  await probe.close()
+
+  let markReadStarted!: () => void
+  let releaseRead!: () => void
+
+  const readStarted = new Promise<void>((resolve) => {
+    markReadStarted = resolve
+  })
+  const readGate = new Promise<void>((resolve) => {
+    releaseRead = resolve
+  })
+
+  let blockFirstRead = true
+
+  t.mock.method(
+    fileHandlePrototype,
+    'read',
+    async function (this: FileHandle, buffer: Buffer, offset: number, length: number, position: number) {
+      if (blockFirstRead) {
+        blockFirstRead = false
+        markReadStarted()
+        await readGate
+      }
+
+      return originalRead.call(this, buffer, offset, length, position)
+    }
+  )
+
+  const firstLoad = handler(first)
+
+  await readStarted
+  await handler(second)
+  releaseRead()
+  await firstLoad
+
+  assert.strictEqual(first.captured.status, 200)
+  assert.strictEqual(second.captured.status, 503)
+  assert.strictEqual(second.captured.headers['retry-after'], '1')
+  rmSync(dir, { recursive: true, force: true })
+})
+
 test('serveStatic: cache hits reuse the response header block', async () => {
   const handler = serveStatic(rootDir)
   const first = fakeCtx('/assets/app.js')
@@ -223,4 +403,20 @@ test('serveStatic: rejects an invalid cache limit at initialization', () => {
   for (const cacheLimit of [-1, 1.5, NaN, Infinity]) {
     assert.throws(() => serveStatic(rootDir, { cacheLimit }), /cacheLimit must be a non-negative safe integer/)
   }
+})
+
+test('serveStatic: rejects invalid resource limits at initialization', () => {
+  for (const option of ['cacheByteLimit', 'maxFileSize', 'maxInflightBytes', 'maxInflightFiles'] as const) {
+    for (const value of [-1, 1.5, NaN, Infinity]) {
+      assert.throws(
+        () => serveStatic(rootDir, { [option]: value }),
+        new RegExp(`${option} must be a non-negative safe integer`)
+      )
+    }
+  }
+
+  assert.throws(
+    () => serveStatic(rootDir, { maxFileSize: 2, maxInflightBytes: 1 }),
+    /maxInflightBytes must be greater than or equal to maxFileSize/
+  )
 })

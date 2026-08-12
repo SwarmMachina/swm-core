@@ -6,9 +6,9 @@ import test from 'node:test'
 import { getFreePort } from '@swarmmachina/benchkit'
 
 import Server from '../../../src/index.js'
-import type HttpContext from '../../../src/http-context.js'
-import type { RawWebSocket } from '../../../src/ws-context.js'
-import type WSContext from '../../../src/ws-context.js'
+import type HttpContext from '../../../src/http/context.js'
+import type { RawWebSocket } from '../../../src/ws/context.js'
+import type WSContext from '../../../src/ws/context.js'
 
 interface WsObservations {
   open?: true

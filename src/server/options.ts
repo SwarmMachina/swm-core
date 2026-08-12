@@ -1,6 +1,6 @@
-import type HttpContext from '../http-context.js'
-import type WSContext from '../ws-context.js'
-import type WebSocketUpgradeMeta from './ws-upgrade-meta.js'
+import type HttpContext from '../http/context.js'
+import type WSContext from '../ws/context.js'
+import type WebSocketUpgradeMeta from '../ws/upgrade-meta.js'
 
 export type HeaderPrefetch = false | 'all' | readonly string[]
 export type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'del' | 'patch' | 'options' | 'head' | 'any'
@@ -83,7 +83,7 @@ export type ServerOptions = CommonServerOptions &
 
 export interface NormalizedHttpOptions {
   onRequest: Handler | null
-  routes: Route[] | null
+  routes: NormalizedRoute[] | null
   onError: (ctx: HttpContext, error: Error) => unknown | Promise<unknown>
   maxBodySize: number
   maxBodyBudget: number | null
@@ -91,6 +91,8 @@ export interface NormalizedHttpOptions {
   prefetch: boolean
   prefetchHeaders: HeaderPrefetch
 }
+
+type NormalizedRoute = Route
 
 export type NormalizedWSOptions = WSOptions & {
   maxPayloadLength: number
@@ -237,7 +239,6 @@ function normalizeRequestTimeout(value: unknown): number {
 
 /**
  * Normalize an opt-in request-header retention policy. Omitted and `false`
- * both keep headers lazy and avoid native header retention.
  * @param {unknown} value
  * @param {string} [name]
  * @returns {false|'all'|readonly string[]}
@@ -361,7 +362,7 @@ function normalizeWsByteCount(value: unknown, name: string, fallback: number, ma
  * @param {Route} route
  * @param {number} index
  */
-function validateRoute(route: unknown, index: number): void {
+function normalizeRoute(route: unknown, index: number): NormalizedRoute {
   if (typeof route !== 'object' || route === null || Array.isArray(route)) {
     throw new TypeError(`http.routes[${index}] must be an object`)
   }
@@ -373,6 +374,7 @@ function validateRoute(route: unknown, index: number): void {
   }
 
   const { method, path, handler, before, prefetch } = route
+  const typedRoute = route as unknown as Route
 
   if (typeof method !== 'string' || !HTTP_METHODS.has(method as HttpMethod)) {
     throw new TypeError(`Invalid HTTP method: ${method}`)
@@ -390,19 +392,22 @@ function validateRoute(route: unknown, index: number): void {
     throw new TypeError(`http.routes[${index}].prefetch must be a boolean`)
   }
 
-  normalizePrefetchHeaders(route.prefetchHeaders, `http.routes[${index}].prefetchHeaders`)
+  const hasPrefetchHeaders = Object.hasOwn(route, 'prefetchHeaders')
+  const prefetchHeaders = normalizePrefetchHeaders(route.prefetchHeaders, `http.routes[${index}].prefetchHeaders`)
 
   if (route.maxBodySize !== undefined) {
     validateBodyByteLimit(route.maxBodySize, `http.routes[${index}].maxBodySize`)
   }
 
   if (before === undefined) {
-    return
+    return hasPrefetchHeaders ? { ...typedRoute, prefetchHeaders } : typedRoute
   }
 
   if (typeof before !== 'function' && (!Array.isArray(before) || before.some((item) => typeof item !== 'function'))) {
     throw new TypeError('Route before must be a function or an array of functions')
   }
+
+  return hasPrefetchHeaders ? { ...typedRoute, prefetchHeaders } : typedRoute
 }
 
 /**
@@ -445,21 +450,15 @@ export function normalizeHttpOptions(http: unknown): NormalizedHttpOptions | nul
     throw new TypeError('http.routes must be an array')
   }
 
-  const routes = http.routes
-
-  if (Array.isArray(routes)) {
-    routes.forEach(validateRoute)
-  }
-
+  const routes = Array.isArray(http.routes) ? http.routes.map(normalizeRoute) : null
   const prefetch = normalizePrefetch(http.prefetch)
   const maxBodySize = validateBodyByteLimit(
     http.maxBodySize === undefined ? DEFAULT_HTTP_MAX_BODY_SIZE_BYTES : http.maxBodySize,
     'http.maxBodySize'
   )
-  const validatedRoutes = routes as Route[] | undefined
 
-  for (let i = 0; i < (validatedRoutes?.length ?? 0); i++) {
-    const routeMaxBodySize = validatedRoutes?.[i]?.maxBodySize
+  for (let i = 0; i < (routes?.length ?? 0); i++) {
+    const routeMaxBodySize = routes?.[i]?.maxBodySize
 
     if (routeMaxBodySize !== undefined && routeMaxBodySize > maxBodySize) {
       throw new TypeError(`http.routes[${i}].maxBodySize cannot exceed http.maxBodySize (${maxBodySize})`)
@@ -468,7 +467,7 @@ export function normalizeHttpOptions(http: unknown): NormalizedHttpOptions | nul
 
   return {
     onRequest: (http.onRequest as Handler | undefined) ?? null,
-    routes: validatedRoutes ?? null,
+    routes,
     onError: (http.onError as ((ctx: HttpContext, error: Error) => unknown | Promise<unknown>) | undefined) ?? NOOP,
     prefetch,
     prefetchHeaders: normalizePrefetchHeaders(http.prefetchHeaders),
@@ -522,8 +521,8 @@ export function normalizeWsOptions(ws: unknown): NormalizedWSOptions | null {
 
   const idleTimeout = ws.idleTimeoutSec ?? 15
 
-  if (!(typeof idleTimeout === 'number' && Number.isFinite(idleTimeout) && idleTimeout >= 5)) {
-    throw new TypeError('ws.idleTimeoutSec must be >= 5')
+  if (typeof idleTimeout !== 'number' || !Number.isSafeInteger(idleTimeout) || idleTimeout < 8 || idleTimeout > 960) {
+    throw new TypeError('ws.idleTimeoutSec must be a safe integer in range 8 - 960')
   }
 
   const closeOnBackpressureLimit = ws.closeOnBackpressureLimit ?? true
@@ -532,15 +531,21 @@ export function normalizeWsOptions(ws: unknown): NormalizedWSOptions | null {
     throw new TypeError('ws.closeOnBackpressureLimit must be a boolean')
   }
 
+  const maxPayloadLength = normalizeWsByteCount(
+    ws.maxPayloadLength,
+    'ws.maxPayloadLength',
+    DEFAULT_WS_MAX_PAYLOAD_LENGTH_BYTES,
+    MAX_HTTP_BODY_SIZE_BYTES
+  )
+
+  if (maxPayloadLength === 0) {
+    throw new TypeError('ws.maxPayloadLength must be at least 1 byte')
+  }
+
   return {
     ...ws,
     prefetchHeaders: normalizePrefetchHeaders(ws.prefetchHeaders, 'ws.prefetchHeaders'),
-    maxPayloadLength: normalizeWsByteCount(
-      ws.maxPayloadLength,
-      'ws.maxPayloadLength',
-      DEFAULT_WS_MAX_PAYLOAD_LENGTH_BYTES,
-      MAX_HTTP_BODY_SIZE_BYTES
-    ),
+    maxPayloadLength,
     maxBackpressure: normalizeWsByteCount(ws.maxBackpressure, 'ws.maxBackpressure', DEFAULT_WS_MAX_BACKPRESSURE_BYTES),
     closeOnBackpressureLimit,
     upgradeTimeoutMs

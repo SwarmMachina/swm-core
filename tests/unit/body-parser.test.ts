@@ -2,11 +2,11 @@
 
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
-import BodyParser, { nextBodyCapacity } from '../../src/body-parser.js'
-import BodyBudget from '../../src/body-budget.js'
-import { CACHED_ERRORS } from '../../src/constants.js'
+import BodyParser, { nextBodyCapacity } from '../../src/http/body-parser.js'
+import BodyBudget from '../../src/http/body-budget.js'
+import { CACHED_ERRORS } from '../../src/http/status.js'
 import { createMockReq, createMockRes } from '../helpers/mock-http.js'
-import HttpContext from '../../src/http-context.js'
+import HttpContext from '../../src/http/context.js'
 
 interface HttpError extends Error {
   status?: number
@@ -332,6 +332,24 @@ describe('BodyParser', () => {
   })
 
   describe('body() - known length mode', () => {
+    function startLengthAwareBody(declaredLength: number | undefined, limit = 16, budget?: BodyBudget) {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq({ headers: { 'content-length': '999' } })
+      const server = {
+        bindingCapabilities: { collectBodyLength: true },
+        httpBodyBudget: budget ?? null,
+        finalizeHttpContext() {}
+      }
+
+      res.setCollectedBodyLength(declaredLength)
+      ctx.reset(res, req, server)
+      parser.reset(ctx, limit)
+
+      return { body: parser.body(), parser, req, res }
+    }
+
     test('should use native collectBody when advertised by the backend', async () => {
       const parser = new BodyParser()
       const ctx = new HttpContext(null)
@@ -369,6 +387,59 @@ describe('BodyParser', () => {
       res.pushCollectedBody(null)
 
       await rejects(body, (error) => httpError(error).message === 'Request body too large')
+    })
+
+    test('should use transport-provided body length and validate its contract', async () => {
+      const exact = startLengthAwareBody(3)
+
+      exact.res.pushCollectedBody([1, 2, 3])
+      deepStrictEqual(await exact.body, Buffer.from([1, 2, 3]))
+      deepStrictEqual(exact.res.calls, [['collectBodyWithLength', 16]])
+      deepStrictEqual(exact.req.calls, [])
+
+      const empty = startLengthAwareBody(0)
+
+      deepStrictEqual(await empty.body, Buffer.alloc(0))
+      deepStrictEqual(empty.res.calls, [['collectBodyWithLength', 16], ['discardBody']])
+
+      const oversized = startLengthAwareBody(17)
+
+      await rejects(oversized.body, (error) => error === CACHED_ERRORS.bodyTooLarge)
+      deepStrictEqual(oversized.res.calls, [['collectBodyWithLength', 16], ['discardBody']])
+
+      for (const [declaredLength, received] of [
+        [4, [1, 2, 3]],
+        [3, [1, 2, 3, 4]]
+      ] as const) {
+        const mismatched = startLengthAwareBody(declaredLength)
+
+        mismatched.res.pushCollectedBody(received)
+        await rejects(mismatched.body, (error) => error === CACHED_ERRORS.sizeMismatch)
+      }
+    })
+
+    test('should retain abort and BodyBudget behavior with transport-provided length', async () => {
+      const aborted = startLengthAwareBody(3)
+
+      aborted.parser.abort()
+      aborted.res.pushCollectedBody([1, 2, 3])
+      await rejects(aborted.body, (error) => error === CACHED_ERRORS.aborted)
+
+      const chunkedBudget = new BodyBudget(32)
+      const chunked = startLengthAwareBody(undefined, 16, chunkedBudget)
+
+      strictEqual(chunkedBudget.usedBytes, 16)
+      chunked.res.pushCollectedBody([1, 2, 3])
+      deepStrictEqual(await chunked.body, Buffer.from([1, 2, 3]))
+      strictEqual(chunkedBudget.usedBytes, 3)
+
+      const rejectedBudget = new BodyBudget(2)
+      const rejected = startLengthAwareBody(3, 16, rejectedBudget)
+
+      await rejects(rejected.body, (error) => error === CACHED_ERRORS.bodyBudgetExceeded)
+      strictEqual(rejectedBudget.usedBytes, 0)
+      deepStrictEqual(rejected.res.calls, [['collectBodyWithLength', 16], ['discardBody']])
+      throws(() => rejected.res.pushCollectedBody([1, 2, 3]), /collectBody not called yet/)
     })
 
     test('should resolve with correct buffer when content-length matches', async () => {
@@ -743,24 +814,6 @@ describe('BodyParser', () => {
   })
 
   describe('body() - memoization', () => {
-    test('buffer() should share the body collector promise', async () => {
-      const parser = new BodyParser()
-      const ctx = new HttpContext(null)
-      const res = createMockRes()
-      const req = createMockReq({ headers: { 'content-length': '2' } })
-
-      ctx.reset(res, req)
-      parser.reset(ctx)
-
-      const bodyPromise = parser.body()
-      const bufferPromise = parser.buffer()
-
-      strictEqual(bufferPromise, bodyPromise)
-
-      res.pushData(Buffer.from([1, 2]), true)
-      await bufferPromise
-    })
-
     test('should return same promise for multiple calls before resolve', async () => {
       const parser = new BodyParser()
       const ctx = new HttpContext(null)

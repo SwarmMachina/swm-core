@@ -2,7 +2,7 @@
 import { strict as assert } from 'node:assert'
 import { WebSocket } from 'ws'
 import { makeMarker } from '../helpers/leak-harness.js'
-import type WSContext from '../../../src/ws-context.js'
+import type WSContext from '../../../src/ws/context.js'
 import type { WsServerHandle, WsServerOptions } from '../../helpers/e2e-server.js'
 
 const HELPER_TIMEOUT_MS = 5000
@@ -196,7 +196,7 @@ export function makeWsScenarios(): WsLeakScenario[] {
           }
         }
       },
-      async run({ wsBaseUrl }, collect, i) {
+      async run({ wsBaseUrl }, _collect, i) {
         const sock = new WebSocket(wsBaseUrl, { perMessageDeflate: false })
 
         await opened(sock)
@@ -226,7 +226,7 @@ export function makeWsScenarios(): WsLeakScenario[] {
           }
         }
       },
-      async run({ wsBaseUrl }, collect, i) {
+      async run({ wsBaseUrl }, _collect, i) {
         const sock = new WebSocket(wsBaseUrl, { perMessageDeflate: false })
 
         await opened(sock)
@@ -272,7 +272,7 @@ export function makeWsScenarios(): WsLeakScenario[] {
           }
         }
       },
-      async run({ wsBaseUrl, server }, collect, i) {
+      async run({ wsBaseUrl, server }, _collect, i) {
         const topic = `topic-${i}`
         const sock = new WebSocket(wsBaseUrl, { perMessageDeflate: false })
 
@@ -351,7 +351,7 @@ export function makeWsScenarios(): WsLeakScenario[] {
           }
         }
       },
-      async run({ wsBaseUrl, server }, collect, i) {
+      async run({ wsBaseUrl, server }, _collect, i) {
         const sock = new WebSocket(`${wsBaseUrl}/?uid=${i}`, { perMessageDeflate: false })
 
         await opened(sock)

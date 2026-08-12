@@ -67,7 +67,7 @@ describe('release tarball contents', () => {
 
   test('rejects source maps without published TypeScript sources', () => {
     throws(
-      () => verifyPackedFiles([...required, 'dist/http-context.js.map'].map((path) => ({ path }))),
+      () => verifyPackedFiles([...required, 'dist/http/context.js.map'].map((path) => ({ path }))),
       /unpublished-source map/
     )
   })

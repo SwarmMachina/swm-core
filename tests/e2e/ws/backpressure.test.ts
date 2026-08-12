@@ -4,7 +4,7 @@ import { WebSocket } from 'ws'
 import type { Socket } from 'node:net'
 import { startWsServer } from '../../helpers/e2e-server.js'
 import type { WsServerHandle } from '../../helpers/e2e-server.js'
-import type WSContext from '../../../src/ws-context.js'
+import type WSContext from '../../../src/ws/context.js'
 
 const SLOW_CLIENTS = 6
 const MESSAGE_SIZE = 256 * 1024

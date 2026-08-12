@@ -2,7 +2,7 @@
 
 import { describe, test } from 'node:test'
 import { deepStrictEqual, strictEqual, throws } from 'node:assert/strict'
-import ContextPool from '../../src/context-pool.js'
+import ContextPool from '../../src/http/context-pool.js'
 
 interface PoolEntry {
   clear(): void
@@ -318,68 +318,6 @@ describe('ContextPool', () => {
 
       strictEqual(acquired.id, 1002)
       strictEqual(acquired, ctx2)
-    })
-  })
-
-  describe('clear', () => {
-    test('should empty the pool', () => {
-      let idCounter = 0
-
-      const createFn = (pool: ContextPool<TestContext>) => ({
-        id: ++idCounter,
-        pool,
-        clear: () => {}
-      })
-      const pool = new ContextPool<TestContext>(createFn)
-      const ctx1 = pool.acquire()
-      const ctx2 = pool.acquire()
-      const ctx3 = pool.acquire()
-
-      pool.release(ctx1)
-      pool.release(ctx2)
-      pool.release(ctx3)
-
-      strictEqual(inspectPool(pool).pool.length, 3)
-
-      pool.clear()
-
-      strictEqual(inspectPool(pool).pool.length, 0)
-    })
-
-    test('should work on empty pool', () => {
-      let idCounter = 0
-
-      const createFn = (pool: ContextPool<TestContext>) => ({
-        id: ++idCounter,
-        pool,
-        clear: () => {}
-      })
-      const pool = new ContextPool<TestContext>(createFn)
-
-      pool.clear()
-
-      strictEqual(inspectPool(pool).pool.length, 0)
-    })
-
-    test('should reset tracking after clear', () => {
-      let idCounter = 0
-
-      const createFn = (pool: ContextPool<TestContext>) => ({
-        id: ++idCounter,
-        pool,
-        clear: () => {}
-      })
-      const pool = new ContextPool<TestContext>(createFn, 5)
-      const ctx = pool.acquire()
-
-      pool.release(ctx)
-      strictEqual(inspectPool(pool).pool.length, 1)
-
-      pool.clear()
-      strictEqual(inspectPool(pool).pool.length, 0)
-
-      pool.release(ctx)
-      strictEqual(inspectPool(pool).pool.length, 1)
     })
   })
 

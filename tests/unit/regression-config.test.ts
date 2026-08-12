@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import { test } from 'node:test'
-import { resolveHttpParams } from '../../benchmark/suites/http.js'
+import { resolveHttpParams } from '../../benchmark/regression/suites/http.js'
 
 const baseline = {
   parameters: {

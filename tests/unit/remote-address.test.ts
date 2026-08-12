@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import test from 'node:test'
 
-import { getRemoteAddress } from '../../src/remote-address.js'
+import { getRemoteAddress } from '../../src/net/remote-address.js'
 
 /**
  * @param {Iterable<number>} bytes

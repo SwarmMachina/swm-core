@@ -3,8 +3,8 @@
 import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
 import { createMockReadable, createMockReq, createMockRes, isWriteHeaderCall } from '../helpers/mock-http.js'
-import BaseHttpContext from '../../src/http-context.js'
-import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../../src/constants.js'
+import BaseHttpContext from '../../src/http/context.js'
+import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../../src/http/status.js'
 import type { HttpRequest, HttpResponse } from '@swarmmachina/swm-uws'
 
 interface HttpError extends Error {
@@ -2369,7 +2369,7 @@ describe('HttpContext', () => {
           finalizeCount++
         },
         safeCall() {
-          /* noop */
+          return Promise.resolve()
         }
       }
       const ctx = new HttpContext(null)
@@ -2472,8 +2472,9 @@ describe('HttpContext', () => {
       )
     })
 
-    test('should cancel the timer when a response starts', async () => {
+    test('should finalize a still-pending handler after an early response', async () => {
       let finalized = 0
+      let reported = 0
 
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -2485,17 +2486,21 @@ describe('HttpContext', () => {
           finalized++
         },
         safeCall() {
+          reported++
+
           return Promise.resolve()
         }
       }
 
       ctx.reset(res, req, server)
-      ctx.startRequestTimeout(10)
       ctx.sendText('ok')
+      ctx.asyncPending = true
+      ctx.startRequestTimeout(10)
 
       await new Promise((resolve) => setTimeout(resolve, 20))
 
-      strictEqual(finalized, 0)
+      strictEqual(finalized, 1)
+      strictEqual(reported, 1)
       strictEqual(res.calls.filter(([name]) => name === 'end').length, 1)
     })
   })
@@ -2541,12 +2546,12 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        httpErrorHandler(ctx: HttpContext | null, err: Error) {
+        httpErrorHandler(_ctx: HttpContext | null, err: Error) {
           safeErrCount++
           lastErr = err
         },
         safeCall(fn: (...args: unknown[]) => unknown, ...args: unknown[]) {
-          return fn(...args)
+          return Promise.resolve(fn(...args))
         }
       }
       const ctx = new HttpContext(null)
@@ -2585,12 +2590,12 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        httpErrorHandler(ctx: HttpContext | null, err: Error) {
+        httpErrorHandler(_ctx: HttpContext | null, err: Error) {
           safeErrCount++
           lastErr = err
         },
         safeCall(fn: (...args: unknown[]) => unknown, ...args: unknown[]) {
-          return fn(...args)
+          return Promise.resolve(fn(...args))
         }
       }
       const ctx = new HttpContext(null)
@@ -2654,7 +2659,7 @@ describe('HttpContext', () => {
           finalizeCount++
         },
         safeCall() {
-          /* noop */
+          return Promise.resolve()
         }
       }
       const ctx = new HttpContext(null)

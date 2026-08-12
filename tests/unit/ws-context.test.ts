@@ -2,7 +2,7 @@
 
 import { describe, test } from 'node:test'
 import { strictEqual, deepStrictEqual, throws } from 'node:assert/strict'
-import BaseWSContext, { type RawWebSocket, type WebSocketData, type WSServer } from '../../src/ws-context.js'
+import BaseWSContext, { type RawWebSocket, type WebSocketData, type WSServer } from '../../src/ws/context.js'
 
 class WSContext extends BaseWSContext {
   constructor() {

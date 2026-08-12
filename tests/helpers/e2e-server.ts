@@ -1,7 +1,7 @@
 import Server from '../../src/index.js'
 import { getFreePort } from '@swarmmachina/benchkit'
 
-import type HttpContext from '../../src/http-context.js'
+import type HttpContext from '../../src/http/context.js'
 import type { HeaderPrefetch, Handler, HttpOptions, Route, WSOptions } from '../../src/server/options.js'
 
 export interface HttpServerOptions {

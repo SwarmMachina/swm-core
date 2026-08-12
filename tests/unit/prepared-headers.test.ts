@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test'
 import { deepStrictEqual, strictEqual, throws } from 'node:assert/strict'
-import HttpContext from '../../src/http-context.js'
-import { prepareHeaders } from '../../src/prepared-headers.js'
+import HttpContext from '../../src/http/context.js'
+import { prepareHeaders } from '../../src/http/headers.js'
 import { createMockReq, createMockRes, isWriteHeaderCall } from '../helpers/mock-http.js'
 
 /**
@@ -13,6 +13,13 @@ function writtenHeaders(res: ReturnType<typeof createMockRes>): Array<[string, s
 }
 
 describe('prepareHeaders()', () => {
+  test('rejects invalid header names before they cross into the native binding', () => {
+    throws(() => prepareHeaders({ 'x-safe\r\nset-cookie': 'value' }), {
+      name: 'TypeError',
+      message: 'Header name must be a valid HTTP token'
+    })
+  })
+
   test('validates values when the reusable block is created', () => {
     throws(() => prepareHeaders({ 'x-name': 'ok\r\nset-cookie: evil=1' }), {
       name: 'TypeError',

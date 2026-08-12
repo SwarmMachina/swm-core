@@ -1,7 +1,7 @@
-export { default } from './server.js'
-export { default as cors } from './cors.js'
-export { default as serveStatic } from './serve-static.js'
-export { prepareHeaders } from './prepared-headers.js'
+export { default } from './server/server.js'
+export { default as cors } from './http/cors.js'
+export { serveStatic } from './static/index.js'
+export { prepareHeaders } from './http/headers.js'
 
 import type { ServerOptions } from './server/options.js'
 

@@ -13,10 +13,10 @@ import {
   resetMockApp,
   setListenCallback
 } from '../helpers/mock-uws-module.js'
-import { STATUS_TEXT } from '../../src/constants.js'
-import type HttpContext from '../../src/http-context.js'
+import { STATUS_TEXT } from '../../src/http/status.js'
+import type HttpContext from '../../src/http/context.js'
 import type { CommonServerOptions, Handler, HttpOptions, Route, WSOptions } from '../../src/server/options.js'
-import type WSContext from '../../src/ws-context.js'
+import type WSContext from '../../src/ws/context.js'
 
 // These unit tests exercise the Server against the uWS mock installed by the
 // loader hook.
@@ -180,7 +180,7 @@ describe('Server', () => {
       const server = makeServer({ http: { routes } })
 
       strictEqual(requireHttp(server).onRequest, null)
-      strictEqual(requireHttp(server).routes, routes)
+      deepStrictEqual(requireHttp(server).routes, routes)
       strictEqual(server.port, 6000)
       strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
       strictEqual(server.ws, null)
@@ -504,6 +504,13 @@ describe('Server', () => {
       })
     })
 
+    test('should reject a fractional port before listen', () => {
+      throws(() => makeServer({ onRequest: () => {}, port: 6000.5 }), {
+        name: 'TypeError',
+        message: 'Http port must be in range 1 - 65535'
+      })
+    })
+
     test('should accept valid port range', () => {
       const server1 = makeServer({ onRequest: () => {}, port: 1 })
 
@@ -666,6 +673,11 @@ describe('Server', () => {
         throws(() => makeServer({ http: null, ws: { maxBackpressure: value } }), TypeError)
       }
 
+      throws(() => makeServer({ http: null, ws: { maxPayloadLength: 0 } }), {
+        name: 'TypeError',
+        message: 'ws.maxPayloadLength must be at least 1 byte'
+      })
+
       throws(
         () => makeServer({ http: null, ws: { maxPayloadLength: 64 * 1024 * 1024 + 1 } }),
         /ws\.maxPayloadLength must be specified in bytes/
@@ -723,18 +735,23 @@ describe('Server', () => {
       strictEqual(server.wsIdleTimeoutSec, 30)
     })
 
-    test('should throw error when ws.idleTimeoutSec is less than 5', () => {
+    test('should validate ws.idleTimeoutSec against the native binding contract', () => {
+      strictEqual(makeServer({ onRequest: () => {}, ws: { idleTimeoutSec: 8 } }).wsIdleTimeoutSec, 8)
+
       throws(
         () =>
           makeServer({
             onRequest: () => {},
-            ws: { idleTimeoutSec: 4 }
+            ws: { idleTimeoutSec: 7 }
           }),
         {
           name: 'TypeError',
-          message: 'ws.idleTimeoutSec must be >= 5'
+          message: 'ws.idleTimeoutSec must be a safe integer in range 8 - 960'
         }
       )
+
+      throws(() => makeServer({ onRequest: () => {}, ws: { idleTimeoutSec: 961 } }), TypeError)
+      throws(() => makeServer({ onRequest: () => {}, ws: { idleTimeoutSec: 8.5 } }), TypeError)
     })
 
     test('should validate ws.upgradeTimeoutMs', () => {
@@ -837,6 +854,7 @@ describe('Server', () => {
       deepStrictEqual(server.bindingCapabilities, {
         beginWrite: true,
         collectBody: true,
+        collectBodyLength: true,
         httpTransportConfig: true,
         requestPause: false,
         requestPrefetch: true,
@@ -918,6 +936,24 @@ describe('Server', () => {
       })
 
       strictEqual(server.socket, null)
+    })
+
+    test('should reject listen without creating a socket when close races startup', async () => {
+      const server = makeServer({ onRequest: () => {} })
+
+      setListenCallback((callback) => {
+        setImmediate(() => callback({ socket: 'late' }))
+      })
+
+      const listening = server.listen()
+
+      server.close()
+
+      await rejects(listening, { name: 'AbortError', message: 'Listen was cancelled' })
+
+      strictEqual(server.app, null)
+      strictEqual(server.socket, null)
+      strictEqual(mockCalls.us_listen_socket_close.length, 0)
     })
 
     test('should register native routes with correct methods', async () => {
@@ -1965,7 +2001,7 @@ describe('Server', () => {
           connectionKey: () => {
             throw boom
           },
-          onError: (ctx, err) => errors.push(err)
+          onError: (_ctx, err) => errors.push(err)
         }
       })
       const ws = createMockWebSocket({ userId: 'u1' })
@@ -2267,6 +2303,23 @@ describe('Server', () => {
       strictEqual(server.app, null)
     })
 
+    test('should wait for an in-flight listen cancellation before shutdown resolves', async () => {
+      const server = makeServer({ onRequest: () => {} })
+
+      setListenCallback((callback) => {
+        setImmediate(() => callback({ socket: 'late' }))
+      })
+
+      const listening = server.listen()
+      const shutdown = server.shutdown(0)
+
+      await rejects(listening, { name: 'AbortError' })
+      await shutdown
+
+      strictEqual(server.app, null)
+      strictEqual(server.socket, null)
+    })
+
     test('should return same promise for concurrent shutdown calls', async () => {
       const server = makeServer({ onRequest: () => {} })
       const promise1 = server.shutdown(0)
@@ -2391,6 +2444,39 @@ describe('Server', () => {
       strictEqual(errorCalled, true)
       strictEqual(errorCtx, null)
       strictEqual(errorErr, error)
+    })
+
+    test('should return 403 and call ws.onError when an upgrade then getter throws', async () => {
+      let errorCalled = 0
+
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          onUpgrade: () => {
+            const result = {}
+
+            Object.defineProperty(result, 'then', {
+              get() {
+                throw new Error('then getter failed')
+              }
+            })
+
+            return result
+          },
+          onError: () => {
+            errorCalled++
+          }
+        }
+      })
+      const res = createMockHttpResponse()
+
+      server.onUpgrade(res, createMockHttpRequest(), {})
+      await Promise.resolve()
+
+      strictEqual(res.getStatus(), STATUS_TEXT[403])
+      strictEqual(res.isEnded(), true)
+      strictEqual(res.isUpgraded(), false)
+      strictEqual(errorCalled, 1)
     })
 
     test('should capture non-header upgrade metadata and synchronously read headers before async detach', async () => {
@@ -2583,7 +2669,7 @@ describe('Server', () => {
         ws: {
           onUpgrade: () => ({}),
           selectProtocol: () => 'admin',
-          onError: (ctx, err) => {
+          onError: (_ctx, err) => {
             receivedError.value = err
           }
         }
@@ -2840,7 +2926,7 @@ describe('Server', () => {
         onRequest: () => {
           throw Object.assign(new Error('bad'), { status: 400 })
         },
-        httpError: (ctx, err) => {
+        httpError: (_ctx, _err) => {
           safeErrCalled++
         }
       })
@@ -2865,6 +2951,127 @@ describe('Server', () => {
       strictEqual(finalizeCalled, 1)
     })
 
+    test('should keep an async http.onError context isolated until the hook settles', async () => {
+      const hook = Promise.withResolvers<void>()
+      const observed: { before?: string; after?: string; header?: string } = {}
+      const server = makeServer({
+        onRequest: () => {},
+        httpError: async (ctx) => {
+          observed.before = ctx.getUrl()
+          observed.header = ctx.getReqHeader('x-request-id')
+          await hook.promise
+          observed.after = ctx.getUrl()
+        }
+      })
+      const requestA = createMockHttpRequest()
+      const responseA = createMockHttpResponse()
+
+      requestA.setUrl('/request-a')
+      requestA.setHeader('x-request-id', 'a')
+      server.handleWithContext(responseA, requestA, () => {
+        throw new Error('request A failed')
+      })
+
+      strictEqual(poolSize(server.httpContextPool), 0)
+
+      const requestB = createMockHttpRequest()
+      const responseB = createMockHttpResponse()
+
+      requestB.setUrl('/request-b')
+      server.handleWithContext(responseB, requestB, () => 'response B')
+
+      hook.resolve()
+      await new Promise((resolve) => setImmediate(resolve))
+
+      deepStrictEqual(observed, { before: '/request-a', after: '/request-a', header: 'a' })
+      strictEqual(responseB.getStatus(), STATUS_TEXT[200])
+      strictEqual(responseEndBody(responseB.calls.find(({ method }) => method === 'end')), 'response B')
+      strictEqual(poolSize(server.httpContextPool), 2)
+    })
+
+    test('should not expose a non-prefetched header to an error hook after an async handler rejects', async () => {
+      const rejectHandler = Promise.withResolvers<void>()
+
+      let header = ''
+
+      const server = makeServer({
+        onRequest: async () => {
+          await rejectHandler.promise
+          throw new Error('async failure')
+        },
+        httpError: (ctx) => {
+          header = ctx.getReqHeader('x-request-id')
+        }
+      })
+      const request = createMockHttpRequest()
+
+      request.setHeader('x-request-id', 'original')
+      server.handleWithContext(createMockHttpResponse(), request, requireHandler(requireHttp(server).onRequest))
+      request.setHeader('x-request-id', 'stale')
+      rejectHandler.resolve()
+
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(header, '')
+    })
+
+    test('should finalize a pending handler after an early response reaches requestTimeoutMs', async () => {
+      const pending = Promise.withResolvers<void>()
+      const server = makeServer({
+        http: {
+          requestTimeoutMs: 100,
+          onRequest: (ctx) => {
+            ctx.sendText('ok')
+
+            return pending.promise
+          }
+        }
+      })
+      const response = createMockHttpResponse()
+
+      server.handleWithContext(response, createMockHttpRequest(), requireHandler(requireHttp(server).onRequest))
+      await new Promise((resolve) => setTimeout(resolve, 150))
+
+      strictEqual(response.getStatus(), STATUS_TEXT[200])
+      strictEqual(responseEndBody(response.calls.find(({ method }) => method === 'end')), 'ok')
+      strictEqual(server.activeHttp, 0)
+
+      pending.resolve()
+      await new Promise((resolve) => setImmediate(resolve))
+    })
+
+    test('should contain a throwing then getter like a handler error', async () => {
+      const error = new Error('then getter failed')
+
+      let reported = 0
+
+      const server = makeServer({
+        onRequest: () => {},
+        httpError: () => {
+          reported++
+        }
+      })
+      const response = createMockHttpResponse()
+      const thenable = {}
+
+      Object.defineProperty(thenable, 'then', {
+        get() {
+          response.triggerAborted()
+
+          throw error
+        }
+      })
+
+      server.handleWithContext(response, createMockHttpRequest(), () => thenable)
+
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(response.isEnded(), false)
+      strictEqual(reported, 1)
+      strictEqual(server.activeHttp, 0)
+      strictEqual(poolSize(server.httpContextPool), 1)
+    })
+
     test('should NOT finalize when ctx.streaming=true after sync throw', async () => {
       let safeErrCalled = 0
       let finalizeCalled = 0
@@ -2874,7 +3081,7 @@ describe('Server', () => {
           ctx.streaming = true
           throw new Error('x')
         },
-        httpError: (ctx, err) => {
+        httpError: (_ctx, _err) => {
           safeErrCalled++
         }
       })
@@ -2929,7 +3136,7 @@ describe('Server', () => {
 
       const server = makeServer({
         onRequest: () => Promise.reject(Object.assign(new Error('no'), { status: 401 })),
-        httpError: (ctx, err) => {
+        httpError: (_ctx, _err) => {
           safeErrCalled++
         }
       })
@@ -2964,7 +3171,7 @@ describe('Server', () => {
               throw new Error('boom')
             }
           }),
-        httpError: (ctx, err) => {
+        httpError: (_ctx, _err) => {
           safeErrCalled++
         }
       })
@@ -3051,7 +3258,7 @@ describe('Server', () => {
           onMessage: () => {
             throw new Error('x')
           },
-          onError: (ctx, err) => {
+          onError: (_ctx, _err) => {
             errorCalled++
           }
         }
@@ -3075,7 +3282,7 @@ describe('Server', () => {
           onMessage: async () => {
             throw new Error('x')
           },
-          onError: (ctx, err) => {
+          onError: (_ctx, _err) => {
             errorCalled++
           }
         }
@@ -3126,7 +3333,7 @@ describe('Server', () => {
           onClose: () => {
             throw new Error('close error')
           },
-          onError: (ctx, err) => {
+          onError: (_ctx, _err) => {
             errorCalled++
           }
         }
@@ -3176,6 +3383,63 @@ describe('Server', () => {
       await new Promise((resolve) => setImmediate(resolve))
 
       strictEqual(ctx.ws, null)
+    })
+
+    test('onClose: should copy the native close reason before an async hook can observe it', async () => {
+      const received: { reason?: ArrayBuffer } = {}
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          onClose: async (_ctx, _code, reason) => {
+            await Promise.resolve()
+            received.reason = reason
+          }
+        }
+      })
+      const ws = createMockWebSocket()
+      const nativeReason = new TextEncoder().encode('audit-reason').buffer
+
+      server.onOpen(ws)
+      server.onClose(ws, 4000, nativeReason)
+
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(received.reason === nativeReason, false)
+      strictEqual(new TextDecoder().decode(received.reason), 'audit-reason')
+    })
+
+    test('onClose: should clean up when a then getter throws', async () => {
+      let errors = 0
+
+      const server = makeServer({
+        onRequest: () => {},
+        ws: {
+          onClose: () => {
+            const result = {}
+
+            Object.defineProperty(result, 'then', {
+              get() {
+                throw new Error('then getter failed')
+              }
+            })
+
+            return result
+          },
+          onError: () => {
+            errors++
+          }
+        }
+      })
+      const ws = createMockWebSocket()
+
+      server.onOpen(ws)
+      const ctx = server.getWsContext(ws)
+
+      server.onClose(ws, 1000, new ArrayBuffer(0))
+      await Promise.resolve()
+
+      strictEqual(ctx.ws, null)
+      strictEqual(errors, 1)
     })
 
     test('shutdown should close app only after activeWs becomes 0 (finishShutdownIfNeed)', async () => {

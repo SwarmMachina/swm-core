@@ -203,7 +203,12 @@ void effectiveHttp
 void effectiveWs
 void app
 void cors
-void serveStatic
+void serveStatic('./public', {
+  cacheByteLimit: 64 * 1024 * 1024,
+  maxFileSize: 16 * 1024 * 1024,
+  maxInflightBytes: 64 * 1024 * 1024,
+  maxInflightFiles: 32
+})
 void prepareHeaders
 void defineConfig
 void uWS

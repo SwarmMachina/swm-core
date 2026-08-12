@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "regression-ci-baseline/v1",
+  "suite": "ws",
+  "benchmark": {
+    "name": "ws-core-ci",
+    "packageName": "@swarmmachina/swm-core",
+    "packageVersion": "4.1.0",
+    "runner": "benchmark/regression/ci.js",
+    "script": "pnpm profile:ci --suite ws",
+    "framework": "core"
+  },
+  "calibration": {
+    "status": "self-hosted-calibrated",
+    "updatedAt": "2026-07-25",
+    "node": "24.16.0",
+    "benchkit": "0.2.0",
+    "swmUws": "0.5.6",
+    "ciRunner": "self-hosted (Ubuntu 24.04, Intel Xeon E5-2680 v4, dedicated, schedutil)",
+    "note": "Calibrated from 4 self-hosted benchkit series. errors is the primary signal; the msgPerSec floor is 12.5% below the slowest series median. rssMB is report-only."
+  },
+  "parameters": {
+    "runs": 3,
+    "warmupSec": 2,
+    "durationSec": 6,
+    "connections": 50,
+    "msgSize": 64,
+    "sampleMs": 250,
+    "cpuProfile": true
+  },
+  "metrics": {
+    "msgPerSec": { "label": "messages", "unit": "msg/s" },
+    "latencyP99Ms": { "label": "p99 round-trip", "unit": "ms" },
+    "errors": { "label": "errors", "unit": "" },
+    "heapMB": { "label": "heap peak", "unit": "MB" },
+    "externalMB": { "label": "external peak", "unit": "MB" },
+    "arrayBuffersMB": { "label": "arrayBuffers peak", "unit": "MB" },
+    "rssMB": { "label": "rss peak", "unit": "MB" }
+  },
+  "tests": {
+    "echo": {
+      "description": "WebSocket echo round-trip (ping-pong)",
+      "observedMedian": {
+        "msgPerSec": 41783.5,
+        "latencyAvgMs": 1.19,
+        "latencyP97_5Ms": 1.29,
+        "latencyP99Ms": 1.93,
+        "errors": 0,
+        "eluPct": 63.63,
+        "eventLoopDelayP99Ms": 20.05,
+        "rssMB": 63.91,
+        "heapMB": 8.77,
+        "externalMB": 2.01,
+        "arrayBuffersMB": 0.03
+      },
+      "guards": {
+        "errors": { "max": 0 },
+        "msgPerSec": { "min": 36000 },
+        "heapMB": { "max": 14 },
+        "externalMB": { "max": 5 },
+        "arrayBuffersMB": { "max": 2 }
+      },
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "latencyP99Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    }
+  },
+  "cpuProfileGuard": {
+    "profileRequired": true,
+    "minTotalTicks": 100,
+    "maxGcPct": 5,
+    "maxUnaccountedPct": 20,
+    "note": "Sanity check only. Across 12 profiles, unaccounted was 9.9-15% and GC was 0.1-0.2%."
+  }
+}

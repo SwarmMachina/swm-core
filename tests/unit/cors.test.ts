@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import cors from '../../src/cors.js'
+import cors from '../../src/http/cors.js'
 
 test('cors: throws when credentials are combined with wildcard origin', () => {
   assert.throws(() => cors({ credentials: true }), TypeError)

@@ -1,13 +1,8 @@
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
-const autobahnSource = path.join(root, 'tests', 'autobahn', 'fuzzingclient.json')
-const autobahnTarget = path.join(root, '.test-dist', 'tests', 'autobahn', 'fuzzingclient.json')
 const testManifest = path.join(root, '.test-dist', 'package.json')
-
-mkdirSync(path.dirname(autobahnTarget), { recursive: true })
-cpSync(autobahnSource, autobahnTarget)
 
 // Keep test-only binding injection inside the disposable compiled test scope.
 // Published package metadata never points at .test-dist.

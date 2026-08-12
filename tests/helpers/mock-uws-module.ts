@@ -45,6 +45,7 @@ export function capabilities() {
   return {
     beginWrite: true,
     collectBody: true,
+    collectBodyLength: true,
     httpTransportConfig: true,
     requestPause: true,
     requestPrefetch: true,

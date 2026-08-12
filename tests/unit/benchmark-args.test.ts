@@ -5,7 +5,7 @@ import {
   assertNonNegativeFinite,
   assertPositiveFinite,
   assertPositiveSafeInteger
-} from '../../benchmark/helpers/bench-args.js'
+} from '../../benchmark/harness/args.js'
 
 test('benchmark argument guards accept valid values', () => {
   assertNonEmpty(['core'], '--fw')

@@ -1,4 +1,4 @@
-import { WS_CONTEXT_DATA } from '../../src/server/ws-upgrade.js'
+import { WS_CONTEXT_DATA } from '../../src/ws/upgrade.js'
 
 import type { HttpRequest, HttpResponse, WebSocket } from '@swarmmachina/swm-uws'
 
