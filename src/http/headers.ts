@@ -14,18 +14,26 @@ interface PreparedHeaderData {
 
 const PREPARED_HEADERS = new WeakMap<object, PreparedHeaderData>()
 
+/** Throws when a response-header value contains a line break. */
 export function assertHeaderValue(value: string): void {
   if (INVALID_HEADER_VALUE.test(value)) {
     throw new TypeError('Header value must not contain CR or LF')
   }
 }
 
+/** Throws when a response-header name is not a valid HTTP token. */
 export function assertHeaderName(value: string): void {
   if (!HEADER_NAME.test(value)) {
     throw new TypeError('Header name must be a valid HTTP token')
   }
 }
 
+/**
+ * Validates and compiles an immutable response-header block for reuse.
+ * @param headers Response headers to validate and normalize.
+ * @returns An opaque prepared-header block.
+ * @throws {TypeError} If a header name or value is invalid.
+ */
 export function prepareHeaders(headers: unknown): object {
   if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
     throw new TypeError('Headers must be an object')
@@ -92,6 +100,7 @@ export function prepareHeaders(headers: unknown): object {
   return prepared
 }
 
+/** Returns compiled header data for a value created by {@link prepareHeaders}. */
 export function getPreparedHeaders(value: unknown): PreparedHeaderData | undefined {
   return value && typeof value === 'object' ? PREPARED_HEADERS.get(value) : undefined
 }

@@ -6,6 +6,46 @@ export type HeaderPrefetch = false | 'all' | readonly string[]
 export type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'del' | 'patch' | 'options' | 'head' | 'any'
 export type Handler = (ctx: HttpContext) => unknown | Promise<unknown>
 
+export interface HttpErrorEvent {
+  readonly timestamp: number
+  readonly method: string
+  readonly url: string
+  readonly status: number
+  readonly headers: Readonly<Record<string, string>>
+  readonly query: Readonly<Record<string, string>>
+  readonly ip?: string
+}
+
+export interface HttpErrorDeliveryContext {
+  readonly signal: AbortSignal
+}
+
+export interface HttpErrorDeliveryStats {
+  readonly inFlight: number
+  readonly queued: number
+  readonly completed: number
+  readonly timedOut: number
+  readonly aborted: number
+  readonly rejected: number
+  readonly dropped: number
+  readonly oldestInFlightMs: number | null
+}
+
+export interface HttpErrorDeliveryOptions {
+  concurrency?: number
+  queueLimit?: number
+  timeoutMs?: number
+  headers?: readonly string[]
+  query?: readonly string[]
+  includeIp?: boolean
+}
+
+export type HttpErrorHandler = (
+  event: HttpErrorEvent,
+  error: Error,
+  context: HttpErrorDeliveryContext
+) => unknown | Promise<unknown>
+
 export interface HttpTransportOptions {
   maxHeaderSize?: number
   maxHeaderCount?: number
@@ -32,7 +72,8 @@ export interface HttpBaseOptions {
   maxBodySize?: number
   maxBodyBudget?: number | null
   requestTimeoutMs?: number
-  onError?: (ctx: HttpContext, error: Error) => unknown | Promise<unknown>
+  onError?: HttpErrorHandler
+  errorDelivery?: HttpErrorDeliveryOptions
 }
 
 export type HttpOptions = HttpBaseOptions &
@@ -84,12 +125,22 @@ export type ServerOptions = CommonServerOptions &
 export interface NormalizedHttpOptions {
   onRequest: Handler | null
   routes: NormalizedRoute[] | null
-  onError: (ctx: HttpContext, error: Error) => unknown | Promise<unknown>
+  onError: HttpErrorHandler | null
+  errorDelivery: NormalizedHttpErrorDeliveryOptions | null
   maxBodySize: number
   maxBodyBudget: number | null
   requestTimeoutMs: number
   prefetch: boolean
   prefetchHeaders: HeaderPrefetch
+}
+
+export interface NormalizedHttpErrorDeliveryOptions {
+  concurrency: number
+  queueLimit: number
+  timeoutMs: number
+  headers: readonly string[]
+  query: readonly string[]
+  includeIp: boolean
 }
 
 type NormalizedRoute = Route
@@ -147,7 +198,16 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_WS_UPGRADE_TIMEOUT_MS = 10_000
 const MAX_HTTP_HEADER_COUNT = 100
 const MAX_UWS_TIMEOUT_MS = 300_000
+const DEFAULT_HTTP_ERROR_DELIVERY_CONCURRENCY = 4
+const DEFAULT_HTTP_ERROR_DELIVERY_QUEUE_LIMIT = 256
+const DEFAULT_HTTP_ERROR_DELIVERY_TIMEOUT_MS = 5_000
+const MAX_HTTP_ERROR_DELIVERY_CONCURRENCY = 1_024
+const MAX_HTTP_ERROR_DELIVERY_QUEUE_LIMIT = 65_536
+const MAX_HTTP_ERROR_DELIVERY_HEADERS = 100
+const MAX_HTTP_ERROR_DELIVERY_QUERY_NAMES = 100
+const MAX_HTTP_ERROR_DELIVERY_QUERY_NAME_LENGTH = 256
 const HTTP_HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+const HTTP_ERROR_DELIVERY_FIELDS = new Set(['concurrency', 'queueLimit', 'timeoutMs', 'headers', 'query', 'includeIp'])
 const HTTP_TRANSPORT_FIELDS = new Set([
   'maxHeaderSize',
   'maxHeaderCount',
@@ -275,6 +335,132 @@ export function normalizePrefetchHeaders(value: unknown, name = 'http.prefetchHe
   }
 
   return names.length === 0 ? false : Object.freeze(names)
+}
+
+/** Normalize a case-sensitive query-parameter allowlist for error events. */
+function normalizeHttpErrorQuery(value: unknown): readonly string[] {
+  if (value === undefined) {
+    return Object.freeze([])
+  }
+
+  if (!Array.isArray(value)) {
+    throw new TypeError('http.errorDelivery.query must be an array of query parameter names')
+  }
+
+  const names: string[] = []
+  const seen = new Set<string>()
+
+  for (let i = 0; i < value.length; i++) {
+    const name = value[i]
+
+    if (typeof name !== 'string' || name.length === 0 || name.length > MAX_HTTP_ERROR_DELIVERY_QUERY_NAME_LENGTH) {
+      throw new TypeError(
+        `http.errorDelivery.query[${i}] must be a non-empty string no longer than ${MAX_HTTP_ERROR_DELIVERY_QUERY_NAME_LENGTH} characters`
+      )
+    }
+
+    if (!seen.has(name)) {
+      seen.add(name)
+      names.push(name)
+    }
+  }
+
+  if (names.length > MAX_HTTP_ERROR_DELIVERY_QUERY_NAMES) {
+    throw new TypeError(
+      `http.errorDelivery.query cannot contain more than ${MAX_HTTP_ERROR_DELIVERY_QUERY_NAMES} names`
+    )
+  }
+
+  return Object.freeze(names)
+}
+
+/**
+ * Normalize bounded asynchronous observability delivery. Header capture is an
+ * explicit allowlist; request bodies are never part of an error event.
+ */
+function normalizeHttpErrorDelivery(value: unknown): Readonly<NormalizedHttpErrorDeliveryOptions> {
+  if (value === undefined) {
+    return Object.freeze({
+      concurrency: DEFAULT_HTTP_ERROR_DELIVERY_CONCURRENCY,
+      queueLimit: DEFAULT_HTTP_ERROR_DELIVERY_QUEUE_LIMIT,
+      timeoutMs: DEFAULT_HTTP_ERROR_DELIVERY_TIMEOUT_MS,
+      headers: Object.freeze([]),
+      query: Object.freeze([]),
+      includeIp: false
+    })
+  }
+
+  assertOptionsObject(value, 'http.errorDelivery')
+
+  for (const name of Object.keys(value)) {
+    if (!HTTP_ERROR_DELIVERY_FIELDS.has(name)) {
+      throw new TypeError(`Unknown http.errorDelivery option: ${name}`)
+    }
+  }
+
+  const concurrency = value.concurrency ?? DEFAULT_HTTP_ERROR_DELIVERY_CONCURRENCY
+  const queueLimit = value.queueLimit ?? DEFAULT_HTTP_ERROR_DELIVERY_QUEUE_LIMIT
+  const timeoutMs = value.timeoutMs ?? DEFAULT_HTTP_ERROR_DELIVERY_TIMEOUT_MS
+  const query = normalizeHttpErrorQuery(value.query)
+  const includeIp = value.includeIp ?? false
+
+  if (
+    typeof concurrency !== 'number' ||
+    !Number.isSafeInteger(concurrency) ||
+    concurrency <= 0 ||
+    concurrency > MAX_HTTP_ERROR_DELIVERY_CONCURRENCY
+  ) {
+    throw new TypeError(
+      `http.errorDelivery.concurrency must be a positive safe integer no greater than ${MAX_HTTP_ERROR_DELIVERY_CONCURRENCY}`
+    )
+  }
+
+  if (
+    typeof queueLimit !== 'number' ||
+    !Number.isSafeInteger(queueLimit) ||
+    queueLimit < 0 ||
+    queueLimit > MAX_HTTP_ERROR_DELIVERY_QUEUE_LIMIT
+  ) {
+    throw new TypeError(
+      `http.errorDelivery.queueLimit must be a non-negative safe integer no greater than ${MAX_HTTP_ERROR_DELIVERY_QUEUE_LIMIT}`
+    )
+  }
+
+  if (
+    typeof timeoutMs !== 'number' ||
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 100 ||
+    timeoutMs > MAX_UWS_TIMEOUT_MS
+  ) {
+    throw new TypeError('http.errorDelivery.timeoutMs must be a safe integer in range 100 - 300000')
+  }
+
+  if (typeof includeIp !== 'boolean') {
+    throw new TypeError('http.errorDelivery.includeIp must be a boolean')
+  }
+
+  if (value.headers !== undefined && !Array.isArray(value.headers)) {
+    throw new TypeError('http.errorDelivery.headers must be an array of header names')
+  }
+
+  const headers = normalizePrefetchHeaders(value.headers, 'http.errorDelivery.headers')
+
+  if (headers === 'all') {
+    throw new TypeError('http.errorDelivery.headers must be an array of header names')
+  }
+
+  if (Array.isArray(headers) && headers.length > MAX_HTTP_ERROR_DELIVERY_HEADERS) {
+    throw new TypeError(`http.errorDelivery.headers cannot contain more than ${MAX_HTTP_ERROR_DELIVERY_HEADERS} names`)
+  }
+
+  return Object.freeze({
+    concurrency,
+    queueLimit,
+    timeoutMs,
+    headers: headers === false ? Object.freeze([]) : headers,
+    query,
+    includeIp
+  })
 }
 
 /**
@@ -429,7 +615,8 @@ function normalizePrefetch(value: unknown): boolean {
  * @returns {
  *  {
  *    onRequest: ((ctx: HttpCtx) => unknown|Promise<unknown>)|null,
- *    routes: Route[]|null, onError: (ctx: HttpCtx, err: Error) => unknown|Promise<unknown>,
+ *    routes: Route[]|null, onError: HttpErrorHandler|null,
+ *    errorDelivery: NormalizedHttpErrorDeliveryOptions|null,
  *    maxBodySize: number, maxBodyBudget: number|null, requestTimeoutMs: number, prefetch: boolean,
  *    prefetchHeaders: false|'all'|readonly string[]
  *  }|null}
@@ -441,6 +628,10 @@ export function normalizeHttpOptions(http: unknown): NormalizedHttpOptions | nul
 
   assertOptionsObject(http, 'http')
   validateCallbacks(http, HTTP_CALLBACK_NAMES, 'http')
+
+  if (http.errorDelivery !== undefined && http.onError === undefined) {
+    throw new TypeError('http.errorDelivery requires http.onError')
+  }
 
   if (http.onRequest !== undefined && http.routes !== undefined) {
     throw new TypeError('Cannot use both "http.onRequest" and "http.routes" options. Choose one.')
@@ -465,10 +656,13 @@ export function normalizeHttpOptions(http: unknown): NormalizedHttpOptions | nul
     }
   }
 
+  const onError = (http.onError as HttpErrorHandler | undefined) ?? null
+
   return {
     onRequest: (http.onRequest as Handler | undefined) ?? null,
     routes,
-    onError: (http.onError as ((ctx: HttpContext, error: Error) => unknown | Promise<unknown>) | undefined) ?? NOOP,
+    onError,
+    errorDelivery: onError ? normalizeHttpErrorDelivery(http.errorDelivery) : null,
     prefetch,
     prefetchHeaders: normalizePrefetchHeaders(http.prefetchHeaders),
     maxBodySize,

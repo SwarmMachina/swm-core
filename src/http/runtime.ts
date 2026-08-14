@@ -1,6 +1,6 @@
 import HttpContext from './context.js'
 import ContextPool from './context-pool.js'
-import { compileHeaderPrefetchPlan } from './prefetch.js'
+import { compileHeaderPrefetchPlan, mergeHeaderPrefetch } from './prefetch.js'
 import { STATUS_TEXT } from './status.js'
 import { isPromise } from '../internal/promise.js'
 
@@ -41,7 +41,6 @@ interface HttpRuntimeServer {
     resize(bytes: number, owner: object): boolean
     release(owner: object): void
   } | null
-  readonly httpErrorHandler: unknown
   readonly httpMaxBodyBytes: number
   readonly httpRequestTimeoutMs: number
   readonly requestPrefetchPlanClass:
@@ -156,7 +155,7 @@ export default class HttpRuntime {
    * @param {HttpContext} ctx
    */
   finalizeHttpContext = (ctx: HttpContext): void => {
-    if (ctx.asyncPending || ctx.errorHookPending !== 0) {
+    if (ctx.asyncPending) {
       ctx.releasePending = true
     } else {
       ctx.release()
@@ -169,12 +168,12 @@ export default class HttpRuntime {
     }
   }
 
-  #handleHandlerError(ctx: HttpContext, err: unknown, paramNames?: string[]): void {
+  #handleHandlerError(ctx: HttpContext, err: unknown): void {
     if (!ctx.replied) {
       ctx.sendError(err as Error)
     }
 
-    ctx.reportError(err, paramNames)
+    ctx.reportError(err)
     ctx.handlerPending = false
 
     if (ctx.abortPending) {
@@ -229,13 +228,13 @@ export default class HttpRuntime {
     let result: unknown
 
     try {
-      if (headerSelection !== false) {
+      if (headerSelection !== false || headerPlan !== null) {
         ctx.attachPrefetchedHeaders(headerSelection, headerPlan)
       }
 
       result = handler(ctx)
     } catch (err) {
-      this.#handleHandlerError(ctx, err, paramNames)
+      this.#handleHandlerError(ctx, err)
 
       return
     }
@@ -245,7 +244,7 @@ export default class HttpRuntime {
     try {
       asyncPending = isPromise(result)
     } catch (err) {
-      this.#handleHandlerError(ctx, err, paramNames)
+      this.#handleHandlerError(ctx, err)
 
       return
     }
@@ -285,7 +284,7 @@ export default class HttpRuntime {
           ctx.sendError(err as Error)
         }
 
-        ctx.reportError(err, paramNames)
+        ctx.reportError(err)
       }
     }
 
@@ -300,6 +299,7 @@ export default class HttpRuntime {
   register(app: HttpApp): void {
     const server = this.#server
     const handleWithContext = this.handleWithContext
+    const errorHeaders = server.http?.errorDelivery?.headers ?? []
 
     if (server.http?.routes) {
       for (const route of server.http.routes) {
@@ -310,8 +310,9 @@ export default class HttpRuntime {
         const routeHandler = shouldPrefetch ? withBodyPrefetch(composedHandler) : composedHandler
         const paramNames = path.match(/:[^/]+/g)?.map((name) => name.slice(1)) ?? []
         const headerSelection = route.prefetchHeaders ?? server.http.prefetchHeaders
+        const retainedHeaderSelection = mergeHeaderPrefetch(headerSelection, errorHeaders)
         const headerPlan = compileHeaderPrefetchPlan(
-          headerSelection,
+          retainedHeaderSelection,
           server.requestPrefetchPlanClass
         ) as RequestPrefetchPlan | null
         const maxBodySize = route.maxBodySize ?? server.httpMaxBodyBytes
@@ -331,8 +332,9 @@ export default class HttpRuntime {
     if (server.http?.onRequest) {
       const onRequest = server.http.prefetch ? withBodyPrefetch(server.http.onRequest) : server.http.onRequest
       const headerSelection = server.http.prefetchHeaders
+      const retainedHeaderSelection = mergeHeaderPrefetch(headerSelection, errorHeaders)
       const headerPlan = compileHeaderPrefetchPlan(
-        headerSelection,
+        retainedHeaderSelection,
         server.requestPrefetchPlanClass
       ) as RequestPrefetchPlan | null
 

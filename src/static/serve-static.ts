@@ -32,6 +32,12 @@ function assertByteLimit(name: string, value: number): void {
   }
 }
 
+/**
+ * Creates an HTTP handler that serves files confined below a canonical root.
+ * @param root Static root directory.
+ * @param options Cache, file-size, and in-flight admission limits.
+ * @returns An asynchronous static-file handler.
+ */
 export default function serveStatic(
   root: string,
   options: ServeStaticOptions = {}

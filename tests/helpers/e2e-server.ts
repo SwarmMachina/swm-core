@@ -1,8 +1,15 @@
 import Server from '../../src/index.js'
 import { getFreePort } from '@swarmmachina/benchkit'
 
-import type HttpContext from '../../src/http/context.js'
-import type { HeaderPrefetch, Handler, HttpOptions, Route, WSOptions } from '../../src/server/options.js'
+import type {
+  HeaderPrefetch,
+  Handler,
+  HttpErrorDeliveryOptions,
+  HttpErrorHandler,
+  HttpOptions,
+  Route,
+  WSOptions
+} from '../../src/server/options.js'
 
 export interface HttpServerOptions {
   onRequest?: Handler
@@ -12,7 +19,8 @@ export interface HttpServerOptions {
   requestTimeoutMs?: number
   prefetch?: boolean
   prefetchHeaders?: HeaderPrefetch
-  onError?: (context: HttpContext, error: Error) => unknown | Promise<unknown>
+  errorDelivery?: HttpErrorDeliveryOptions
+  onError?: HttpErrorHandler
 }
 
 export interface HttpServerHandle {
@@ -30,6 +38,7 @@ export async function startHttpServer({
   requestTimeoutMs,
   prefetch,
   prefetchHeaders,
+  errorDelivery,
   onError
 }: HttpServerOptions): Promise<HttpServerHandle> {
   const port = await getFreePort()
@@ -39,6 +48,7 @@ export async function startHttpServer({
     ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
     ...(prefetch !== undefined ? { prefetch } : {}),
     ...(prefetchHeaders !== undefined ? { prefetchHeaders } : {}),
+    ...(errorDelivery !== undefined ? { errorDelivery } : {}),
     ...(onError !== undefined ? { onError } : {})
   }
   const http: HttpOptions =

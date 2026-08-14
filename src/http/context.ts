@@ -34,9 +34,8 @@ interface HttpContextServer {
     resize(bytes: number, owner: object): boolean
     release(owner: object): void
   } | null
-  readonly httpErrorHandler: unknown
   finalizeHttpContext(context: HttpContext): void
-  safeCall(handler: unknown, ...args: unknown[]): Promise<void>
+  reportHttpError(context: HttpContext, error: unknown): void
 }
 
 /**
@@ -86,7 +85,6 @@ export default class HttpContext {
   declare abortPending: boolean
   declare asyncPending: boolean
   declare releasePending: boolean
-  declare errorHookPending: number
   declare onWritableCallback: ((offset: number) => void) | null
 
   body(maxSize?: number): Promise<Buffer> {
@@ -244,7 +242,6 @@ export default class HttpContext {
     this.abortPending = false
     this.asyncPending = false
     this.releasePending = false
-    this.errorHookPending = 0
     this.onWritableCallback = null
   }
 
@@ -301,9 +298,8 @@ export default class HttpContext {
       ? {
           bindingCapabilities: {},
           httpBodyBudget: null,
-          httpErrorHandler: null,
           finalizeHttpContext: testFinalize,
-          safeCall: async () => {}
+          reportHttpError: () => {}
         }
       : (serverInput as HttpContextServer | null)
 
@@ -317,7 +313,6 @@ export default class HttpContext {
     this.abortPending = false
     this.asyncPending = false
     this.releasePending = false
-    this.errorHookPending = 0
     this.onWritableCallback = null
 
     this.#bodyParser.reset(this, maxSize)
@@ -345,7 +340,6 @@ export default class HttpContext {
     this.abortPending = false
     this.asyncPending = false
     this.releasePending = false
-    this.errorHookPending = 0
     this.onWritableCallback = null
 
     this.#responseBatch = false
@@ -390,35 +384,17 @@ export default class HttpContext {
     }
   }
 
-  /**
-   * Keep an error hook's context isolated until it settles. Error hooks are
-   * observability callbacks, but they may be async and may inspect request
-   * metadata after the response has been finalized.
-   * @param {unknown} error
-   */
-  reportError(error: unknown, paramNames?: string[]): void {
-    const server = this.server
-
-    if (!server) {
-      return
-    }
-
-    this.cacheHeaders()
-    this.cacheRequest(paramNames)
-    this.errorHookPending++
-
-    void server.safeCall(server.httpErrorHandler, this, error).finally(() => {
-      this.errorHookPending--
-      this.maybeRelease()
-    })
+  /** Submit stable metadata to observability without retaining this context. */
+  reportError(error: unknown): void {
+    this.server?.reportHttpError(this, error)
   }
 
   /**
-   * Release only after both the handler and all async error hooks have
-   * settled. This must be checked after each independent lifecycle branch.
+   * Release after a late asynchronous handler branch settles. Error delivery
+   * owns an immutable event and never participates in request lifecycle.
    */
   maybeRelease(): void {
-    if (!this.releasePending || this.asyncPending || this.errorHookPending !== 0) {
+    if (!this.releasePending || this.asyncPending) {
       return
     }
 
@@ -597,6 +573,44 @@ export default class HttpContext {
     this.#ipCached = true
 
     return this.#ip
+  }
+
+  /** Read an internally retained observability header without widening ctx access. */
+  readErrorHeader(name: string): string | undefined {
+    const headerName = name.toLowerCase()
+    const cached = this.#headers?.[headerName]
+
+    if (cached !== undefined) {
+      return cached === MISSING_HEADER ? undefined : cached
+    }
+
+    const prefetched = this.#prefetchedHeaders?.getHeader?.(headerName)
+
+    if (prefetched !== undefined) {
+      return prefetched
+    }
+
+    if (this.#requestDetached || !this.req) {
+      return undefined
+    }
+
+    return this.req.getHeader(headerName)
+  }
+
+  /** Read one allowlisted observability query parameter from stable request metadata. */
+  readErrorQuery(name: string): string | undefined {
+    return this.#getQueryParameter(name)
+  }
+
+  /** Numeric status selected for the framework-controlled error response. */
+  resolveErrorStatus(error: Error): number {
+    const errorStatus = (error as Error & { status?: unknown }).status
+
+    if (Number.isFinite(this.#statusOverride)) {
+      return this.#statusOverride!
+    }
+
+    return Number.isFinite(errorStatus) ? (errorStatus as number) : 500
   }
 
   getMethod(): string {

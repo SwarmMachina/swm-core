@@ -82,3 +82,68 @@ test('shutdown: finalizes context after async handler replies itself (no leak)',
 
   assert.ok(elapsed < 500, `graceful shutdown took ${elapsed}ms (context leaked)`)
 })
+
+test('shutdown: drains accepted HTTP error delivery before resolving', async () => {
+  const delivery = Promise.withResolvers<void>()
+  const server = await startHttpServer({
+    onRequest: () => {
+      throw new Error('delivery probe')
+    },
+    errorDelivery: { timeoutMs: 5_000 },
+    onError: () => delivery.promise
+  })
+  const response = await reqText(`${server.baseUrl}/failed`)
+
+  assert.strictEqual(response.status, 500)
+  assert.strictEqual(server.server.httpErrorDeliveryStats.inFlight, 1)
+
+  let resolved = false
+
+  const shutdown = server.server.shutdown(1_000).then(() => {
+    resolved = true
+  })
+
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.strictEqual(resolved, false)
+
+  delivery.resolve()
+  await shutdown
+
+  assert.strictEqual(server.server.httpErrorDeliveryStats.inFlight, 0)
+  assert.strictEqual(server.server.httpErrorDeliveryStats.completed, 1)
+})
+
+test('shutdown: aborts HTTP error delivery at the shared deadline', async () => {
+  let deliverySignal: AbortSignal | null = null
+
+  const server = await startHttpServer({
+    onRequest: () => {
+      throw new Error('delivery probe')
+    },
+    errorDelivery: { timeoutMs: 5_000 },
+    onError: (_event, _error, { signal }) => {
+      deliverySignal = signal
+
+      return new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+    }
+  })
+  const response = await reqText(`${server.baseUrl}/failed`)
+
+  assert.strictEqual(response.status, 500)
+
+  const startedAt = Date.now()
+
+  await server.server.shutdown(20)
+  await Promise.resolve()
+
+  const elapsed = Date.now() - startedAt
+
+  assert.strictEqual((deliverySignal as AbortSignal | null)?.aborted, true)
+  assert.strictEqual((deliverySignal as AbortSignal | null)?.reason?.code, 'ERR_HTTP_ERROR_DELIVERY_SHUTDOWN')
+  assert.ok(elapsed < 500, `forced shutdown took ${elapsed}ms`)
+  assert.strictEqual(server.server.httpErrorDeliveryStats.inFlight, 0)
+  assert.strictEqual(server.server.httpErrorDeliveryStats.timedOut, 0)
+  assert.strictEqual(server.server.httpErrorDeliveryStats.aborted, 1)
+  assert.strictEqual(server.server.httpErrorDeliveryStats.completed, 0)
+  assert.strictEqual(server.server.httpErrorDeliveryStats.rejected, 0)
+})

@@ -85,6 +85,7 @@ const READABLE_SURFACE = {
     'activeHttp',
     'activeWs',
     'connectionCount',
+    'httpErrorDeliveryStats',
     'getConnection',
     'getSubscribersCount',
     'hasConnection',
@@ -106,7 +107,15 @@ const CORE_READ_METHODS = {
     'headers'
   ],
   WSContext: ['decode'],
-  Server: ['activeHttp', 'activeWs', 'connectionCount', 'getConnection', 'getSubscribersCount', 'hasConnection']
+  Server: [
+    'activeHttp',
+    'activeWs',
+    'connectionCount',
+    'httpErrorDeliveryStats',
+    'getConnection',
+    'getSubscribersCount',
+    'hasConnection'
+  ]
 }
 // Pinned uwebsockets.js v20.69.0 exposes these getters but returns the
 // absence values after a custom upgrade. swm-uws preserves the peer address.
@@ -480,6 +489,7 @@ test(
       'activeHttp',
       'activeWs',
       'connectionCount',
+      'httpErrorDeliveryStats',
       'getConnection',
       'getSubscribersCount',
       'hasConnection',
@@ -492,6 +502,16 @@ test(
     assert.equal(server.activeHttp, 0)
     assert.equal(server.activeWs, 0)
     assert.equal(server.connectionCount, 0)
+    assert.deepEqual(server.httpErrorDeliveryStats, {
+      inFlight: 0,
+      queued: 0,
+      completed: 0,
+      timedOut: 0,
+      aborted: 0,
+      rejected: 0,
+      dropped: 0,
+      oldestInFlightMs: null
+    })
     assert.equal(server.getSubscribersCount('contract'), 0)
     assert.equal(server.hasConnection('contract-client'), false)
     assert.equal(server.getConnection('contract-client'), undefined)

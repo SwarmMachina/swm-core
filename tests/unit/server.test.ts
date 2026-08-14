@@ -14,8 +14,15 @@ import {
   setListenCallback
 } from '../helpers/mock-uws-module.js'
 import { STATUS_TEXT } from '../../src/http/status.js'
-import type HttpContext from '../../src/http/context.js'
-import type { CommonServerOptions, Handler, HttpOptions, Route, WSOptions } from '../../src/server/options.js'
+import type {
+  CommonServerOptions,
+  Handler,
+  HttpErrorEvent,
+  HttpErrorHandler,
+  HttpOptions,
+  Route,
+  WSOptions
+} from '../../src/server/options.js'
 import type WSContext from '../../src/ws/context.js'
 
 // These unit tests exercise the Server against the uWS mock installed by the
@@ -25,7 +32,7 @@ type TestWsOptions = Omit<WSOptions, 'onUpgrade'> & { onUpgrade?: WSOptions['onU
 type TestServerOptions = CommonServerOptions & {
   onRequest?: Handler
   routes?: Route[]
-  httpError?: (context: HttpContext, error: Error) => unknown | Promise<unknown>
+  httpError?: HttpErrorHandler
   http?: HttpOptions | null
   ws?: TestWsOptions | null
 } & Record<string, unknown>
@@ -239,6 +246,84 @@ describe('Server', () => {
       })
     })
 
+    test('should normalize bounded HTTP error delivery', () => {
+      const server = makeServer({
+        http: {
+          onRequest: () => {},
+          onError: () => {},
+          errorDelivery: {
+            concurrency: 8,
+            queueLimit: 512,
+            timeoutMs: 10_000,
+            headers: ['X-Request-ID', 'traceparent', 'x-request-id'],
+            query: ['requestId', 'Operation', 'requestId'],
+            includeIp: true
+          }
+        }
+      })
+
+      deepStrictEqual(requireHttp(server).errorDelivery, {
+        concurrency: 8,
+        queueLimit: 512,
+        timeoutMs: 10_000,
+        headers: ['x-request-id', 'traceparent'],
+        query: ['requestId', 'Operation'],
+        includeIp: true
+      })
+      strictEqual(Object.isFrozen(requireHttp(server).errorDelivery), true)
+      strictEqual(requireEffectiveHttp(server).errorDelivery, requireHttp(server).errorDelivery)
+    })
+
+    test('should reject unsafe HTTP error-delivery configuration', () => {
+      throws(() => makeServer({ http: { onRequest: () => {}, errorDelivery: {} } }), {
+        name: 'TypeError',
+        message: 'http.errorDelivery requires http.onError'
+      })
+      throws(
+        () => makeServer({ http: { onRequest: () => {}, onError: () => {}, errorDelivery: { concurrency: 0 } } }),
+        TypeError
+      )
+      throws(
+        () => makeServer({ http: { onRequest: () => {}, onError: () => {}, errorDelivery: { queueLimit: -1 } } }),
+        TypeError
+      )
+      throws(
+        () => makeServer({ http: { onRequest: () => {}, onError: () => {}, errorDelivery: { timeoutMs: 0 } } }),
+        TypeError
+      )
+      throws(
+        () => makeServer({ http: { onRequest: () => {}, onError: () => {}, errorDelivery: { headers: 'all' } } }),
+        TypeError
+      )
+      throws(
+        () => makeServer({ http: { onRequest: () => {}, onError: () => {}, errorDelivery: { query: 'all' } } }),
+        TypeError
+      )
+      throws(
+        () => makeServer({ http: { onRequest: () => {}, onError: () => {}, errorDelivery: { query: [''] } } }),
+        TypeError
+      )
+      throws(
+        () =>
+          makeServer({
+            http: {
+              onRequest: () => {},
+              onError: () => {},
+              errorDelivery: { query: Array.from({ length: 101 }, (_, index) => `name${index}`) }
+            }
+          }),
+        TypeError
+      )
+      throws(
+        () => makeServer({ http: { onRequest: () => {}, onError: () => {}, errorDelivery: { includeIp: 1 } } }),
+        TypeError
+      )
+      throws(() => makeServer({ http: { onRequest: () => {}, onError: () => {}, errorDelivery: { unknown: true } } }), {
+        name: 'TypeError',
+        message: 'Unknown http.errorDelivery option: unknown'
+      })
+    })
+
     test('should validate a per-route body limit against the HTTP ceiling', () => {
       const server = makeServer({
         http: {
@@ -345,13 +430,32 @@ describe('Server', () => {
       const onError = () => {}
       const server = makeServer({ http: { onRequest: () => {}, onError } })
 
-      strictEqual(server.httpErrorHandler, onError)
+      strictEqual(requireHttp(server).onError, onError)
+      deepStrictEqual(requireHttp(server).errorDelivery, {
+        concurrency: 4,
+        queueLimit: 256,
+        timeoutMs: 5_000,
+        headers: [],
+        query: [],
+        includeIp: false
+      })
     })
 
     test('should use default HTTP error handler when not provided', () => {
       const server = makeServer({ onRequest: () => {} })
 
-      strictEqual(typeof server.httpErrorHandler, 'function')
+      strictEqual(requireHttp(server).onError, null)
+      strictEqual(requireHttp(server).errorDelivery, null)
+      deepStrictEqual(server.httpErrorDeliveryStats, {
+        inFlight: 0,
+        queued: 0,
+        completed: 0,
+        timedOut: 0,
+        aborted: 0,
+        rejected: 0,
+        dropped: 0,
+        oldestInFlightMs: null
+      })
     })
 
     test('should use custom onServerError handler', () => {
@@ -2330,6 +2434,72 @@ describe('Server', () => {
       server.close()
       await promise1
     })
+
+    test('should drain bounded HTTP error delivery before graceful shutdown resolves', async () => {
+      const delivery = Promise.withResolvers<void>()
+      const server = makeServer({
+        http: {
+          onRequest: () => {},
+          onError: () => delivery.promise
+        }
+      })
+
+      server.handleWithContext(createMockHttpResponse(), createMockHttpRequest(), () => {
+        throw new Error('delivery probe')
+      })
+      await Promise.resolve()
+
+      let resolved = false
+
+      const shutdown = server.shutdown(0).then(() => {
+        resolved = true
+      })
+
+      await Promise.resolve()
+      strictEqual(resolved, false)
+      strictEqual(server.httpErrorDeliveryStats.inFlight, 1)
+
+      delivery.resolve()
+      await shutdown
+
+      strictEqual(resolved, true)
+      strictEqual(server.httpErrorDeliveryStats.inFlight, 0)
+      strictEqual(server.httpErrorDeliveryStats.completed, 1)
+    })
+
+    test('should abort HTTP error delivery at the shared shutdown deadline', async () => {
+      let signal: AbortSignal | null = null
+
+      const server = makeServer({
+        http: {
+          onRequest: () => {},
+          errorDelivery: { timeoutMs: 5_000 },
+          onError: (_event, _error, context) => {
+            signal = context.signal
+
+            return new Promise<void>((resolve) =>
+              context.signal.addEventListener('abort', () => resolve(), { once: true })
+            )
+          }
+        }
+      })
+
+      server.handleWithContext(createMockHttpResponse(), createMockHttpRequest(), () => {
+        throw new Error('delivery probe')
+      })
+      await Promise.resolve()
+
+      await server.shutdown(10)
+      await Promise.resolve()
+
+      strictEqual((signal as AbortSignal | null)?.aborted, true)
+      strictEqual((signal as AbortSignal | null)?.reason?.code, 'ERR_HTTP_ERROR_DELIVERY_SHUTDOWN')
+      strictEqual(server.httpErrorDeliveryStats.inFlight, 0)
+      strictEqual(server.httpErrorDeliveryStats.timedOut, 0)
+      strictEqual(server.httpErrorDeliveryStats.aborted, 1)
+      strictEqual(server.httpErrorDeliveryStats.completed, 0)
+      strictEqual(server.httpErrorDeliveryStats.rejected, 0)
+    })
   })
 
   describe('onUpgrade()', () => {
@@ -2951,16 +3121,23 @@ describe('Server', () => {
       strictEqual(finalizeCalled, 1)
     })
 
-    test('should keep an async http.onError context isolated until the hook settles', async () => {
+    test('should release HttpContext while an immutable error event remains in async delivery', async () => {
+      let receivedEvent: HttpErrorEvent | null = null
+
       const hook = Promise.withResolvers<void>()
-      const observed: { before?: string; after?: string; header?: string } = {}
+      const observed: { before?: string; after?: string; header?: string | undefined; query?: string | undefined } = {}
       const server = makeServer({
-        onRequest: () => {},
-        httpError: async (ctx) => {
-          observed.before = ctx.getUrl()
-          observed.header = ctx.getReqHeader('x-request-id')
-          await hook.promise
-          observed.after = ctx.getUrl()
+        http: {
+          onRequest: () => {},
+          errorDelivery: { headers: ['x-request-id'], query: ['requestId'] },
+          onError: async (event) => {
+            receivedEvent = event
+            observed.before = event.url
+            observed.header = event.headers['x-request-id']
+            observed.query = event.query.requestId
+            await hook.promise
+            observed.after = event.url
+          }
         }
       })
       const requestA = createMockHttpRequest()
@@ -2968,11 +3145,21 @@ describe('Server', () => {
 
       requestA.setUrl('/request-a')
       requestA.setHeader('x-request-id', 'a')
+      requestA.setQuery('requestId', 'query-a')
+      requestA.setQuery('token', 'must-not-leak')
       server.handleWithContext(responseA, requestA, () => {
         throw new Error('request A failed')
       })
 
-      strictEqual(poolSize(server.httpContextPool), 0)
+      strictEqual(poolSize(server.httpContextPool), 1)
+      await Promise.resolve()
+      const capturedEvent = requireDefined<HttpErrorEvent>(receivedEvent as HttpErrorEvent | null, 'error event')
+
+      strictEqual(Object.isFrozen(capturedEvent), true)
+      strictEqual(Object.isFrozen(capturedEvent.headers), true)
+      strictEqual(Object.isFrozen(capturedEvent.query), true)
+      strictEqual(Object.hasOwn(capturedEvent.query, 'token'), false)
+      strictEqual(Object.hasOwn(capturedEvent, 'body'), false)
 
       const requestB = createMockHttpRequest()
       const responseB = createMockHttpResponse()
@@ -2983,10 +3170,20 @@ describe('Server', () => {
       hook.resolve()
       await new Promise((resolve) => setImmediate(resolve))
 
-      deepStrictEqual(observed, { before: '/request-a', after: '/request-a', header: 'a' })
+      deepStrictEqual(observed, { before: '/request-a', after: '/request-a', header: 'a', query: 'query-a' })
       strictEqual(responseB.getStatus(), STATUS_TEXT[200])
       strictEqual(responseEndBody(responseB.calls.find(({ method }) => method === 'end')), 'response B')
-      strictEqual(poolSize(server.httpContextPool), 2)
+      strictEqual(poolSize(server.httpContextPool), 1)
+      deepStrictEqual(server.httpErrorDeliveryStats, {
+        inFlight: 0,
+        queued: 0,
+        completed: 1,
+        timedOut: 0,
+        aborted: 0,
+        rejected: 0,
+        dropped: 0,
+        oldestInFlightMs: null
+      })
     })
 
     test('should not expose a non-prefetched header to an error hook after an async handler rejects', async () => {
@@ -2999,8 +3196,8 @@ describe('Server', () => {
           await rejectHandler.promise
           throw new Error('async failure')
         },
-        httpError: (ctx) => {
-          header = ctx.getReqHeader('x-request-id')
+        httpError: (event) => {
+          header = event.headers['x-request-id'] ?? ''
         }
       })
       const request = createMockHttpRequest()
@@ -3013,6 +3210,57 @@ describe('Server', () => {
       await new Promise((resolve) => setImmediate(resolve))
 
       strictEqual(header, '')
+    })
+
+    test('should privately retain selected error metadata across an async handler boundary', async () => {
+      const rejectHandler = Promise.withResolvers<void>()
+
+      let handlerHeader = ''
+      let handlerQuery = ''
+      let errorHeader = ''
+      let errorQuery = ''
+
+      const server = makeServer({
+        http: {
+          onRequest: async (ctx) => {
+            await rejectHandler.promise
+            handlerHeader = ctx.getReqHeader('x-request-id')
+            handlerQuery = ctx.getQuery('requestId') ?? ''
+            throw new Error('async failure')
+          },
+          errorDelivery: { headers: ['x-request-id'], query: ['requestId'] },
+          onError: (event) => {
+            errorHeader = event.headers['x-request-id'] ?? ''
+            errorQuery = event.query.requestId ?? ''
+          }
+        }
+      })
+
+      await server.listen()
+
+      const call = requireRouteCall(
+        requireCurrentMockApp().calls.find(({ method, path }) => method === 'any' && path === '/*')
+      )
+      const request = createMockHttpRequest()
+
+      request.setHeader('x-request-id', 'original')
+      request.setQuery('requestId', 'query-original')
+      request.setQuery('token', 'must-not-leak')
+      call.handler(createMockHttpResponse(), request)
+      request.setHeader('x-request-id', 'stale')
+      request.setQuery('requestId', 'query-stale')
+      rejectHandler.resolve()
+
+      await new Promise<void>((resolve) => setImmediate(resolve))
+
+      strictEqual(handlerHeader, '')
+      strictEqual(handlerQuery, 'query-original')
+      strictEqual(errorHeader, 'original')
+      strictEqual(errorQuery, 'query-original')
+      deepStrictEqual(
+        request.calls.filter(({ method }) => method === 'prefetch').map(({ plan }) => plan?.headers),
+        [['x-request-id']]
+      )
     })
 
     test('should finalize a pending handler after an early response reaches requestTimeoutMs', async () => {
@@ -3153,7 +3401,7 @@ describe('Server', () => {
 
       server.handleWithContext(res, req, requireHandler(requireHttp(server).onRequest))
 
-      await Promise.resolve()
+      await new Promise<void>((resolve) => setImmediate(resolve))
 
       strictEqual(res.getStatus(), STATUS_TEXT[401])
       strictEqual(res.isEnded(), true)
@@ -3180,7 +3428,7 @@ describe('Server', () => {
 
       server.handleWithContext(res, req, requireHandler(requireHttp(server).onRequest))
 
-      await Promise.resolve()
+      await new Promise<void>((resolve) => setImmediate(resolve))
 
       strictEqual(res.getStatus(), STATUS_TEXT[500])
       strictEqual(res.getHeaders()['content-type'], 'text/plain; charset=utf-8')

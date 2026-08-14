@@ -16,6 +16,12 @@ interface CorsContext {
   setHeader(name: string, value: string): CorsContext
 }
 
+/**
+ * Creates a request-level CORS applier.
+ * @param options CORS response policy.
+ * @returns A callback that returns `true` after answering a preflight request.
+ * @throws {TypeError} If credentials are combined with wildcard origin `'*'`.
+ */
 export default function cors(options: CorsOptions = {}): (ctx: CorsContext) => boolean {
   const origin = options.origin ?? '*'
   const methods = options.methods ?? DEFAULT_METHODS

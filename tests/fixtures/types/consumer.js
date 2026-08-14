@@ -52,6 +52,10 @@ export const jsOptions = defineConfig({
   http: {
     maxBodyBudget: 256 * 1024 * 1024,
     prefetchHeaders: ['authorization'],
-    onRequest: (ctx) => ({ method: ctx.getMethod() })
+    errorDelivery: { query: ['requestId'] },
+    onRequest: (ctx) => ({ method: ctx.getMethod() }),
+    onError: (event) => {
+      void event.query.requestId
+    }
   }
 })

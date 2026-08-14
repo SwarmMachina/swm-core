@@ -17,3 +17,30 @@ export function compileHeaderPrefetchPlan(
 
   return new Plan({ headers: selection })
 }
+
+export function mergeHeaderPrefetch(
+  selection: false | 'all' | readonly string[],
+  required: readonly string[]
+): false | 'all' | readonly string[] {
+  if (selection === 'all' || required.length === 0) {
+    return selection
+  }
+
+  if (selection === false) {
+    return required
+  }
+
+  const merged = selection.slice()
+  const seen = new Set(selection)
+
+  for (let i = 0; i < required.length; i++) {
+    const name = required[i]!
+
+    if (!seen.has(name)) {
+      seen.add(name)
+      merged.push(name)
+    }
+  }
+
+  return merged.length === selection.length ? selection : Object.freeze(merged)
+}

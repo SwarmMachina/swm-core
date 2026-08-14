@@ -123,6 +123,48 @@ test('request timeout returns 408 and releases prefetched body capacity', { time
   await new Promise<void>((resolve) => setImmediate(resolve))
 })
 
+test('a pending async error delivery does not retain request body capacity', { timeout: 5000 }, async () => {
+  const deliveryStarted = Promise.withResolvers<void>()
+
+  let deliveredQuery: Readonly<Record<string, string>> | null = null
+
+  server = await startHttpServer({
+    prefetch: true,
+    maxBodySize: 8,
+    maxBodyBudget: 8,
+    onRequest: async (ctx) => {
+      await ctx.json()
+
+      return 'ok'
+    },
+    errorDelivery: { timeoutMs: 5_000, query: ['requestId'] },
+    onError: async (event) => {
+      deliveredQuery = event.query
+      deliveryStarted.resolve()
+      await new Promise(() => {})
+    }
+  })
+
+  const invalid = await reqText(`${server.baseUrl}?requestId=request-1&token=must-not-leak`, {
+    method: 'POST',
+    body: 'invalid!'
+  })
+
+  await deliveryStarted.promise
+
+  assert.strictEqual(invalid.status, 400)
+  assert.strictEqual(invalid.text, 'Invalid JSON')
+  assert.strictEqual(requireBodyBudget(server).usedBytes, 0)
+  assert.strictEqual(requireBodyBudget(server).activeReservations, 0)
+  assert.strictEqual(server.server.httpErrorDeliveryStats.inFlight, 1)
+  assert.deepStrictEqual({ ...(deliveredQuery as Readonly<Record<string, string>> | null) }, { requestId: 'request-1' })
+
+  const next = await reqText(server.baseUrl, { method: 'POST', body: '{}' })
+
+  assert.strictEqual(next.status, 200)
+  assert.strictEqual(next.text, 'ok')
+})
+
 test(
   'default HTTP body budget admits an exact deterministic reservation count and recovers',
   { timeout: 5000 },

@@ -1,5 +1,7 @@
 import { load as loadTransport } from './transport/uws.js'
 import BodyBudget from '../http/body-budget.js'
+import HttpErrorDispatcher, { EMPTY_HTTP_ERROR_DELIVERY_STATS } from '../http/error-dispatcher.js'
+import { createHttpErrorEvent, normalizeHttpError } from '../http/error-event.js'
 import HttpRuntime from '../http/runtime.js'
 import { NOOP, normalizeHttpOptions, normalizeTransportOptions, normalizeWsOptions } from './options.js'
 import WebSocketRuntime from '../ws/runtime.js'
@@ -7,7 +9,14 @@ import WebSocketRuntime from '../ws/runtime.js'
 import type { HttpRequest, HttpResponse, RequestPrefetchPlan } from '@swarmmachina/swm-uws'
 import type HttpContext from '../http/context.js'
 import type WSContext from '../ws/context.js'
-import type { HttpTransportOptions, NormalizedHttpOptions, NormalizedWSOptions, ServerOptions } from './options.js'
+import type {
+  HttpErrorDeliveryStats,
+  HttpTransportOptions,
+  NormalizedHttpErrorDeliveryOptions,
+  NormalizedHttpOptions,
+  NormalizedWSOptions,
+  ServerOptions
+} from './options.js'
 import type WebSocketUpgradeMeta from '../ws/upgrade-meta.js'
 
 type AsyncCallback<Args extends unknown[] = unknown[]> = (...args: Args) => unknown | Promise<unknown>
@@ -46,6 +55,7 @@ interface EffectiveConfig {
     maxBodySize: number
     maxBodyBudget: number | null
     requestTimeoutMs: number
+    errorDelivery: Readonly<NormalizedHttpErrorDeliveryOptions> | null
   }> | null
   transport: Readonly<Record<string, number | null>> | null
   ws: Readonly<{
@@ -66,7 +76,15 @@ function createListenAbortError(): Error {
   return error
 }
 
+/**
+ * High-performance HTTP and WebSocket server backed by swm-uws.
+ *
+ * Construction validates configuration synchronously. Call {@link listen} to
+ * begin accepting connections and {@link shutdown} for graceful termination.
+ */
 export default class Server {
+  #httpErrorDispatcher: HttpErrorDispatcher | null
+  #httpErrorShutdownPromise: Promise<void> | null = null
   #listenPromise: Promise<this> | null = null
   #listenGeneration = 0
   #shutdownPromise: Promise<void> | null = null
@@ -95,7 +113,6 @@ export default class Server {
   declare wsMaxPayloadBytes: number
   declare wsMaxBackpressureBytes: number
   declare wsCloseOnBackpressureLimit: boolean
-  declare httpErrorHandler: AsyncCallback<[HttpContext, Error]>
   declare onServerError: AsyncCallback<[Error]>
   declare onWsOpen: AsyncCallback<[WSContext]>
   declare onWsClose: AsyncCallback<[WSContext, number, ArrayBuffer]>
@@ -137,8 +154,9 @@ export default class Server {
   declare clearConnections: WebSocketRuntime['clearConnections']
 
   /**
+   * Creates a server with at least one enabled protocol layer.
    * @param {object} [opt]
-   * @param {{onRequest?: (ctx: import('../http/context.js').default) => unknown|Promise<unknown>, routes?: import('./options.js').Route[], onError?: (ctx: import('../http/context.js').default, err: Error) => unknown|Promise<unknown>, prefetch?: boolean, prefetchHeaders?: false|'all'|string[], maxBodySize?: number, maxBodyBudget?: number|null, requestTimeoutMs?: number}|null} [opt.http]
+   * @param {import('./options.js').HttpOptions|null} [opt.http]
    * @param {(err: Error) => unknown|Promise<unknown>} [opt.onServerError]
    * @param {string} [opt.host]
    * @param {number} [opt.port]
@@ -212,7 +230,8 @@ export default class Server {
     this.wsMaxBackpressureBytes = ws?.maxBackpressure ?? 0
     this.wsCloseOnBackpressureLimit = ws?.closeOnBackpressureLimit ?? false
 
-    this.httpErrorHandler = http?.onError ?? NOOP
+    this.#httpErrorDispatcher =
+      http?.onError && http.errorDelivery ? new HttpErrorDispatcher(http.onError, http.errorDelivery) : null
     this.onServerError = typeof onServerError === 'function' ? (onServerError as AsyncCallback<[Error]>) : NOOP
     this.onWsOpen = ws?.onOpen ?? NOOP
     this.onWsClose = ws?.onClose ?? NOOP
@@ -240,7 +259,8 @@ export default class Server {
             prefetchHeaders: http.prefetchHeaders,
             maxBodySize: this.httpMaxBodyBytes,
             maxBodyBudget: http.maxBodyBudget,
-            requestTimeoutMs: this.httpRequestTimeoutMs
+            requestTimeoutMs: this.httpRequestTimeoutMs,
+            errorDelivery: http.errorDelivery
           })
         : null,
       transport,
@@ -289,19 +309,43 @@ export default class Server {
     this.clearConnections = this.#wsRuntime.clearConnections
   }
 
+  /** Number of HTTP requests whose lifecycle has not completed. */
   get activeHttp() {
     return this.#lifecycle.activeHttp
   }
 
+  /** Number of open WebSocket connections. */
   get activeWs() {
     return this.#lifecycle.activeWs
   }
 
+  /** Number of live entries in the addressable WebSocket registry. */
   get connectionCount() {
     return this.#wsRuntime.connectionCount
   }
 
+  /** Returns a frozen point-in-time view of bounded HTTP error delivery. */
+  get httpErrorDeliveryStats(): Readonly<HttpErrorDeliveryStats> {
+    return this.#httpErrorDispatcher?.stats ?? EMPTY_HTTP_ERROR_DELIVERY_STATS
+  }
+
+  /** Captures body-free request metadata and submits an observability event. */
+  reportHttpError(context: HttpContext, value: unknown): void {
+    const dispatcher = this.#httpErrorDispatcher
+    const delivery = this.http?.errorDelivery
+
+    if (!dispatcher || !delivery) {
+      return
+    }
+
+    const error = normalizeHttpError(value)
+    const event = createHttpErrorEvent(context, error, delivery.headers, delivery.query, delivery.includeIp)
+
+    dispatcher.dispatch(event, error)
+  }
+
   /**
+   * Calls a user hook while containing synchronous throws and rejections.
    * @param {(...args: unknown[]) => unknown|Promise<unknown>} fn
    * @param {...unknown} args
    * @returns {Promise<void>}
@@ -318,6 +362,7 @@ export default class Server {
     }
   }
 
+  /** Starts the native listener and resolves with this server when ready. */
   listen(): Promise<this> {
     if (this.socket) {
       return Promise.resolve(this)
@@ -325,6 +370,13 @@ export default class Server {
 
     if (this.#listenPromise) {
       return this.#listenPromise
+    }
+
+    if (this.#httpErrorDispatcher?.closed) {
+      const http = this.http
+
+      this.#httpErrorDispatcher =
+        http?.onError && http.errorDelivery ? new HttpErrorDispatcher(http.onError, http.errorDelivery) : null
     }
 
     const generation = ++this.#listenGeneration
@@ -343,6 +395,8 @@ export default class Server {
   }
 
   /**
+   * Creates the native application and binds its listener.
+   * @param {number} generation Listen generation used to reject stale completions.
    * @returns {Promise<Server>}
    */
   async #doListen(generation: number): Promise<this> {
@@ -430,6 +484,7 @@ export default class Server {
     })
   }
 
+  /** Stops accepting new connections without closing active work. */
   stopAccepting() {
     if (this.socket) {
       this.#backend?.us_listen_socket_close(this.socket)
@@ -437,12 +492,38 @@ export default class Server {
     }
   }
 
+  /** Completes graceful shutdown after every tracked connection is gone. */
   finishShutdownIfNeed() {
     if (!this.#lifecycle.draining) {
       return
     }
 
     if (this.#lifecycle.activeHttp || this.#lifecycle.activeWs) {
+      return
+    }
+
+    const dispatcher = this.#httpErrorDispatcher
+
+    if (dispatcher && !this.#httpErrorShutdownPromise) {
+      const shutdownPromise = dispatcher.shutdown()
+
+      this.#httpErrorShutdownPromise = shutdownPromise
+      void shutdownPromise.then(() => {
+        if (this.#httpErrorShutdownPromise !== shutdownPromise) {
+          return
+        }
+
+        this.#httpErrorShutdownPromise = null
+
+        if (this.#lifecycle.draining) {
+          this.close()
+        }
+      })
+
+      return
+    }
+
+    if (this.#httpErrorShutdownPromise) {
       return
     }
 
@@ -462,6 +543,7 @@ export default class Server {
   }
 
   /**
+   * Stops accepting new work and waits for active HTTP and WebSocket lifecycles.
    * @param {number} [timeout]
    * @returns {Promise<void>}
    */
@@ -488,9 +570,11 @@ export default class Server {
     return this.#shutdownPromise
   }
 
-  /** Force stop. */
+  /** Immediately closes the listener and active native connections. */
   close() {
     this.#listenGeneration++
+    this.#httpErrorDispatcher?.abort()
+    this.#httpErrorShutdownPromise = null
     this.stopAccepting()
 
     if (!this.app) {

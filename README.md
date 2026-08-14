@@ -239,8 +239,8 @@ const server = new Server({
       ctx.setStatus(404)
       return { error: 'Not found' }
     },
-    onError: (ctx, error) => {
-      console.error('HTTP Error:', error)
+    onError: (event, error) => {
+      console.error(`HTTP Error [${event.method} ${event.url}]:`, error)
     }
   }
 })
@@ -304,8 +304,8 @@ const server = new Server({
         }
       }
     ],
-    onError: (ctx, error) => {
-      console.error('HTTP Error:', error)
+    onError: (event, error) => {
+      console.error(`HTTP Error [${event.method} ${event.url}]:`, error)
     }
   }
 })
@@ -405,7 +405,8 @@ a fixed `404` without allocating an `HttpContext`.
 | `prefetchHeaders`  | `false`/`'all'`/`String[]` | omitted     | Retain selected request headers before handlers run.                 |
 | `onRequest`        | `Function`                 | default 404 | Universal request handler `(ctx) => any`                             |
 | `routes`           | `Array`                    | default 404 | Declarative route definitions                                        |
-| `onError`          | `Function`                 | `() => {}`  | Request error handler `(ctx, error) => void`                         |
+| `errorDelivery`    | `Object`                   | see below   | Bounded async error-delivery policy                                  |
+| `onError`          | `Function`                 | omitted     | Request error handler `(event, error, { signal }) => any`            |
 
 `http.onRequest` and `http.routes` are mutually exclusive. `http: {}` enables
 HTTP with a deterministic default `404` response.
@@ -438,6 +439,64 @@ new Server({
 
 The native binding capability is checked during `listen()`. Configuration
 fails instead of silently falling back to a full JavaScript header scan.
+
+#### Bounded asynchronous error delivery
+
+`http.onError` receives an immutable, body-free event rather than the pooled
+`HttpContext`. The request context and its body budget are released independently
+of remote logging, tracing, or metrics delivery.
+
+This is the `5.1` contract and intentionally replaces the earlier
+`onError(ctx, error)` signature. Migrate context reads to the event fields and
+configure explicit `errorDelivery.headers`, `errorDelivery.query`, or
+`errorDelivery.includeIp` selection when that metadata is required.
+
+```javascript
+const server = new Server({
+  http: {
+    onRequest,
+    errorDelivery: {
+      concurrency: 4,
+      queueLimit: 256,
+      timeoutMs: 5_000,
+      headers: ['x-request-id', 'traceparent'],
+      query: ['requestId', 'operation'],
+      includeIp: false
+    },
+    async onError(event, error, { signal }) {
+      await fetch(logEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ event, error: error.message }),
+        signal
+      })
+    }
+  }
+})
+```
+
+Defaults are `concurrency: 4`, `queueLimit: 256`, `timeoutMs: 5000`, no
+headers, no query parameters, and no IP lookup. Selected headers are retained
+for error reporting without widening the handler's `prefetchHeaders` policy.
+`errorDelivery.query` is a case-sensitive allowlist; only present selected
+values appear in `event.query`. `event.url` remains the path without the query
+string. The allowlist accepts at most 100 unique names of 1–256 characters.
+Request bodies, native request/response handles, and mutable context state are
+never copied.
+
+The delivery `AbortSignal` fires at the deadline. Arbitrary Promises cannot be
+force-cancelled in JavaScript, so a timed-out attempt keeps its dispatcher slot
+until it actually settles. This prevents code that ignores cancellation from
+defeating the concurrency bound; once the bounded queue is full, later events
+are counted as dropped. Use APIs such as `fetch` that honor the signal. Inspect
+`server.httpErrorDeliveryStats` for `inFlight`, `queued`, `completed`,
+`timedOut`, `aborted`, `rejected`, `dropped`, and `oldestInFlightMs`.
+
+Graceful shutdown stops accepting new error events after request/WebSocket
+lifecycle drain, then waits for accepted delivery work. The server-wide shutdown
+deadline drops queued events and aborts active delivery signals. A callback that
+ignores its signal cannot be force-cancelled; shutdown still resolves at its
+deadline and the unsettled callback remains visible in delivery stats.
 
 **Native HTTP transport options (`transport` object):**
 
@@ -491,6 +550,13 @@ const server = new Server({
     maxBodySize: 2 * 1024 * 1024,
     maxBodyBudget: 64 * 1024 * 1024,
     requestTimeoutMs: 15_000,
+    errorDelivery: {
+      concurrency: 4,
+      queueLimit: 256,
+      timeoutMs: 5_000,
+      headers: ['x-request-id', 'traceparent'],
+      query: ['requestId']
+    },
     onRequest: async (ctx) => {
       const body = await ctx.json()
 
@@ -499,8 +565,8 @@ const server = new Server({
         body
       }
     },
-    onError: (ctx, error) => {
-      console.error(`Request failed: ${ctx.getMethod()} ${ctx.getUrl()}`, error)
+    onError: (event, error) => {
+      console.error(`Request failed: ${event.method} ${event.url}`, error)
     }
   },
   ws: null
@@ -562,8 +628,8 @@ const routeServer = new Server({
         handler: () => ({ ok: true })
       }
     ],
-    onError: (ctx, error) => {
-      console.error(`Route failed: ${ctx.getUrl()}`, error)
+    onError: (event, error) => {
+      console.error(`Route failed: ${event.url}`, error)
     }
   },
   ws: null
@@ -1450,10 +1516,11 @@ await.
 what guarantees the fail-loud behavior below. Do not reason about `WSContext`
 by analogy to `HttpContext`.
 
-| Context       | Allocated per…            | Valid for…                                 | Safe to retain?                                          |
-| ------------- | ------------------------- | ------------------------------------------ | -------------------------------------------------------- |
-| `HttpContext` | request (pooled, reused)  | response plus pending `http.onError` hooks | No — released after finalization and pending error hooks |
-| `WSContext`   | connection (never reused) | the whole connection lifetime              | Yes, for the connection; not past `onClose`              |
+| Context          | Allocated per…            | Valid for…                    | Safe to retain?                             |
+| ---------------- | ------------------------- | ----------------------------- | ------------------------------------------- |
+| `HttpContext`    | request (pooled, reused)  | request/response lifecycle    | No — copy data needed by background work    |
+| `HttpErrorEvent` | reported HTTP error       | independent immutable value   | Yes — it contains bounded metadata, no body |
+| `WSContext`      | connection (never reused) | the whole connection lifetime | Yes, for the connection; not past `onClose` |
 
 - **One instance per connection.** The _same_ `WSContext` is passed to every
   callback of a given connection (`onOpen`, `onMessage`, `onClose`, `onDrain`,
@@ -1521,8 +1588,8 @@ const server = new Server({
         return ctx.setStatus(500).send({ error: 'Internal server error' })
       }
     },
-    onError: (ctx, error) => {
-      console.error(`HTTP Error [${ctx.getMethod()} ${ctx.getUrl()}]:`, error)
+    onError: (event, error) => {
+      console.error(`HTTP Error [${event.method} ${event.url}]:`, error)
     }
   }
 })
@@ -1774,6 +1841,12 @@ function handleSignal(signal) {
 process.once('SIGTERM', () => handleSignal('SIGTERM'))
 process.once('SIGINT', () => handleSignal('SIGINT'))
 ```
+
+`shutdown(timeout)` uses one deadline for HTTP requests, WebSockets, and bounded
+HTTP error delivery. Once request and socket lifecycles finish, accepted error
+events drain before shutdown resolves. At the deadline, queued events are
+dropped and active delivery signals are aborted. Use cancellation-aware clients
+such as `fetch`; arbitrary Promises cannot be force-cancelled by JavaScript.
 
 ### Route before hooks
 

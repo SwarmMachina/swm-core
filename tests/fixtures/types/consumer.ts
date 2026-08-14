@@ -9,6 +9,10 @@ import type {
   HttpBaseOptions,
   HttpBody,
   HttpContext,
+  HttpErrorDeliveryContext,
+  HttpErrorDeliveryOptions,
+  HttpErrorDeliveryStats,
+  HttpErrorEvent,
   HttpHeaders,
   HttpMethod,
   HttpOptions,
@@ -78,6 +82,10 @@ type CorePublicTypes = [
   EffectiveWSConfig,
   EffectiveServerConfig,
   HttpContext,
+  HttpErrorEvent,
+  HttpErrorDeliveryContext,
+  HttpErrorDeliveryOptions,
+  HttpErrorDeliveryStats,
   WSSendStatus,
   RawWebSocket,
   UWebSocket,
@@ -147,16 +155,43 @@ const server: ServerType = new Server(configuredOptions)
 const unlimitedServer: ServerType = new Server({
   http: { maxBodyBudget: null, onRequest: () => 'ok' }
 })
+const reportingServer: ServerType = new Server({
+  http: {
+    onRequest: () => 'ok',
+    errorDelivery: {
+      concurrency: 4,
+      queueLimit: 256,
+      timeoutMs: 5_000,
+      headers: ['x-request-id'],
+      query: ['requestId'],
+      includeIp: true
+    },
+    async onError(event, error, { signal }) {
+      const status: number = event.status
+      const header: string | undefined = event.headers['x-request-id']
+      const requestId: string | undefined = event.query.requestId
+      const aborted: boolean = signal.aborted
+
+      void error
+      void status
+      void header
+      void requestId
+      void aborted
+    }
+  }
+})
 
 const effectiveConfig: Readonly<EffectiveServerConfig> = server.effectiveConfig
 const effectiveHttp: Readonly<EffectiveHttpConfig> | null = effectiveConfig.http
 const effectiveWs: Readonly<EffectiveWSConfig> | null = effectiveConfig.ws
 const effectiveTransport: Readonly<HttpTransportOptions> | null = effectiveConfig.transport
 const nativeCapabilities: Readonly<NativeCapabilities> = server.bindingCapabilities
+const errorDeliveryStats: Readonly<HttpErrorDeliveryStats> = reportingServer.httpErrorDeliveryStats
 
 void effectiveTransport
 void nativeCapabilities.requestPrefetch
 void nativeCapabilities.responseBatch
+void errorDeliveryStats.oldestInFlightMs
 
 export function verifyHttpContextReaders(ctx: HttpContext): void {
   const ip: string = ctx.getIP()

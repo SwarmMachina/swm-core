@@ -34,6 +34,7 @@ declare const preparedHeadersBrand: unique symbol
  * path. They cannot be constructed directly.
  */
 export interface PreparedHeaders {
+  /** Internal nominal marker preventing structural construction by consumers. */
   readonly [preparedHeadersBrand]: true
 }
 
@@ -66,6 +67,9 @@ export function prepareHeaders(headers: HttpHeaders): PreparedHeaders
  * A returned value is sent through {@link HttpContext.send} unless the handler
  * already replied or started a stream. Promise handlers keep the pooled
  * context assigned until the Promise settles.
+ *
+ * @param ctx Per-request HTTP context.
+ * @returns A response value or a Promise for one.
  */
 export type Handler = (ctx: HttpContext) => any | Promise<any>
 
@@ -333,6 +337,89 @@ export interface WSOptions {
   connectionKey?: (ctx: WSContext) => string | number | null | undefined
 }
 
+/** Stable, body-free request metadata passed to asynchronous error delivery. */
+export interface HttpErrorEvent {
+  /** Unix timestamp in milliseconds at which the framework captured the error. */
+  readonly timestamp: number
+
+  /** Lowercase HTTP method reported by the transport. */
+  readonly method: string
+
+  /** Request path without the query string. */
+  readonly url: string
+
+  /** Status selected for the framework-controlled error response. */
+  readonly status: number
+
+  /** Configured `errorDelivery.headers` that were present on the request. */
+  readonly headers: Readonly<Record<string, string>>
+
+  /** Configured `errorDelivery.query` parameters that were present on the request. */
+  readonly query: Readonly<Record<string, string>>
+
+  /** Client address when `errorDelivery.includeIp` is enabled. */
+  readonly ip?: string
+}
+
+/** Per-attempt controls for asynchronous error delivery. */
+export interface HttpErrorDeliveryContext {
+  /** Aborted when the delivery timeout or the server shutdown deadline expires. */
+  readonly signal: AbortSignal
+}
+
+/** Bounded asynchronous error-delivery policy. */
+export interface HttpErrorDeliveryOptions {
+  /** Maximum simultaneously executing callbacks. @defaultValue `4` */
+  concurrency?: number
+
+  /** Maximum callbacks waiting behind active delivery. @defaultValue `256` */
+  queueLimit?: number
+
+  /** Deadline for aborting a callback; its slot remains occupied until settlement. @defaultValue `5_000` */
+  timeoutMs?: number
+
+  /** Request-header allowlist copied into each error event. @defaultValue `[]` */
+  headers?: readonly string[]
+
+  /**
+   * Case-sensitive query-parameter allowlist copied into each error event.
+   *
+   * @defaultValue `[]`
+   * @remarks At most 100 unique names; each name must contain 1 through 256 characters.
+   */
+  query?: readonly string[]
+
+  /** Resolve and copy the client address for error events. @defaultValue `false` */
+  includeIp?: boolean
+}
+
+/** Point-in-time diagnostics for the server's HTTP error dispatcher. */
+export interface HttpErrorDeliveryStats {
+  /** Callbacks that have started but have not settled, including timed-out callbacks. */
+  readonly inFlight: number
+
+  /** Events waiting for a dispatcher slot. */
+  readonly queued: number
+
+  /** Callbacks that settled successfully before their deadline. */
+  readonly completed: number
+
+  /** Callbacks whose deadline elapsed before settlement. */
+  readonly timedOut: number
+
+  /** Active callbacks aborted by forced server shutdown before settlement. */
+  readonly aborted: number
+
+  /** Callbacks that threw or rejected before their deadline. */
+  readonly rejected: number
+
+  /** Events discarded because every active and queued slot was occupied. */
+  readonly dropped: number
+
+  /** Age of the oldest unsettled callback, or `null` when none are active. */
+  readonly oldestInFlightMs: number | null
+}
+
 /** Shared options for either HTTP routing mode. */
 export interface HttpBaseOptions {
   /**
@@ -351,9 +438,8 @@ export interface HttpBaseOptions {
    * Retains request headers in native-owned storage before handlers run.
    *
    * A list retains only those fields, `false` explicitly disables automatic
-   * header retention, and `'all'` retains every field. When omitted, the
-   * compatibility path captures all request metadata and headers before the
-   * native request expires.
+   * header retention, and `'all'` retains every field. When omitted, no
+   * headers are retained automatically.
    */
   prefetchHeaders?: HeaderPrefetch
 
@@ -401,14 +487,24 @@ export interface HttpBaseOptions {
   requestTimeoutMs?: number
 
   /**
+   * Bounds asynchronous observability work and selects request metadata.
+   *
+   * Selected headers are retained independently of `prefetchHeaders`, but do
+   * not become readable through `HttpContext` unless that policy also selects
+   * them. Selected query names are matched case-sensitively. The complete query
+   * string and request body are never copied into error events.
+   */
+  errorDelivery?: HttpErrorDeliveryOptions
+
+  /**
    * Handles request parsing, timeout, and application errors.
    *
-   * The framework still performs its controlled response and lifecycle
-   * cleanup. Request metadata is retained until an async hook settles, so it
-   * cannot observe a later pooled request. Errors thrown or rejected by this
-   * hook are contained so they cannot escape into native transport callbacks.
+   * The framework first copies a compact immutable event, then releases the
+   * request context independently of this callback. Delivery is concurrency-
+   * and queue-bounded. Rejections, timeouts, and overflow are exposed through
+   * {@link Server.httpErrorDeliveryStats}.
    */
-  onError?: (ctx: HttpContext, err: Error) => any | Promise<any>
+  onError?: (event: HttpErrorEvent, err: Error, context: HttpErrorDeliveryContext) => any | Promise<any>
 }
 
 /**
@@ -419,9 +515,24 @@ export interface HttpBaseOptions {
  */
 export type HttpOptions = HttpBaseOptions &
   (
-    | { onRequest: Handler; routes?: never }
-    | { routes: Route[]; onRequest?: never }
-    | { onRequest?: never; routes?: never }
+    | {
+        /** Universal handler invoked for every HTTP request. */
+        onRequest: Handler
+        /** Declarative routes cannot be combined with `onRequest`. */
+        routes?: never
+      }
+    | {
+        /** Declarative route table. */
+        routes: Route[]
+        /** A universal handler cannot be combined with `routes`. */
+        onRequest?: never
+      }
+    | {
+        /** Omit to enable the deterministic HTTP 404 fallback. */
+        onRequest?: never
+        /** Omit to enable the deterministic HTTP 404 fallback. */
+        routes?: never
+      }
   )
 
 /** Native HTTP parser and connection timeout policy applied by swm-uws. */
@@ -479,24 +590,49 @@ export interface CommonServerOptions {
   transport?: HttpTransportOptions
 }
 
+/** Legacy top-level options rejected by the v5 constructor contract. */
+type RemovedServerOptions = {
+  /** @deprecated The backend is fixed to swm-uws and cannot be configured. */
+  backend?: never
+
+  /** @deprecated Use `http.maxBodySize` or `ws.maxPayloadLength`. */
+  maxBodySize?: never
+
+  /** @deprecated Use `http.onError`. */
+  onHttpError?: never
+
+  /** @deprecated Use `http.prefetch`. */
+  prefetch?: never
+
+  /** @deprecated Use `http.routes`. */
+  router?: never
+
+  /** @deprecated Use `http.routes`. */
+  routes?: never
+}
+
 /**
  * Server construction options.
  *
  * At least one protocol layer must be configured. `null` explicitly disables
  * a layer; an empty object enables that layer with default behavior.
  */
-type RemovedServerOptions = {
-  backend?: never
-  maxBodySize?: never
-  onHttpError?: never
-  prefetch?: never
-  router?: never
-  routes?: never
-}
-
 export type ServerOptions = CommonServerOptions &
   RemovedServerOptions &
-  ({ http: HttpOptions; ws?: WSOptions | null } | { http?: HttpOptions | null; ws: WSOptions })
+  (
+    | {
+        /** HTTP protocol configuration. */
+        http: HttpOptions
+        /** Optional WebSocket protocol configuration; `null` disables it. */
+        ws?: WSOptions | null
+      }
+    | {
+        /** Optional HTTP protocol configuration; `null` disables it. */
+        http?: HttpOptions | null
+        /** WebSocket protocol configuration. */
+        ws: WSOptions
+      }
+  )
 
 /**
  * Provides contextual {@link ServerOptions} typing for a separately declared
@@ -510,6 +646,9 @@ export type ServerOptions = CommonServerOptions &
  * This helper is primarily useful in JavaScript, where a standalone object
  * literal otherwise has no contextual type and therefore no nested IDE
  * completion.
+ *
+ * @param options Configuration object to type without cloning it.
+ * @returns The same configuration object.
  *
  * @example
  * ```js
@@ -529,38 +668,79 @@ export function defineConfig<const Options extends ServerOptions>(options: Optio
 
 /** Normalized HTTP resource settings exposed by {@link Server.effectiveConfig}. */
 export interface EffectiveHttpConfig {
+  /** Whether body collection starts before the HTTP handler runs. */
   readonly prefetch: boolean
+
+  /** Effective request-header retention policy. */
   readonly prefetchHeaders: HeaderPrefetch
+
+  /** Effective per-request body limit in bytes. */
   readonly maxBodySize: number
+
+  /** Effective aggregate body budget in bytes, or `null` when disabled. */
   readonly maxBodyBudget: number | null
+
+  /** Effective asynchronous request deadline in milliseconds. */
   readonly requestTimeoutMs: number
+
+  /** Effective bounded error-delivery policy, or `null` when `onError` is absent. */
+  readonly errorDelivery: Readonly<Required<HttpErrorDeliveryOptions>> | null
 }
 
 /** Normalized WebSocket resource settings exposed by {@link Server.effectiveConfig}. */
 export interface EffectiveWSConfig {
+  /** Effective maximum reconstructed incoming message size in bytes. */
   readonly maxPayloadLength: number
+
+  /** Effective per-socket outbound backpressure limit in bytes. */
   readonly maxBackpressure: number
+
+  /** Whether exceeding the backpressure limit closes the socket. */
   readonly closeOnBackpressureLimit: boolean
+
+  /** Effective idle timeout in seconds. */
   readonly idleTimeoutSec: number
+
+  /** Effective asynchronous upgrade deadline in milliseconds. */
   readonly upgradeTimeoutMs: number
+
+  /** Effective WebSocket upgrade-header retention policy. */
   readonly prefetchHeaders: HeaderPrefetch
 }
 
 /** Immutable snapshot of the server's effective protocol configuration. */
 export interface EffectiveServerConfig {
+  /** Effective HTTP configuration, or `null` when HTTP is disabled. */
   readonly http: Readonly<EffectiveHttpConfig> | null
+
+  /** Effective native transport overrides, or `null` when defaults are used. */
   readonly transport: Readonly<HttpTransportOptions> | null
+
+  /** Effective WebSocket configuration, or `null` when WebSocket is disabled. */
   readonly ws: Readonly<EffectiveWSConfig> | null
 }
 
 /** Native binding extensions selected for this process. */
 export interface NativeCapabilities {
+  /** Supports batched native response-header writes. */
   readonly beginWrite: boolean
+
+  /** Supports native bounded request-body collection. */
   readonly collectBody: boolean
+
+  /** Supports collection with a transport-validated body length. */
   readonly collectBodyLength?: boolean
+
+  /** Supports per-server native HTTP parser and timeout configuration. */
   readonly httpTransportConfig: boolean
+
+  /** Supports pausing and resuming native request-body reads. */
   readonly requestPause: boolean
+
+  /** Supports selective native request-metadata retention. */
   readonly requestPrefetch: boolean
+
+  /** Supports native response batching. */
   readonly responseBatch: boolean
 }
 
@@ -885,6 +1065,9 @@ declare class Server {
   /** Number of open WebSocket connections. */
   readonly activeWs: number
 
+  /** Frozen point-in-time diagnostics for bounded HTTP error delivery. */
+  readonly httpErrorDeliveryStats: Readonly<HttpErrorDeliveryStats>
+
   /**
    * Frozen snapshot of normalized resource and timeout configuration.
    *
@@ -907,16 +1090,18 @@ declare class Server {
   listen(): Promise<this>
 
   /**
-   * Stops accepting new work and waits for active requests and WebSockets.
+   * Stops accepting new work and waits for active requests, WebSockets, and
+   * accepted HTTP error-delivery jobs.
    *
-   * Remaining connections are force-closed when the timeout expires.
+   * When the timeout expires, remaining connections are force-closed, queued
+   * error events are dropped, and active error-delivery signals are aborted.
    *
    * @param timeout Maximum graceful wait in milliseconds.
    * @defaultValue `10_000`
    */
   shutdown(timeout?: number): Promise<void>
 
-  /** Immediately closes the listener and active native connections. */
+  /** Immediately closes native connections and aborts bounded HTTP error delivery. */
   close(): void
 
   /**
@@ -996,6 +1181,8 @@ export interface CorsOptions {
  * Call the returned function at the beginning of a handler. It returns `true`
  * after replying to an `OPTIONS` preflight request.
  *
+ * @param options CORS response policy.
+ * @returns A request-level CORS applier.
  * @throws {TypeError} If credentials are combined with wildcard origin `'*'`.
  */
 export function cors(options?: CorsOptions): (ctx: HttpContext) => boolean
@@ -1073,5 +1260,9 @@ export interface ServeStaticOptions {
  * Mount the returned handler on a wildcard `/*` route. Resolved paths remain
  * confined to the canonical `root`; file reads and cache storage are bounded
  * by byte limits as well as {@link ServeStaticOptions.cacheLimit}.
+ *
+ * @param root Static root directory.
+ * @param options Static-file cache and admission policy.
+ * @returns An asynchronous HTTP handler.
  */
 export function serveStatic(root: string, options?: ServeStaticOptions): (ctx: HttpContext) => Promise<void>

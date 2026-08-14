@@ -2368,9 +2368,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeCall() {
-          return Promise.resolve()
-        }
+        reportHttpError() {}
       }
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -2424,20 +2422,17 @@ describe('HttpContext', () => {
   describe('request timeout', () => {
     test('should reject body work, send 408 with close, report the error, and finalize', async () => {
       const finalized = Promise.withResolvers<void>()
-      const reported: Array<readonly [unknown, ...unknown[]]> = []
+      const reported: unknown[][] = []
       const ctx = new HttpContext(null)
       const res = createMockRes()
       const req = createMockReq()
       const server = {
         bindingCapabilities: {},
-        httpErrorHandler: () => {},
         finalizeHttpContext() {
           finalized.resolve()
         },
-        safeCall(fn: (...args: unknown[]) => unknown, ...args: unknown[]) {
-          reported.push([fn, ...args])
-
-          return Promise.resolve()
+        reportHttpError(...args: unknown[]) {
+          reported.push(args)
         }
       }
 
@@ -2461,7 +2456,7 @@ describe('HttpContext', () => {
       strictEqual(ctx.done, true)
       strictEqual(ctx.replied, true)
       strictEqual(reported.length, 1)
-      strictEqual(httpError(at(reported, 0)[2]).status, 408)
+      strictEqual(httpError(at(reported, 0)[1]).status, 408)
       strictEqual(
         res.calls.some(([name, value]) => name === 'writeStatus' && value === STATUS_TEXT[408]),
         true
@@ -2481,14 +2476,11 @@ describe('HttpContext', () => {
       const req = createMockReq()
       const server = {
         bindingCapabilities: {},
-        httpErrorHandler: () => {},
         finalizeHttpContext() {
           finalized++
         },
-        safeCall() {
+        reportHttpError() {
           reported++
-
-          return Promise.resolve()
         }
       }
 
@@ -2537,7 +2529,7 @@ describe('HttpContext', () => {
       strictEqual(safeErrCount, 0)
     })
 
-    test('onResolve should call sendError + httpErrorHandler if send throws, and still finalize', () => {
+    test('onResolve should call sendError + reportHttpError if send throws, and still finalize', () => {
       let finalizeCount = 0
       let safeErrCount = 0
       let lastErr: Error | null = null
@@ -2546,12 +2538,9 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        httpErrorHandler(_ctx: HttpContext | null, err: Error) {
+        reportHttpError(_ctx: HttpContext | null, err: Error) {
           safeErrCount++
           lastErr = err
-        },
-        safeCall(fn: (...args: unknown[]) => unknown, ...args: unknown[]) {
-          return Promise.resolve(fn(...args))
         }
       }
       const ctx = new HttpContext(null)
@@ -2581,7 +2570,7 @@ describe('HttpContext', () => {
       strictEqual(finalizeCount, 1)
     })
 
-    test('onReject should sendError(err), call httpErrorHandler, and finalize if not streaming', () => {
+    test('onReject should sendError(err), call reportHttpError, and finalize if not streaming', () => {
       let finalizeCount = 0
       let safeErrCount = 0
       let lastErr: Error | null = null
@@ -2590,12 +2579,9 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        httpErrorHandler(_ctx: HttpContext | null, err: Error) {
+        reportHttpError(_ctx: HttpContext | null, err: Error) {
           safeErrCount++
           lastErr = err
-        },
-        safeCall(fn: (...args: unknown[]) => unknown, ...args: unknown[]) {
-          return Promise.resolve(fn(...args))
         }
       }
       const ctx = new HttpContext(null)
@@ -2658,9 +2644,7 @@ describe('HttpContext', () => {
         finalizeHttpContext() {
           finalizeCount++
         },
-        safeCall() {
-          return Promise.resolve()
-        }
+        reportHttpError() {}
       }
       const ctx = new HttpContext(null)
       const res = createMockRes()
