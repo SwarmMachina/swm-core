@@ -348,9 +348,10 @@ jobs:
           path: release-artifact/
 
       - name: Verify release artifact against package-job digest
+        working-directory: release-artifact
         run: |
-          sha256sum --check release-artifact/SHA256SUMS
-          actual="$(node -p 'JSON.parse(require("node:fs").readFileSync("release-artifact/release-manifest.json", "utf8")).sha256')"
+          sha256sum --check SHA256SUMS
+          actual="$(node -p 'JSON.parse(require("node:fs").readFileSync("release-manifest.json", "utf8")).sha256')"
           test "$actual" = "${{ needs.package.outputs.artifact_sha256 }}"
 
       - name: Publish
