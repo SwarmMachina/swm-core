@@ -57,7 +57,7 @@ interface EffectiveConfig {
     requestTimeoutMs: number
     errorDelivery: Readonly<NormalizedHttpErrorDeliveryOptions> | null
   }> | null
-  transport: Readonly<Record<string, number | null>> | null
+  transport: Readonly<HttpTransportOptions> | null
   ws: Readonly<{
     maxPayloadLength: number
     maxBackpressure: number

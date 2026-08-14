@@ -44,11 +44,12 @@ export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, be
   void options
   void effectiveConfig.http?.maxBodyBudget
   void effectiveConfig.transport?.maxHeaderSize
+  void effectiveConfig.transport?.trustedProxy?.header
   void behavior
 }
 
 export const jsOptions = defineConfig({
-  transport: { maxHeaderSize: 16 * 1024 },
+  transport: { maxHeaderSize: 16 * 1024, trustedProxy: { header: 'x-real-ip' } },
   http: {
     maxBodyBudget: 256 * 1024 * 1024,
     prefetchHeaders: ['authorization'],

@@ -46,6 +46,11 @@ export type HttpErrorHandler = (
   context: HttpErrorDeliveryContext
 ) => unknown | Promise<unknown>
 
+export interface TrustedProxyOptions {
+  header: 'x-forwarded-for' | 'x-real-ip'
+  hops?: number
+}
+
 export interface HttpTransportOptions {
   maxHeaderSize?: number
   maxHeaderCount?: number
@@ -54,6 +59,7 @@ export interface HttpTransportOptions {
   bodyIdleTimeoutMs?: number
   minBodyRateBytesPerSec?: number | null
   responseWriteTimeoutMs?: number
+  trustedProxy?: Readonly<TrustedProxyOptions>
 }
 
 export interface Route {
@@ -172,7 +178,7 @@ const HTTP_TRANSPORT_TIMEOUT_NAMES = [
   'keepAliveTimeoutMs',
   'bodyIdleTimeoutMs',
   'responseWriteTimeoutMs'
-]
+] as const
 const WS_CALLBACK_NAMES = [
   'onOpen',
   'onDrain',
@@ -198,6 +204,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_WS_UPGRADE_TIMEOUT_MS = 10_000
 const MAX_HTTP_HEADER_COUNT = 100
 const MAX_UWS_TIMEOUT_MS = 300_000
+const MAX_TRUSTED_PROXY_HOPS = 32
 const DEFAULT_HTTP_ERROR_DELIVERY_CONCURRENCY = 4
 const DEFAULT_HTTP_ERROR_DELIVERY_QUEUE_LIMIT = 256
 const DEFAULT_HTTP_ERROR_DELIVERY_TIMEOUT_MS = 5_000
@@ -215,8 +222,10 @@ const HTTP_TRANSPORT_FIELDS = new Set([
   'keepAliveTimeoutMs',
   'bodyIdleTimeoutMs',
   'minBodyRateBytesPerSec',
-  'responseWriteTimeoutMs'
+  'responseWriteTimeoutMs',
+  'trustedProxy'
 ])
+const TRUSTED_PROXY_FIELDS = new Set(['header', 'hops'])
 
 /**
  * @param {unknown} value
@@ -478,6 +487,37 @@ function normalizePositiveTransportInteger(value: unknown, name: string, maximum
 }
 
 /**
+ * @param {unknown} value
+ * @returns {Readonly<TrustedProxyOptions>}
+ */
+function normalizeTrustedProxyOptions(value: unknown): Readonly<TrustedProxyOptions> {
+  assertOptionsObject(value, 'transport.trustedProxy')
+
+  for (const name of Object.keys(value)) {
+    if (!TRUSTED_PROXY_FIELDS.has(name)) {
+      throw new TypeError(`Unknown transport.trustedProxy option: ${name}`)
+    }
+  }
+
+  const { header, hops } = value
+
+  if (header !== 'x-forwarded-for' && header !== 'x-real-ip') {
+    throw new TypeError('transport.trustedProxy.header must be "x-forwarded-for" or "x-real-ip"')
+  }
+
+  const normalizedHops =
+    hops === undefined
+      ? undefined
+      : normalizePositiveTransportInteger(hops, 'transport.trustedProxy.hops', MAX_TRUSTED_PROXY_HOPS)
+
+  if (header === 'x-real-ip' && normalizedHops !== undefined && normalizedHops !== 1) {
+    throw new TypeError('transport.trustedProxy.hops must be 1 when header is "x-real-ip"')
+  }
+
+  return Object.freeze(normalizedHops === undefined ? { header } : { header, hops: normalizedHops })
+}
+
+/**
  * Validate the optional native HTTP transport policy without filling binding-
  * owned defaults. An omitted policy therefore remains compatible with older
  * bindings and keeps their current effective defaults.
@@ -497,7 +537,7 @@ export function normalizeTransportOptions(transport: unknown): Readonly<HttpTran
     }
   }
 
-  const normalized: Record<string, number | null> = {}
+  const normalized: HttpTransportOptions = {}
 
   if (transport.maxHeaderSize !== undefined) {
     normalized.maxHeaderSize = normalizePositiveTransportInteger(transport.maxHeaderSize, 'transport.maxHeaderSize')
@@ -522,6 +562,10 @@ export function normalizeTransportOptions(transport: unknown): Readonly<HttpTran
       transport.minBodyRateBytesPerSec === null
         ? null
         : normalizePositiveTransportInteger(transport.minBodyRateBytesPerSec, 'transport.minBodyRateBytesPerSec')
+  }
+
+  if (transport.trustedProxy !== undefined) {
+    normalized.trustedProxy = normalizeTrustedProxyOptions(transport.trustedProxy)
   }
 
   return Object.keys(normalized).length === 0 ? null : Object.freeze(normalized)

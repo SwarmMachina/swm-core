@@ -359,13 +359,16 @@ describe('Server', () => {
           keepAliveTimeoutMs: 5_000,
           bodyIdleTimeoutMs: 10_000,
           minBodyRateBytesPerSec: null,
-          responseWriteTimeoutMs: 10_000
+          responseWriteTimeoutMs: 10_000,
+          trustedProxy: { header: 'x-forwarded-for', hops: 2 }
         }
       })
 
       strictEqual(Object.isFrozen(server.transport), true)
       strictEqual(requireTransport(server).maxHeaderSize, 16 * 1024)
       strictEqual(requireTransport(server).minBodyRateBytesPerSec, null)
+      deepStrictEqual(requireTransport(server).trustedProxy, { header: 'x-forwarded-for', hops: 2 })
+      strictEqual(Object.isFrozen(requireTransport(server).trustedProxy), true)
       strictEqual(server.effectiveConfig.transport, server.transport)
     })
 
@@ -386,6 +389,37 @@ describe('Server', () => {
         message: 'transport.headersTimeoutMs must be a positive safe integer no greater than 300000'
       })
       throws(() => makeServer({ onRequest: () => {}, transport: { maxHeaderSize: '16384' } }), TypeError)
+      throws(() => makeServer({ onRequest: () => {}, transport: { trustedProxy: null } }), TypeError)
+      throws(() => makeServer({ onRequest: () => {}, transport: { trustedProxy: { header: 'forwarded' } } }), {
+        name: 'TypeError',
+        message: 'transport.trustedProxy.header must be "x-forwarded-for" or "x-real-ip"'
+      })
+      throws(
+        () =>
+          makeServer({
+            onRequest: () => {},
+            transport: { trustedProxy: { header: 'x-forwarded-for', hops: 33 } }
+          }),
+        {
+          name: 'TypeError',
+          message: 'transport.trustedProxy.hops must be a positive safe integer no greater than 32'
+        }
+      )
+      throws(() => makeServer({ onRequest: () => {}, transport: { trustedProxy: { header: 'x-real-ip', hops: 2 } } }), {
+        name: 'TypeError',
+        message: 'transport.trustedProxy.hops must be 1 when header is "x-real-ip"'
+      })
+      throws(
+        () =>
+          makeServer({
+            onRequest: () => {},
+            transport: { trustedProxy: { header: 'x-real-ip', unknown: true } }
+          }),
+        {
+          name: 'TypeError',
+          message: 'Unknown transport.trustedProxy option: unknown'
+        }
+      )
       throws(() => makeServer({ onRequest: () => {}, transport: { unknown: 1 } }), {
         name: 'TypeError',
         message: 'Unknown transport option: unknown'
@@ -985,7 +1019,8 @@ describe('Server', () => {
       const transport = {
         maxHeaderSize: 16 * 1024,
         headersTimeoutMs: 10_000,
-        keepAliveTimeoutMs: 5_000
+        keepAliveTimeoutMs: 5_000,
+        trustedProxy: { header: 'x-real-ip' as const }
       }
       const server = makeServer({ onRequest: () => {}, transport })
 

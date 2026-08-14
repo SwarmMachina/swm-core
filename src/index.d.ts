@@ -535,6 +535,15 @@ export type HttpOptions = HttpBaseOptions &
       }
   )
 
+/** Explicit trust boundary for a listener reached only through known reverse proxies. */
+export interface TrustedProxyOptions {
+  /** Header written or sanitized by the trusted proxy. */
+  header: 'x-forwarded-for' | 'x-real-ip'
+
+  /** Address selected from the right of `X-Forwarded-For`; `1` is the rightmost entry. */
+  hops?: number
+}
+
 /** Native HTTP parser and connection timeout policy applied by swm-uws. */
 export interface HttpTransportOptions {
   /** Request line plus all request header fields, in bytes. */
@@ -557,6 +566,14 @@ export interface HttpTransportOptions {
 
   /** Timeout for a response blocked by outbound backpressure. */
   responseWriteTimeoutMs?: number
+
+  /**
+   * Trusts one forwarded-address header for this listener.
+   *
+   * Leave unset on public listeners. The nearest proxy must overwrite or
+   * sanitize the configured header before forwarding the request.
+   */
+  trustedProxy?: Readonly<TrustedProxyOptions>
 }
 
 /** Options shared by HTTP-only, WebSocket-only, and dual-protocol servers. */

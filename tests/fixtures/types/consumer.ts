@@ -25,6 +25,7 @@ import type {
   ServeStaticOptions,
   Server as ServerType,
   ServerOptions,
+  TrustedProxyOptions,
   UWebSocket,
   UpgradeMeta,
   UpgradeResult,
@@ -76,6 +77,7 @@ type CorePublicTypes = [
   HttpBaseOptions,
   HttpOptions,
   HttpTransportOptions,
+  TrustedProxyOptions,
   CommonServerOptions,
   ServerOptions,
   EffectiveHttpConfig,
@@ -141,7 +143,8 @@ const configuredOptions = defineConfig({
   transport: {
     maxHeaderSize: 16 * 1024,
     headersTimeoutMs: 10_000,
-    keepAliveTimeoutMs: 5_000
+    keepAliveTimeoutMs: 5_000,
+    trustedProxy: { header: 'x-forwarded-for', hops: 2 }
   },
   http: {
     prefetch: true,
@@ -185,10 +188,12 @@ const effectiveConfig: Readonly<EffectiveServerConfig> = server.effectiveConfig
 const effectiveHttp: Readonly<EffectiveHttpConfig> | null = effectiveConfig.http
 const effectiveWs: Readonly<EffectiveWSConfig> | null = effectiveConfig.ws
 const effectiveTransport: Readonly<HttpTransportOptions> | null = effectiveConfig.transport
+const effectiveTrustedProxy: Readonly<TrustedProxyOptions> | undefined = effectiveTransport?.trustedProxy
 const nativeCapabilities: Readonly<NativeCapabilities> = server.bindingCapabilities
 const errorDeliveryStats: Readonly<HttpErrorDeliveryStats> = reportingServer.httpErrorDeliveryStats
 
 void effectiveTransport
+void effectiveTrustedProxy?.header
 void nativeCapabilities.requestPrefetch
 void nativeCapabilities.responseBatch
 void errorDeliveryStats.oldestInFlightMs
