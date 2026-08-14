@@ -1,6 +1,6 @@
 {
   "name": "@swarmmachina/swm-core",
-  "version": "5.0.3",
+  "version": "5.1.0",
   "description": "High-performance HTTP/WebSocket server built on swm-uws",
   "keywords": [
     "http",
@@ -121,6 +121,6 @@
     "ws": "^8.21.2"
   },
   "dependencies": {
-    "@swarmmachina/swm-uws": "0.6.2"
+    "@swarmmachina/swm-uws": "0.7.2"
   }
 }
