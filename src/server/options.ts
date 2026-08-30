@@ -70,12 +70,14 @@ export interface Route {
   prefetch?: boolean
   prefetchHeaders?: HeaderPrefetch
   maxBodySize?: number
+  maxStreamBodySize?: number
 }
 
 export interface HttpBaseOptions {
   prefetch?: boolean
   prefetchHeaders?: HeaderPrefetch
   maxBodySize?: number
+  maxStreamBodySize?: number
   maxBodyBudget?: number | null
   requestTimeoutMs?: number
   onError?: HttpErrorHandler
@@ -134,6 +136,7 @@ export interface NormalizedHttpOptions {
   onError: HttpErrorHandler | null
   errorDelivery: NormalizedHttpErrorDeliveryOptions | null
   maxBodySize: number
+  maxStreamBodySize: number
   maxBodyBudget: number | null
   requestTimeoutMs: number
   prefetch: boolean
@@ -261,6 +264,19 @@ export function validateBodyByteLimit(value: unknown, name = 'maxSize'): number 
     throw new TypeError(
       `${name} must be specified in bytes as a non-negative safe integer no greater than ${MAX_HTTP_BODY_SIZE_BYTES}`
     )
+  }
+
+  return value
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} [name]
+ * @returns {number}
+ */
+export function validateStreamBodyByteLimit(value: unknown, name = 'maxSize'): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${name} must be specified in bytes as a non-negative safe integer`)
   }
 
   return value
@@ -629,6 +645,10 @@ function normalizeRoute(route: unknown, index: number): NormalizedRoute {
     validateBodyByteLimit(route.maxBodySize, `http.routes[${index}].maxBodySize`)
   }
 
+  if (route.maxStreamBodySize !== undefined) {
+    validateStreamBodyByteLimit(route.maxStreamBodySize, `http.routes[${index}].maxStreamBodySize`)
+  }
+
   if (before === undefined) {
     return hasPrefetchHeaders ? { ...typedRoute, prefetchHeaders } : typedRoute
   }
@@ -661,7 +681,8 @@ function normalizePrefetch(value: unknown): boolean {
  *    onRequest: ((ctx: HttpCtx) => unknown|Promise<unknown>)|null,
  *    routes: Route[]|null, onError: HttpErrorHandler|null,
  *    errorDelivery: NormalizedHttpErrorDeliveryOptions|null,
- *    maxBodySize: number, maxBodyBudget: number|null, requestTimeoutMs: number, prefetch: boolean,
+ *    maxBodySize: number, maxStreamBodySize: number, maxBodyBudget: number|null,
+ *    requestTimeoutMs: number, prefetch: boolean,
  *    prefetchHeaders: false|'all'|readonly string[]
  *  }|null}
  */
@@ -691,12 +712,23 @@ export function normalizeHttpOptions(http: unknown): NormalizedHttpOptions | nul
     http.maxBodySize === undefined ? DEFAULT_HTTP_MAX_BODY_SIZE_BYTES : http.maxBodySize,
     'http.maxBodySize'
   )
+  const maxStreamBodySize = validateStreamBodyByteLimit(
+    http.maxStreamBodySize === undefined ? maxBodySize : http.maxStreamBodySize,
+    'http.maxStreamBodySize'
+  )
 
   for (let i = 0; i < (routes?.length ?? 0); i++) {
     const routeMaxBodySize = routes?.[i]?.maxBodySize
+    const routeMaxStreamBodySize = routes?.[i]?.maxStreamBodySize
 
     if (routeMaxBodySize !== undefined && routeMaxBodySize > maxBodySize) {
       throw new TypeError(`http.routes[${i}].maxBodySize cannot exceed http.maxBodySize (${maxBodySize})`)
+    }
+
+    if (routeMaxStreamBodySize !== undefined && routeMaxStreamBodySize > maxStreamBodySize) {
+      throw new TypeError(
+        `http.routes[${i}].maxStreamBodySize cannot exceed http.maxStreamBodySize (${maxStreamBodySize})`
+      )
     }
   }
 
@@ -710,6 +742,7 @@ export function normalizeHttpOptions(http: unknown): NormalizedHttpOptions | nul
     prefetch,
     prefetchHeaders: normalizePrefetchHeaders(http.prefetchHeaders),
     maxBodySize,
+    maxStreamBodySize,
     maxBodyBudget: normalizeMaxBodyBudget(http.maxBodyBudget),
     requestTimeoutMs: normalizeRequestTimeout(http.requestTimeoutMs)
   }

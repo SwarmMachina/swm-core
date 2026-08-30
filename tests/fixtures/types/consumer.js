@@ -5,6 +5,7 @@ import { defineConfig } from '@swarmmachina/swm-core'
 /** @typedef {import('@swarmmachina/swm-core').ServerOptions} ServerOptions */
 /** @typedef {import('@swarmmachina/swm-core').EffectiveServerConfig} EffectiveServerConfig */
 /** @typedef {import('@swarmmachina/swm-core').HttpContext} HttpContext */
+/** @typedef {import('@swarmmachina/swm-core').RequestBodyStream} RequestBodyStream */
 /** @typedef {import('@swarmmachina/swm-core').WSContext} WSContext */
 /** @typedef {import('@swarmmachina/swm-uws').HttpRequest} HttpRequest */
 /** @typedef {import('@swarmmachina/swm-uws').HttpResponse} HttpResponse */
@@ -12,6 +13,7 @@ import { defineConfig } from '@swarmmachina/swm-core'
 
 /**
  * @param {HttpContext} ctx
+ * @param {HttpContext} streamingCtx
  * @param {WSContext} ws
  * @param {HttpRequest} req
  * @param {HttpResponse} res
@@ -19,7 +21,7 @@ import { defineConfig } from '@swarmmachina/swm-core'
  * @param {EffectiveServerConfig} effectiveConfig
  * @param {WebSocketBehavior} behavior
  */
-export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, behavior) {
+export function verifyJsConsumer(ctx, streamingCtx, ws, req, res, options, effectiveConfig, behavior) {
   ctx.getIP()
   ctx.getMethod()
   ctx.getUrl()
@@ -30,6 +32,9 @@ export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, be
   ctx.headers
   ctx.getHeaders()
   ctx.getContentLength()
+  /** @type {RequestBodyStream} */
+  const bodyStream = streamingCtx.bodyStream()
+  void bodyStream.contentLength
   ctx.setStatus(201)
   void ctx.json()
   ws.send('hello')
@@ -42,6 +47,7 @@ export function verifyJsConsumer(ctx, ws, req, res, options, effectiveConfig, be
   res.getProxiedRemoteAddress()
   res.collectBody(1024, () => {})
   void options
+  void effectiveConfig.http?.maxStreamBodySize
   void effectiveConfig.http?.maxBodyBudget
   void effectiveConfig.transport?.maxHeaderSize
   void effectiveConfig.transport?.trustedProxy?.header

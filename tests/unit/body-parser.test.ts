@@ -20,7 +20,170 @@ function httpError(error: unknown): HttpError {
   return error as HttpError
 }
 
+async function readStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = []
+
+  for await (const chunk of stream) {
+    if (!Buffer.isBuffer(chunk)) {
+      throw new TypeError('Expected a Buffer chunk')
+    }
+
+    chunks.push(chunk)
+  }
+
+  return Buffer.concat(chunks)
+}
+
 describe('BodyParser', () => {
+  describe('bodyStream()', () => {
+    test('should enforce the configured stream ceiling and only allow per-call narrowing', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+
+      ctx.reset(res, createMockReq({ headers: { 'content-length': '5' } }))
+      parser.reset(ctx, 16, 4)
+
+      throws(
+        () => parser.bodyStream(100),
+        (error) => error === CACHED_ERRORS.bodyTooLarge
+      )
+
+      const nextCtx = new HttpContext(null)
+      const nextRes = createMockRes()
+
+      nextCtx.reset(nextRes, createMockReq({ headers: { 'content-length': '4' } }))
+      parser.reset(nextCtx, 16, 4)
+
+      const body = readStream(parser.bodyStream(100))
+
+      nextRes.pushData('test', true)
+      strictEqual((await body).toString(), 'test')
+    })
+
+    test('should reject invalid per-call stream limits', () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+
+      ctx.reset(res, createMockReq())
+      parser.reset(ctx, 16, 16)
+
+      for (const value of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+        throws(() => parser.bodyStream(value), {
+          name: 'TypeError',
+          message: 'maxSize must be specified in bytes as a non-negative safe integer'
+        })
+      }
+    })
+
+    test('should reject streaming after another body reader or prefetch', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+
+      ctx.reset(res, createMockReq({ headers: { 'content-length': '4' } }))
+      parser.reset(ctx, 16, 16)
+      parser.prefetch()
+
+      throws(() => parser.bodyStream(), {
+        name: 'Error',
+        message: 'Request body already has a reader'
+      })
+
+      res.pushData('test', true)
+      strictEqual((await parser.body()).toString(), 'test')
+
+      throws(() => parser.bodyStream(), {
+        name: 'Error',
+        message: 'Request body already has a reader'
+      })
+    })
+
+    test('should reject buffered readers and prefetch after streaming starts', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+
+      ctx.reset(res, createMockReq())
+      parser.reset(ctx, 16, 16)
+      parser.bodyStream()
+
+      await rejects(parser.body(), (error) => {
+        strictEqual(httpError(error).message, 'Request body already has a reader')
+        strictEqual(httpError(error).status, undefined)
+
+        return true
+      })
+
+      const prefetchError = parser.prefetch()
+
+      strictEqual(prefetchError?.message, 'Request body already has a reader')
+      strictEqual(httpError(prefetchError).status, undefined)
+    })
+
+    test('should preserve abort state when streaming is requested too late', () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+
+      ctx.reset(res, createMockReq())
+      parser.reset(ctx, 16, 16)
+      ctx.aborted = true
+
+      throws(
+        () => parser.bodyStream(),
+        (error) => error === CACHED_ERRORS.aborted
+      )
+    })
+
+    test('should retain a synchronously completed stream until request cleanup', async () => {
+      const parser = new BodyParser()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+
+      res.onData = (callback) => {
+        callback(Uint8Array.from(Buffer.from('test')).buffer, true)
+
+        return res
+      }
+
+      ctx.reset(res, createMockReq({ headers: { 'content-length': '4' } }))
+      parser.reset(ctx, 16, 16)
+
+      const stream = parser.bodyStream()
+
+      parser.timeout()
+      await rejects(readStream(stream), (error) => error === CACHED_ERRORS.requestTimeout)
+    })
+
+    test('should detach callbacks from a previous parser generation', async () => {
+      const parser = new BodyParser()
+      const oldCtx = new HttpContext(null)
+      const oldRes = createMockRes()
+
+      oldCtx.reset(oldRes, createMockReq())
+      parser.reset(oldCtx, 16, 16)
+
+      const oldStream = parser.bodyStream()
+      const oldCallback = oldRes.onDataCb!
+      const oldFailure = readStream(oldStream)
+      const nextCtx = new HttpContext(null)
+      const nextRes = createMockRes()
+
+      nextCtx.reset(nextRes, createMockReq({ headers: { 'content-length': '3' } }))
+      parser.reset(nextCtx, 16, 16)
+
+      const nextBody = readStream(parser.bodyStream())
+
+      oldCallback(Uint8Array.from(Buffer.from('old')).buffer, true)
+      nextRes.pushData('new', true)
+
+      await rejects(oldFailure, (error) => error === CACHED_ERRORS.aborted)
+      strictEqual((await nextBody).toString(), 'new')
+    })
+  })
+
   describe('reset()', () => {
     test('should reset all state and set ctx and maxSize', async () => {
       const parser = new BodyParser()

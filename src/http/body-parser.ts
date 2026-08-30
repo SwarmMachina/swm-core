@@ -1,11 +1,16 @@
 import { CACHED_ERRORS } from './status.js'
 import type { HttpBodyBudget, HttpBodyContext } from './internal.js'
-import { DEFAULT_HTTP_MAX_BODY_SIZE_BYTES, validateBodyByteLimit } from '../server/options.js'
+import RequestBodyStream from './request-body-stream.js'
+import {
+  DEFAULT_HTTP_MAX_BODY_SIZE_BYTES,
+  validateBodyByteLimit,
+  validateStreamBodyByteLimit
+} from '../server/options.js'
 
 const NOOP = () => {}
 const INITIAL_BODY_CAPACITY = 4096
 
-type BodyParserState = 'cleared' | 'idle' | 'collecting' | 'materialized' | 'failed' | 'aborted'
+type BodyParserState = 'cleared' | 'idle' | 'collecting' | 'materialized' | 'streaming' | 'failed' | 'aborted'
 type BodyInput = ArrayBuffer | ArrayBufferView
 type NativeBodyCallback = (body: ArrayBuffer | null) => void
 
@@ -126,6 +131,8 @@ export default class BodyParser {
   #reservedBytes = 0
   #ctx: HttpBodyContext | null = null
   #maxSize = DEFAULT_HTTP_MAX_BODY_SIZE_BYTES
+  #maxStreamSize = DEFAULT_HTTP_MAX_BODY_SIZE_BYTES
+  #bodyStream: RequestBodyStream | null = null
 
   // Known-length state.
   #dst: Buffer | null = null
@@ -379,15 +386,18 @@ export default class BodyParser {
     }
 
     const reject = this.#bodyPromise ? this.#bodyReject : null
+    const bodyStream = this.#bodyStream
 
     this.#generation++
     this.#state = state
     this.#bodyError = error
+    this.#bodyStream = null
     this.#bodyPromise = null
     this.#bodyReject = null
     this.#bodyResolve = null
     this.#discardStorage()
     this.#releaseReservation()
+    bodyStream?.destroy(error)
     reject?.(error)
   }
 
@@ -400,16 +410,18 @@ export default class BodyParser {
     this.#collectionLimit = 0
     this.#budget = null
     this.#reservedBytes = 0
+    this.#bodyStream = null
     this.#discardStorage()
   }
 
   /**
    * @param {HttpContext} ctx
    * @param {number} [maxSize]
+   * @param {number} [maxStreamSize]
    */
-  reset(ctx: HttpBodyContext, maxSize: number = this.#maxSize): void {
+  reset(ctx: HttpBodyContext, maxSize: number = this.#maxSize, maxStreamSize: number = maxSize): void {
     if (this.#state !== 'idle' && this.#state !== 'cleared') {
-      if (this.#state === 'collecting') {
+      if (this.#state === 'collecting' || this.#state === 'streaming') {
         this.#cancel(CACHED_ERRORS.aborted, 'aborted')
       }
 
@@ -419,6 +431,7 @@ export default class BodyParser {
     }
 
     this.#maxSize = validateBodyByteLimit(maxSize, 'maxSize')
+    this.#maxStreamSize = validateStreamBodyByteLimit(maxStreamSize, 'maxStreamSize')
     this.#ctx = ctx
     this.#state = 'idle'
   }
@@ -436,7 +449,7 @@ export default class BodyParser {
       return
     }
 
-    if (this.#state === 'collecting') {
+    if (this.#state === 'collecting' || this.#state === 'streaming') {
       this.#cancel(CACHED_ERRORS.aborted, 'aborted')
     }
 
@@ -448,6 +461,10 @@ export default class BodyParser {
   }
 
   prefetch(): Error | null {
+    if (this.#state === 'streaming') {
+      return new Error('Request body already has a reader')
+    }
+
     if (this.#state !== 'idle') {
       return this.#bodyError
     }
@@ -608,6 +625,72 @@ export default class BodyParser {
     return body
   }
 
+  bodyStream(maxSize?: number): RequestBodyStream {
+    const requestedLimit = maxSize === undefined ? this.#maxStreamSize : validateStreamBodyByteLimit(maxSize, 'maxSize')
+    const limit = Math.min(requestedLimit, this.#maxStreamSize)
+
+    if (this.#bodyError !== null) {
+      throw this.#bodyError
+    }
+
+    if (!this.#ctx || this.#state === 'cleared') {
+      this.#bodyError = CACHED_ERRORS.serverError
+      this.#state = 'failed'
+
+      throw this.#bodyError
+    }
+
+    if (this.#state !== 'idle') {
+      throw new Error('Request body already has a reader')
+    }
+
+    const ctx = this.#ctx
+
+    if (ctx.aborted) {
+      this.#bodyError = CACHED_ERRORS.aborted
+      this.#state = 'aborted'
+
+      throw this.#bodyError
+    }
+
+    const response = ctx.res
+
+    if (!response) {
+      this.#bodyError = CACHED_ERRORS.serverError
+      this.#state = 'failed'
+
+      throw this.#bodyError
+    }
+
+    const contentLength = ctx.getContentLength()
+
+    if (contentLength !== null && contentLength > limit) {
+      this.#discardIncomingBody(ctx)
+      this.#bodyError = CACHED_ERRORS.bodyTooLarge
+      this.#state = 'failed'
+
+      throw this.#bodyError
+    }
+
+    const stream = new RequestBodyStream(contentLength, limit)
+
+    this.#bodyStream = stream
+    this.#state = 'streaming'
+
+    try {
+      stream.start(response)
+
+      return stream
+    } catch {
+      this.#bodyStream = null
+      this.#bodyError = CACHED_ERRORS.serverError
+      this.#state = 'failed'
+      stream.destroy(this.#bodyError)
+
+      throw this.#bodyError
+    }
+  }
+
   /**
    * The first body call (or prefetch) fixes the collector limit. Later smaller
    * limits are checked against the materialized body; larger limits do not
@@ -634,6 +717,10 @@ export default class BodyParser {
       } catch (error) {
         return Promise.reject(error)
       }
+    }
+
+    if (this.#state === 'streaming') {
+      return Promise.reject(new Error('Request body already has a reader'))
     }
 
     if (this.#bodyError !== null) {

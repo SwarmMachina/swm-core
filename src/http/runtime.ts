@@ -42,6 +42,7 @@ interface HttpRuntimeServer {
     release(owner: object): void
   } | null
   readonly httpMaxBodyBytes: number
+  readonly httpMaxStreamBodyBytes: number
   readonly httpRequestTimeoutMs: number
   readonly requestPrefetchPlanClass:
     (new (options: { headers: 'all' | readonly string[] }) => RequestPrefetchPlan) | null
@@ -196,6 +197,7 @@ export default class HttpRuntime {
    * @param {false|'all'|readonly string[]} [headerSelection]
    * @param {object|null} [headerPlan]
    * @param {number} [maxBodySize]
+   * @param {number} [maxStreamBodySize]
    */
   handleWithContext = (
     res: HttpResponse,
@@ -204,7 +206,8 @@ export default class HttpRuntime {
     paramNames?: string[],
     headerSelection: HeaderPrefetch = false,
     headerPlan: RequestPrefetchPlan | null = null,
-    maxBodySize?: number
+    maxBodySize?: number,
+    maxStreamBodySize?: number
   ): void => {
     const server = this.#server
 
@@ -220,7 +223,15 @@ export default class HttpRuntime {
 
     this.#lifecycle.activeHttp++
 
-    const ctx = this.contextPool.acquire().reset(res, req, server, maxBodySize ?? server.httpMaxBodyBytes)
+    const ctx = this.contextPool
+      .acquire()
+      .reset(
+        res,
+        req,
+        server,
+        maxBodySize ?? server.httpMaxBodyBytes,
+        maxStreamBodySize ?? server.httpMaxStreamBodyBytes
+      )
 
     res.onAborted(ctx.onAbort)
     ctx.handlerPending = true
@@ -316,9 +327,22 @@ export default class HttpRuntime {
           server.requestPrefetchPlanClass
         ) as RequestPrefetchPlan | null
         const maxBodySize = route.maxBodySize ?? server.httpMaxBodyBytes
+        const maxStreamBodySize = Math.min(
+          route.maxStreamBodySize ?? route.maxBodySize ?? server.httpMaxStreamBodyBytes,
+          server.httpMaxStreamBodyBytes
+        )
 
         app[methodName](path, (res, req) =>
-          handleWithContext(res, req, routeHandler, paramNames, headerSelection, headerPlan, maxBodySize)
+          handleWithContext(
+            res,
+            req,
+            routeHandler,
+            paramNames,
+            headerSelection,
+            headerPlan,
+            maxBodySize,
+            maxStreamBodySize
+          )
         )
       }
 

@@ -1,4 +1,5 @@
 import BodyParser from './body-parser.js'
+import type RequestBodyStream from './request-body-stream.js'
 import ResStreamer from './response-streamer.js'
 import { CACHED_ERRORS, JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './status.js'
 import { assertHeaderName, assertHeaderValue, getPreparedHeaders } from './headers.js'
@@ -89,6 +90,10 @@ export default class HttpContext {
 
   body(maxSize?: number): Promise<Buffer> {
     return this.#bodyParser.body(maxSize)
+  }
+
+  bodyStream(maxSize?: number): RequestBodyStream {
+    return this.#bodyParser.bodyStream(maxSize)
   }
 
   buffer(maxSize?: number): Promise<Buffer> {
@@ -272,13 +277,15 @@ export default class HttpContext {
    * @param {import('@swarmmachina/swm-uws').HttpRequest} req
    * @param {Server} [server]
    * @param {number} [maxSize]
+   * @param {number} [maxStreamSize]
    * @returns {HttpContext}
    */
   reset(
     res: HttpResponse,
     req: HttpRequest,
     server: HttpContextServer | HttpContextServerInput | null = null,
-    maxSize = DEFAULT_HTTP_MAX_BODY_SIZE_BYTES
+    maxSize = DEFAULT_HTTP_MAX_BODY_SIZE_BYTES,
+    maxStreamSize = maxSize
   ): this {
     this.stopRequestTimeout()
 
@@ -315,7 +322,7 @@ export default class HttpContext {
     this.releasePending = false
     this.onWritableCallback = null
 
-    this.#bodyParser.reset(this, maxSize)
+    this.#bodyParser.reset(this, maxSize, maxStreamSize)
     this.#resStreamer.reset(this, res)
 
     return this

@@ -151,6 +151,47 @@ test('drains an early declared body-limit rejection before keep-alive reuse', as
   }
 })
 
+test('drains a destroyed request-body stream before keep-alive reuse', async () => {
+  server = await startHttpServer({
+    maxStreamBodySize: 1024 * 1024,
+    routes: [
+      {
+        method: 'post',
+        path: '/stream',
+        handler: async (ctx) => {
+          const stream = ctx.bodyStream()
+
+          await new Promise((resolve) => setTimeout(resolve, 25))
+          stream.destroy()
+
+          return 'ok'
+        }
+      },
+      { method: 'get', path: '/next', handler: () => 'next' }
+    ]
+  })
+
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 })
+
+  try {
+    const first = await request(agent, {
+      method: 'POST',
+      port: server.port,
+      path: '/stream',
+      body: 'x'.repeat(256 * 1024)
+    })
+    const next = await request(agent, { method: 'GET', port: server.port, path: '/next' })
+
+    assert.strictEqual(first.status, 200)
+    assert.strictEqual(first.text, 'ok')
+    assert.strictEqual(next.status, 200)
+    assert.strictEqual(next.text, 'next')
+    assert.strictEqual(first.socket, next.socket)
+  } finally {
+    agent.destroy()
+  }
+})
+
 test('terminate aborts the HTTP connection without sending a response', async () => {
   server = await startHttpServer({
     routes: [{ method: 'get', path: '/terminate', handler: (ctx) => ctx.terminate() }]

@@ -55,6 +55,7 @@ const READABLE_SURFACE = {
   HttpContext: [
     'aborted',
     'body',
+    'bodyStream',
     'buffer',
     'getContentLength',
     'getReqHeader',
@@ -305,13 +306,14 @@ test(
 
       const readable = ctx as unknown as Record<string, unknown>
 
-      for (const method of ['body', 'buffer', 'text', 'json']) {
+      for (const method of ['body', 'bodyStream', 'buffer', 'text', 'json']) {
         assert.equal(typeof readable[method], 'function')
       }
 
       cover(
         'HttpContext',
         'aborted',
+        'bodyStream',
         'buffer',
         'getContentLength',
         'getReqHeader',

@@ -53,6 +53,7 @@ interface EffectiveConfig {
     prefetch: boolean
     prefetchHeaders: false | 'all' | readonly string[]
     maxBodySize: number
+    maxStreamBodySize: number
     maxBodyBudget: number | null
     requestTimeoutMs: number
     errorDelivery: Readonly<NormalizedHttpErrorDeliveryOptions> | null
@@ -108,6 +109,7 @@ export default class Server {
   declare transport: Readonly<HttpTransportOptions> | null
   declare ws: NormalizedWSOptions | null
   declare httpMaxBodyBytes: number
+  declare httpMaxStreamBodyBytes: number
   declare httpBodyBudget: BodyBudget | null
   declare httpRequestTimeoutMs: number
   declare wsMaxPayloadBytes: number
@@ -224,6 +226,7 @@ export default class Server {
     this.transport = transport
     this.ws = ws
     this.httpMaxBodyBytes = http?.maxBodySize ?? 0
+    this.httpMaxStreamBodyBytes = http?.maxStreamBodySize ?? 0
     this.httpBodyBudget = http && http.maxBodyBudget !== null ? new BodyBudget(http.maxBodyBudget) : null
     this.httpRequestTimeoutMs = http?.requestTimeoutMs ?? 0
     this.wsMaxPayloadBytes = ws?.maxPayloadLength ?? 0
@@ -258,6 +261,7 @@ export default class Server {
             prefetch: http.prefetch,
             prefetchHeaders: http.prefetchHeaders,
             maxBodySize: this.httpMaxBodyBytes,
+            maxStreamBodySize: this.httpMaxStreamBodyBytes,
             maxBodyBudget: http.maxBodyBudget,
             requestTimeoutMs: this.httpRequestTimeoutMs,
             errorDelivery: http.errorDelivery

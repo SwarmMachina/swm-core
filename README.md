@@ -212,6 +212,10 @@ http: {
 > Either enable `prefetch`, or start the reader synchronously inside `before`,
 > before its first `await`, and retain the returned Promise for the handler.
 
+> **Streaming:** call `ctx.bodyStream()` before the first `await`. It cannot be
+> combined with body prefetch. If a route has an asynchronous `before`, create
+> the stream there before its first `await` and retain it for the handler.
+
 ### HTTP Server with Routing (Traditional API)
 
 ```javascript
@@ -396,17 +400,18 @@ a fixed `404` without allocating an `HttpContext`.
 
 **HTTP Options (`http` object):**
 
-| Option             | Type                       | Default     | Description                                                          |
-| ------------------ | -------------------------- | ----------- | -------------------------------------------------------------------- |
-| `maxBodySize`      | `Number`                   | `1048576`   | Maximum HTTP request body size in bytes (1 MiB default, 64 MiB max). |
-| `maxBodyBudget`    | `Number`/`null`            | `268435456` | Aggregate retained/in-flight body-memory budget in bytes (256 MiB).  |
-| `requestTimeoutMs` | `Number`                   | `30000`     | Async handler timeout in ms (100-300000); explicit `0` disables it.  |
-| `prefetch`         | `Boolean`                  | `false`     | Collect request bodies before user handlers run.                     |
-| `prefetchHeaders`  | `false`/`'all'`/`String[]` | omitted     | Retain selected request headers before handlers run.                 |
-| `onRequest`        | `Function`                 | default 404 | Universal request handler `(ctx) => any`                             |
-| `routes`           | `Array`                    | default 404 | Declarative route definitions                                        |
-| `errorDelivery`    | `Object`                   | see below   | Bounded async error-delivery policy                                  |
-| `onError`          | `Function`                 | omitted     | Request error handler `(event, error, { signal }) => any`            |
+| Option              | Type                       | Default       | Description                                                          |
+| ------------------- | -------------------------- | ------------- | -------------------------------------------------------------------- |
+| `maxBodySize`       | `Number`                   | `1048576`     | Maximum HTTP request body size in bytes (1 MiB default, 64 MiB max). |
+| `maxStreamBodySize` | `Number`                   | `maxBodySize` | Maximum `bodyStream()` size in bytes (non-negative safe integer).    |
+| `maxBodyBudget`     | `Number`/`null`            | `268435456`   | Aggregate retained/in-flight body-memory budget in bytes (256 MiB).  |
+| `requestTimeoutMs`  | `Number`                   | `30000`       | Async handler timeout in ms (100-300000); explicit `0` disables it.  |
+| `prefetch`          | `Boolean`                  | `false`       | Collect request bodies before user handlers run.                     |
+| `prefetchHeaders`   | `false`/`'all'`/`String[]` | omitted       | Retain selected request headers before handlers run.                 |
+| `onRequest`         | `Function`                 | default 404   | Universal request handler `(ctx) => any`                             |
+| `routes`            | `Array`                    | default 404   | Declarative route definitions                                        |
+| `errorDelivery`     | `Object`                   | see below     | Bounded async error-delivery policy                                  |
+| `onError`           | `Function`                 | omitted       | Request error handler `(event, error, { signal }) => any`            |
 
 `http.onRequest` and `http.routes` are mutually exclusive. `http: {}` enables
 HTTP with a deterministic default `404` response.
@@ -587,6 +592,7 @@ import Server from '@swarmmachina/swm-core'
 const routeServer = new Server({
   http: {
     maxBodySize: 2 * 1024 * 1024,
+    maxStreamBodySize: 16 * 1024 * 1024,
     maxBodyBudget: 32 * 1024 * 1024,
     requestTimeoutMs: 10_000,
     routes: [
@@ -743,10 +749,14 @@ All values are byte counts. `maxBodySize` defaults to 1 MiB and cannot exceed
 64 MiB; it limits one request. `maxBodyBudget` defaults to 256 MiB and limits
 the aggregate retained and in-flight body memory across requests.
 
+`maxStreamBodySize` defaults to `maxBodySize` and limits `ctx.bodyStream()`.
+It accepts any non-negative safe integer.
+
 ```javascript
 const server = new Server({
   http: {
     maxBodySize: 16 * 1024 * 1024,
+    maxStreamBodySize: 512 * 1024 * 1024,
     maxBodyBudget: 256 * 1024 * 1024,
     onRequest
   }
@@ -763,19 +773,24 @@ flow for larger uploads. `requestTimeoutMs` defaults to 30 seconds. Before a
 response starts it releases the body reservation and returns `408`; after an
 early response it finalizes the request without a second response. It does not
 cancel application work.
+
+`ctx.bodyStream(maxSize)` does not retain the complete body or use
+`maxBodyBudget`. Its per-call and route limits can only lower
+`http.maxStreamBodySize`.
 The normalized values are available on `server.effectiveConfig.http`.
 
 **Route Definition (for `routes` array):**
 
-| Property          | Type                       | Description                                                                                              |
-| ----------------- | -------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `method`          | `String`                   | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'`   |
-| `path`            | `String`                   | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                               |
-| `handler`         | `Function`                 | Handler function `(ctx) => any \| Promise<any>`                                                          |
-| `before`          | `Function`/`Array`         | Optional. One function or an array, run before `handler` (see [Route before hooks](#route-before-hooks)) |
-| `prefetch`        | `Boolean`                  | Optional route body-prefetch override. Omitted inherits `http.prefetch`.                                 |
-| `prefetchHeaders` | `false`/`'all'`/`String[]` | Optional header-retention override. Omitted inherits `http.prefetchHeaders`.                             |
-| `maxBodySize`     | `Number`                   | Optional route body limit in bytes; cannot exceed `http.maxBodySize`.                                    |
+| Property            | Type                       | Description                                                                                                           |
+| ------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `method`            | `String`                   | HTTP method: `'get'`, `'post'`, `'put'`, `'delete'`/`'del'`, `'patch'`, `'options'`, `'head'`, `'any'`                |
+| `path`              | `String`                   | URL path pattern. Supports `:param` segments and a `/*` wildcard catch-all                                            |
+| `handler`           | `Function`                 | Handler function `(ctx) => any \| Promise<any>`                                                                       |
+| `before`            | `Function`/`Array`         | Optional. One function or an array, run before `handler` (see [Route before hooks](#route-before-hooks))              |
+| `prefetch`          | `Boolean`                  | Optional route body-prefetch override. Omitted inherits `http.prefetch`.                                              |
+| `prefetchHeaders`   | `false`/`'all'`/`String[]` | Optional header-retention override. Omitted inherits `http.prefetchHeaders`.                                          |
+| `maxBodySize`       | `Number`                   | Optional route body limit in bytes; cannot exceed `http.maxBodySize`.                                                 |
+| `maxStreamBodySize` | `Number`                   | Optional `bodyStream()` limit; defaults to explicit route `maxBodySize`, otherwise inherits `http.maxStreamBodySize`. |
 
 **WebSocket Options (`ws` object):**
 
@@ -1150,6 +1165,50 @@ Every `maxSize` argument is a non-negative safe integer byte count. The first
 body accessor (or prefetch) fixes the collection limit; later calls reuse one
 collector. A smaller later value checks the same materialized bytes, while a
 larger value does not restart or expand an in-flight or failed collection.
+
+##### `ctx.bodyStream([maxSize])`
+
+Stream the request body as a Node.js `Readable` without buffering the whole
+body. Set `prefetch: false` and create the stream synchronously before the first
+asynchronous boundary in the complete `onRequest` or route hook/handler chain.
+An asynchronous `before` hook must create it before that hook yields.
+
+```javascript
+import { createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
+
+const upload = ctx.bodyStream()
+const user = await authorize(ctx.getReqHeader('authorization'))
+
+if (!user) {
+  upload.destroy()
+  return ctx.setStatus(401).send({ error: 'Unauthorized' })
+}
+
+await pipeline(upload, createWriteStream('./uploads/video.mp4'))
+```
+
+**Returns:** `RequestBodyStream`, a Node.js `Readable`. Its readonly
+`contentLength` is the strictly parsed `Content-Length`, or `null`; the declared
+value does not prove how many bytes will ultimately arrive.
+
+Transport-owned chunks are copied into owned `Buffer` instances before they
+become visible to application code. When the Readable reaches its high-water
+mark, native request delivery is paused and resumes as the consumer drains it.
+The explicit `maxSize` is a non-negative safe integer and can only narrow the
+effective route and `http.maxStreamBodySize` ceiling. Streamed bytes do not use
+`http.maxBodyBudget`.
+
+A streaming reader is exclusive. It cannot be combined with body prefetch or
+`body()`, `buffer()`, `text()`, or `json()` for the same request. Invalid limits,
+known oversized lengths, and reader conflicts throw synchronously. Errors
+detected after `bodyStream()` returns—including native delivery, size, framing,
+timeout, and abort failures—are emitted by the stream and reject `pipeline()`
+or asynchronous iteration.
+
+If the handler stops without consuming the body, for example after
+authorization fails, call `stream.destroy()` before returning. This releases
+native backpressure and lets the transport drain unread request bytes.
 
 ##### `ctx.buffer([maxSize])`
 

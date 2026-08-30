@@ -15,6 +15,7 @@ export interface HttpServerOptions {
   onRequest?: Handler
   routes?: Route[]
   maxBodySize?: number
+  maxStreamBodySize?: number
   maxBodyBudget?: number | null
   requestTimeoutMs?: number
   prefetch?: boolean
@@ -34,6 +35,7 @@ export async function startHttpServer({
   onRequest,
   routes,
   maxBodySize,
+  maxStreamBodySize,
   maxBodyBudget,
   requestTimeoutMs,
   prefetch,
@@ -44,6 +46,7 @@ export async function startHttpServer({
   const port = await getFreePort()
   const common = {
     ...(maxBodySize !== undefined ? { maxBodySize } : {}),
+    ...(maxStreamBodySize !== undefined ? { maxStreamBodySize } : {}),
     ...(maxBodyBudget !== undefined ? { maxBodyBudget } : {}),
     ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
     ...(prefetch !== undefined ? { prefetch } : {}),

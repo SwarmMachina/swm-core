@@ -60,6 +60,7 @@ function assertJavaScriptIdeTypes(consumer: string, compilerOptions: ts.Compiler
   const names = new Set(completions?.entries.map((entry) => entry.name))
 
   assert.ok(names.has('maxBodySize'), 'JavaScript IDE completion is missing maxBodySize')
+  assert.ok(names.has('maxStreamBodySize'), 'JavaScript IDE completion is missing maxStreamBodySize')
   assert.ok(names.has('maxBodyBudget'), 'JavaScript IDE completion is missing maxBodyBudget')
 
   const details = service.getCompletionEntryDetails(file, position, 'maxBodyBudget', {}, undefined, {}, undefined)
@@ -70,6 +71,25 @@ function assertJavaScriptIdeTypes(consumer: string, compilerOptions: ts.Compiler
 
   assert.match(documentation, /Aggregate retained and in-flight HTTP body budget/)
   assert.match(defaultValue ?? '', /268_435_456.*256 MiB/)
+
+  const streamDetails = service.getCompletionEntryDetails(
+    file,
+    position,
+    'maxStreamBodySize',
+    {},
+    undefined,
+    {},
+    undefined
+  )
+  const streamDocumentation = ts.displayPartsToString(streamDetails?.documentation)
+  const streamDefaultTagText = streamDetails?.tags?.find((tag) => tag.name === 'defaultValue')?.text
+  const streamDefaultValue =
+    typeof streamDefaultTagText === 'string'
+      ? streamDefaultTagText
+      : streamDefaultTagText?.map((part) => part.text).join('')
+
+  assert.match(streamDocumentation, /Maximum body size for one `HttpContext\.bodyStream\(\)` request/)
+  assert.match(streamDefaultValue ?? '', /maxBodySize/)
 }
 
 /**

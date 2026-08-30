@@ -16,6 +16,15 @@ export type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'del' | 'patch' | '
  */
 export type HttpBody = string | ArrayBuffer | ArrayBufferView | Buffer
 
+/** A bounded readable request body created by {@link HttpContext.bodyStream}. */
+export interface RequestBodyStream extends Readable {
+  /**
+   * Strictly parsed request `Content-Length`, or `null` when absent or invalid.
+   * This declaration is not proof of the number of bytes ultimately received.
+   */
+  readonly contentLength: number | null
+}
+
 /**
  * A response-header map.
  *
@@ -122,6 +131,15 @@ export interface Route {
    * which remains the server-wide safety ceiling.
    */
   maxBodySize?: number
+
+  /**
+   * Per-route `bodyStream()` limit in bytes.
+   *
+   * Defaults to this route's `maxBodySize` when present, otherwise to
+   * {@link HttpBaseOptions.maxStreamBodySize}, and never exceeds that global
+   * stream ceiling.
+   */
+  maxStreamBodySize?: number
 }
 
 /**
@@ -457,6 +475,17 @@ export interface HttpBaseOptions {
   maxBodySize?: number
 
   /**
+   * Maximum body size for one `HttpContext.bodyStream()` request, in bytes.
+   *
+   * Route and per-call limits may narrow but cannot raise this server-wide
+   * ceiling. Streamed bytes are not charged to `maxBodyBudget`.
+   *
+   * @defaultValue The normalized {@link HttpBaseOptions.maxBodySize}.
+   * @remarks Must be a non-negative safe integer.
+   */
+  maxStreamBodySize?: number
+
+  /**
    * Aggregate retained and in-flight HTTP body budget, in bytes.
    *
    * The default applies to both lazy readers and prefetched bodies. Known
@@ -694,6 +723,9 @@ export interface EffectiveHttpConfig {
   /** Effective per-request body limit in bytes. */
   readonly maxBodySize: number
 
+  /** Effective per-request `bodyStream()` ceiling in bytes. */
+  readonly maxStreamBodySize: number
+
   /** Effective aggregate body budget in bytes, or `null` when disabled. */
   readonly maxBodyBudget: number | null
 
@@ -801,6 +833,33 @@ export interface HttpContext {
    * @throws An error with status 503 when aggregate body budget is exhausted.
    */
   body(maxSize?: number): Promise<Buffer>
+
+  /**
+   * Streams the request body as a Node.js `Readable` without buffering it.
+   *
+   * Create the stream synchronously before the first asynchronous boundary in
+   * the complete `onRequest` or route hook/handler chain. An asynchronous
+   * `before` hook must create it before that hook yields. Streaming requires
+   * `prefetch: false` and is exclusive with other body accessors for the same
+   * request.
+   *
+   * Transport-owned chunks are copied into `Buffer` instances before becoming
+   * visible to application code. Native delivery follows Readable
+   * backpressure. Streamed bytes are not charged to `http.maxBodyBudget`.
+   * Destroy an unconsumed stream before returning a response so native
+   * backpressure is released and unread request bytes can be drained.
+   *
+   * @param maxSize Optional per-call ceiling that can only narrow the
+   * configured stream limit.
+   * @returns A bounded readable of owned `Buffer` chunks.
+   * @throws A synchronous `TypeError` for an invalid `maxSize`, or a
+   * synchronous error when a known length exceeds the limit or another reader
+   * exists.
+   * @remarks Errors detected after this method returns, including native
+   * delivery, size, framing, timeout, and abort failures, are emitted by the
+   * returned stream.
+   */
+  bodyStream(maxSize?: number): RequestBodyStream
 
   /** Alias of {@link HttpContext.body}. */
   buffer(maxSize?: number): Promise<Buffer>
