@@ -198,6 +198,12 @@ export function createMockRes(options: MockResOptions = {}): MockRes {
       calls.push(['discardBody'])
       collectBodyCb = null
     },
+    pause(): void {
+      calls.push(['pause'])
+    },
+    resume(): void {
+      calls.push(['resume'])
+    },
     pushCollectedBody(data: ArrayLike<number> | null): void {
       if (!collectBodyCb) {
         throw new Error('collectBody not called yet')

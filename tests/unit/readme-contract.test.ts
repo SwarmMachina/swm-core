@@ -48,6 +48,7 @@ test('README configuration examples cover every public Server option', () => {
     'prefetch',
     'prefetchHeaders',
     'maxBodySize',
+    'maxStreamBodySize',
     'maxBodyBudget',
     'requestTimeoutMs',
     'onRequest',

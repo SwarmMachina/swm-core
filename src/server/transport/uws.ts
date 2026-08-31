@@ -21,6 +21,7 @@ const DEFAULT_NATIVE_FAST_PATHS = new Set([
   'collectBody',
   'collectBodyLength',
   'httpTransportConfig',
+  'requestPause',
   'requestPrefetch'
 ])
 

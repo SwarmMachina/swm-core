@@ -172,7 +172,9 @@ describe('Server', () => {
       strictEqual(server.host, '127.0.0.1')
       strictEqual(server.port, 6000)
       strictEqual(server.httpMaxBodyBytes, 1024 * 1024)
+      strictEqual(server.httpMaxStreamBodyBytes, 1024 * 1024)
       strictEqual(requireBodyBudget(server).limitBytes, 256 * 1024 * 1024)
+      strictEqual(requireEffectiveHttp(server).maxStreamBodySize, 1024 * 1024)
       strictEqual(requireEffectiveHttp(server).maxBodyBudget, 256 * 1024 * 1024)
       strictEqual(server.httpRequestTimeoutMs, 30_000)
       strictEqual(requireHttp(server).prefetch, false)
@@ -349,6 +351,31 @@ describe('Server', () => {
       )
     })
 
+    test('should validate a per-route stream body limit against the HTTP ceiling', () => {
+      const server = makeServer({
+        http: {
+          maxStreamBodySize: 1024,
+          routes: [{ method: 'post', path: '/small', maxStreamBodySize: 128, handler: () => {} }]
+        }
+      })
+
+      strictEqual(at(requireDefined(requireHttp(server).routes, 'HTTP routes'), 0, 'HTTP route').maxStreamBodySize, 128)
+
+      throws(
+        () =>
+          makeServer({
+            http: {
+              maxStreamBodySize: 1024,
+              routes: [{ method: 'post', path: '/large', maxStreamBodySize: 1025, handler: () => {} }]
+            }
+          }),
+        {
+          name: 'TypeError',
+          message: 'http.routes[0].maxStreamBodySize cannot exceed http.maxStreamBodySize (1024)'
+        }
+      )
+    })
+
     test('should validate and freeze explicit native transport options', () => {
       const server = makeServer({
         onRequest: () => {},
@@ -444,6 +471,21 @@ describe('Server', () => {
       const server = makeServer({ http: { onRequest: () => {}, maxBodySize: 5 * 1024 * 1024 } })
 
       strictEqual(server.httpMaxBodyBytes, 5 * 1024 * 1024)
+      strictEqual(server.httpMaxStreamBodyBytes, 5 * 1024 * 1024)
+    })
+
+    test('should use a separate maxStreamBodySize ceiling', () => {
+      const server = makeServer({
+        http: {
+          onRequest: () => {},
+          maxBodySize: 1024,
+          maxStreamBodySize: 512 * 1024 * 1024
+        }
+      })
+
+      strictEqual(server.httpMaxBodyBytes, 1024)
+      strictEqual(server.httpMaxStreamBodyBytes, 512 * 1024 * 1024)
+      strictEqual(requireEffectiveHttp(server).maxStreamBodySize, 512 * 1024 * 1024)
     })
 
     test('should configure aggregate body budget and request timeout', () => {
@@ -685,6 +727,27 @@ describe('Server', () => {
       const server2 = makeServer({ http: { onRequest: () => {}, maxBodySize: 64 * 1024 * 1024 } })
 
       strictEqual(server2.httpMaxBodyBytes, 64 * 1024 * 1024)
+    })
+
+    test('should validate http.maxStreamBodySize without the maxBodySize ceiling', () => {
+      const maximum = Number.MAX_SAFE_INTEGER
+      const server = makeServer({ http: { onRequest: () => {}, maxStreamBodySize: maximum } })
+
+      strictEqual(server.httpMaxStreamBodyBytes, maximum)
+
+      for (const value of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '1', {}, Object(1)]) {
+        throws(() => makeServer({ http: { onRequest: () => {}, maxStreamBodySize: value } }), {
+          name: 'TypeError',
+          message: 'http.maxStreamBodySize must be specified in bytes as a non-negative safe integer'
+        })
+      }
+    })
+
+    test('should preserve an explicit zero-byte http.maxStreamBodySize', () => {
+      const server = makeServer({ http: { onRequest: () => {}, maxStreamBodySize: 0 } })
+
+      strictEqual(server.httpMaxStreamBodyBytes, 0)
+      strictEqual(requireEffectiveHttp(server).maxStreamBodySize, 0)
     })
 
     test('distinguishes omitted, zero, finite, and unlimited body budgets', () => {
@@ -994,7 +1057,7 @@ describe('Server', () => {
         collectBody: true,
         collectBodyLength: true,
         httpTransportConfig: true,
-        requestPause: false,
+        requestPause: true,
         requestPrefetch: true,
         responseBatch: false
       })
@@ -1205,6 +1268,67 @@ describe('Server', () => {
       await new Promise((resolve) => setImmediate(resolve))
 
       strictEqual(res.getStatus(), STATUS_TEXT[413])
+    })
+
+    test('should derive and enforce route-specific stream body limits', async () => {
+      const server = makeServer({
+        http: {
+          maxBodySize: 1024,
+          maxStreamBodySize: 16,
+          routes: [
+            {
+              method: 'post',
+              path: '/inherited',
+              maxBodySize: 4,
+              handler: async (ctx) => {
+                for await (const chunk of ctx.bodyStream()) {
+                  void chunk
+                }
+
+                return 'unreachable'
+              }
+            },
+            {
+              method: 'post',
+              path: '/explicit',
+              maxBodySize: 4,
+              maxStreamBodySize: 8,
+              handler: async (ctx) => {
+                let body = ''
+
+                for await (const chunk of ctx.bodyStream()) {
+                  body += chunk.toString()
+                }
+
+                return body
+              }
+            }
+          ]
+        }
+      })
+
+      await server.listen()
+
+      const inheritedCall = requireRouteCall(requireCurrentMockApp().calls.find((call) => call.path === '/inherited'))
+      const inheritedReq = createMockHttpRequest()
+      const inheritedRes = createMockHttpResponse()
+
+      inheritedReq.setHeader('content-length', '5')
+      inheritedCall.handler(inheritedRes, inheritedReq)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(inheritedRes.getStatus(), STATUS_TEXT[413])
+
+      const explicitCall = requireRouteCall(requireCurrentMockApp().calls.find((call) => call.path === '/explicit'))
+      const explicitReq = createMockHttpRequest()
+      const explicitRes = createMockHttpResponse()
+
+      explicitReq.setHeader('content-length', '5')
+      explicitCall.handler(explicitRes, explicitReq)
+      explicitRes.pushData('hello', true)
+      await new Promise((resolve) => setImmediate(resolve))
+
+      strictEqual(responseEndBody(explicitRes.calls.find((call) => call.method === 'end')), 'hello')
     })
 
     test('should retain only selected HTTP headers without a full header iteration', async () => {

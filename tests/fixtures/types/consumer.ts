@@ -20,6 +20,7 @@ import type {
   NativeCapabilities,
   PreparedHeaders,
   RawWebSocket,
+  RequestBodyStream,
   ResponseHeaders,
   Route,
   ServeStaticOptions,
@@ -90,6 +91,7 @@ type CorePublicTypes = [
   HttpErrorDeliveryStats,
   WSSendStatus,
   RawWebSocket,
+  RequestBodyStream,
   UWebSocket,
   WSContext,
   CorsOptions,
@@ -123,6 +125,7 @@ const uploadRoute: Route = {
   method: 'post',
   path: '/upload',
   maxBodySize: 1024,
+  maxStreamBodySize: 16 * 1024 * 1024,
   prefetchHeaders: ['authorization'],
   handler: (ctx) => ctx.headers.authorization
 }
@@ -150,6 +153,7 @@ const configuredOptions = defineConfig({
     prefetch: true,
     prefetchHeaders: ['authorization', 'traceparent'],
     maxBodySize: 16 * 1024 * 1024,
+    maxStreamBodySize: 128 * 1024 * 1024,
     maxBodyBudget: 256 * 1024 * 1024,
     onRequest: () => 'ok'
   }
@@ -194,11 +198,14 @@ const errorDeliveryStats: Readonly<HttpErrorDeliveryStats> = reportingServer.htt
 
 void effectiveTransport
 void effectiveTrustedProxy?.header
+void effectiveHttp?.maxStreamBodySize
 void nativeCapabilities.requestPrefetch
 void nativeCapabilities.responseBatch
 void errorDeliveryStats.oldestInFlightMs
 
 export function verifyHttpContextReaders(ctx: HttpContext): void {
+  const bodyStream: RequestBodyStream = ctx.bodyStream(1024)
+  const bodyContentLength: number | null = bodyStream.contentLength
   const ip: string = ctx.getIP()
   const method: string = ctx.getMethod()
   const url: string = ctx.getUrl()
@@ -220,6 +227,8 @@ export function verifyHttpContextReaders(ctx: HttpContext): void {
   void prefetchedHeaders
   void headers
   void contentLength
+  void bodyStream
+  void bodyContentLength
 
   ctx.getIP()
   ctx.getMethod()
