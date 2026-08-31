@@ -1168,55 +1168,28 @@ larger value does not restart or expand an in-flight or failed collection.
 
 ##### `ctx.bodyStream([maxSize])`
 
-Stream the request body as a Node.js `Readable` without buffering the whole
-body. Set `prefetch: false` and create the stream synchronously before the first
-asynchronous boundary in the complete `onRequest` or route hook/handler chain.
-An asynchronous `before` hook must create it before that hook yields.
+Stream the request body as a Node.js `Readable` of owned `Buffer` chunks with
+backpressure. Set `prefetch: false` and call it synchronously before any hook
+or handler yields.
 
 ```javascript
 import { createWriteStream } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 
 const upload = ctx.bodyStream()
-const user = await authorize(ctx.getReqHeader('authorization'))
-
-if (!user) {
-  upload.destroy()
-  return ctx.setStatus(401).send({ error: 'Unauthorized' })
-}
-
 await pipeline(upload, createWriteStream('./uploads/video.mp4'))
 ```
 
-**Returns:** `RequestBodyStream`, a Node.js `Readable`. Its readonly
-`contentLength` is the strictly parsed `Content-Length`, or `null`; the declared
-value does not prove how many bytes will ultimately arrive.
+**Returns:** `RequestBodyStream` with readonly `contentLength`: the declared
+length in bytes, or `null`.
 
-Transport-owned chunks are copied into owned `Buffer` instances before they
-become visible to application code. When the Readable reaches its high-water
-mark, native request delivery is paused and resumes as the consumer drains it.
+`maxSize` is a non-negative safe integer in bytes and can only narrow route
+and `http.maxStreamBodySize` limits. Streaming bypasses `http.maxBodyBudget`;
+backpressure bounds the stream queue, not total process memory.
 
-Core pins `swm-uws@0.7.3`, which stops further socket reads after a pause.
-The high-water mark is a flow-control threshold, not a hard queue ceiling:
-fragments already present in the native parser buffer can still be delivered,
-allowing up to one additional 512 KiB receive buffer beyond that threshold.
-This bounds the Readable queue, not total process memory; downstream buffers,
-application-held chunks and the number of concurrent uploads also matter.
-
-The explicit `maxSize` is a non-negative safe integer and can only narrow the
-effective route and `http.maxStreamBodySize` ceiling. Streamed bytes do not use
-`http.maxBodyBudget`.
-
-A streaming reader is exclusive. It cannot be combined with body prefetch or
-`body()`, `buffer()`, `text()`, or `json()` for the same request. Invalid limits,
-known oversized lengths, and reader conflicts throw synchronously. Errors
-detected after `bodyStream()` returns—including native delivery, size, framing,
-timeout, and abort failures—are emitted by the stream and reject `pipeline()`
-or asynchronous iteration.
-
-If the handler stops without consuming the body, for example after
-authorization fails, call `stream.destroy()` before returning. This releases
-native backpressure and lets the transport drain unread request bytes.
+Do not combine it with other body readers. Creation errors throw synchronously;
+stream errors reject `pipeline()` or asynchronous iteration. If you stop reading
+early, call `upload.destroy()` before returning.
 
 ##### `ctx.buffer([maxSize])`
 
