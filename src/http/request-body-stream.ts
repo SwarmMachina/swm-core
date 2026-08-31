@@ -133,11 +133,9 @@ export default class RequestBodyStream extends Readable {
     }
 
     try {
-      const chunk = copyChunk(value)
-
       this.#receivedSize += chunkLength
 
-      const accepted = chunkLength === 0 || this.push(chunk)
+      const accepted = chunkLength === 0 || this.push(copyChunk(value))
 
       if (this.destroyed) {
         return
