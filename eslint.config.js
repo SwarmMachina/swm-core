@@ -24,6 +24,7 @@ config.push({
     '.scripts-dist/**',
     '.test-dist/**',
     '.benchmark-dist/**',
+    'benchmark/profiles/**',
     'release-artifact/**',
     'tests/fixtures/**'
   ]

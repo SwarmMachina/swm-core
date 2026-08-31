@@ -1195,6 +1195,14 @@ value does not prove how many bytes will ultimately arrive.
 Transport-owned chunks are copied into owned `Buffer` instances before they
 become visible to application code. When the Readable reaches its high-water
 mark, native request delivery is paused and resumes as the consumer drains it.
+
+Core pins `swm-uws@0.7.3`, which stops further socket reads after a pause.
+The high-water mark is a flow-control threshold, not a hard queue ceiling:
+fragments already present in the native parser buffer can still be delivered,
+allowing up to one additional 512 KiB receive buffer beyond that threshold.
+This bounds the Readable queue, not total process memory; downstream buffers,
+application-held chunks and the number of concurrent uploads also matter.
+
 The explicit `maxSize` is a non-negative safe integer and can only narrow the
 effective route and `http.maxStreamBodySize` ceiling. Streamed bytes do not use
 `http.maxBodyBudget`.
