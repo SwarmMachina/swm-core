@@ -26,6 +26,7 @@ interface MockResControls {
   getRemoteAddressCallCount(): number
   getWarnings(): string[]
   endBatch(status: string, headerLines: string[], body?: NativeData): this
+  endPrepared(status: string, headers: object, body?: NativeData): this
   beginWrite(): void
   collectBodyWithLength(maxSize: number, cb: CollectBodyCallback): number | undefined
   discardBody(): void
@@ -178,6 +179,11 @@ export function createMockRes(options: MockResOptions = {}): MockRes {
     },
     endBatch(status: string, headerLines: string[], body?: NativeData) {
       calls.push(['endBatch', status, headerLines, body])
+
+      return this
+    },
+    endPrepared(status: string, headers: object, body?: NativeData) {
+      calls.push(['endPrepared', status, headers, body])
 
       return this
     },

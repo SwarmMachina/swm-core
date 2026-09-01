@@ -1,7 +1,9 @@
 import type { RequestPrefetchPlan } from '@swarmmachina/swm-uws'
+import type { PreparedHeaderBlockConstructor } from '../../http/prepared-header-replies.js'
 
 interface NativeBindingModule {
   App: (...args: unknown[]) => object
+  PreparedHeaderBlock?: PreparedHeaderBlockConstructor
   RequestPrefetchPlan?: new (options: { headers: 'all' | readonly string[] }) => RequestPrefetchPlan
   capabilities?: () => Record<string, boolean>
   us_listen_socket_close: (socket: unknown) => void
@@ -9,6 +11,7 @@ interface NativeBindingModule {
 
 interface NativeBinding {
   App: (...args: unknown[]) => object
+  PreparedHeaderBlock?: PreparedHeaderBlockConstructor
   RequestPrefetchPlan?: new (options: { headers: 'all' | readonly string[] }) => RequestPrefetchPlan
   capabilities: Record<string, boolean>
   us_listen_socket_close: (socket: unknown) => void
@@ -21,6 +24,7 @@ const DEFAULT_NATIVE_FAST_PATHS = new Set([
   'collectBody',
   'collectBodyLength',
   'httpTransportConfig',
+  'preparedHeaders',
   'requestPause',
   'requestPrefetch'
 ])
@@ -67,9 +71,14 @@ export async function load(): Promise<NativeBinding> {
     )
   }
 
-  const advertised = typeof mod.capabilities === 'function' ? mod.capabilities() : {}
+  const reported = typeof mod.capabilities === 'function' ? mod.capabilities() : {}
+  const advertised = {
+    ...reported,
+    preparedHeaders: reported.preparedHeaders === true && mod.PreparedHeaderBlock !== undefined
+  }
   const binding: NativeBinding = {
     App: mod.App,
+    ...(mod.PreparedHeaderBlock === undefined ? {} : { PreparedHeaderBlock: mod.PreparedHeaderBlock }),
     ...(mod.RequestPrefetchPlan === undefined ? {} : { RequestPrefetchPlan: mod.RequestPrefetchPlan }),
     us_listen_socket_close: mod.us_listen_socket_close,
     capabilities: selectCapabilities(advertised)

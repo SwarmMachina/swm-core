@@ -7,9 +7,10 @@ interface PreparedHeaderGroup {
   readonly values: readonly string[]
 }
 
-interface PreparedHeaderData {
+export interface PreparedHeaderData {
   readonly groups: readonly PreparedHeaderGroup[]
   readonly lines: readonly string[]
+  readonly nativeEligible: boolean
 }
 
 const PREPARED_HEADERS = new WeakMap<object, PreparedHeaderData>()
@@ -93,9 +94,26 @@ export function prepareHeaders(headers: unknown): object {
     }
   }
 
+  let nativeEligible = lines.length / 2 <= 64
+  let nativeBytes = 0
+
+  for (let index = 0; nativeEligible && index < lines.length; index += 2) {
+    const name = lines[index]!
+    const value = lines[index + 1]!
+    const lowercaseName = name.toLowerCase()
+
+    if (lowercaseName === 'content-length' || lowercaseName === 'transfer-encoding') {
+      nativeEligible = false
+      break
+    }
+
+    nativeBytes += name.length + Buffer.byteLength(value)
+    nativeEligible = nativeBytes <= 64 * 1024
+  }
+
   const prepared = Object.freeze(Object.create(null))
 
-  PREPARED_HEADERS.set(prepared, Object.freeze({ groups, lines: Object.freeze(lines) }))
+  PREPARED_HEADERS.set(prepared, Object.freeze({ groups, lines: Object.freeze(lines), nativeEligible }))
 
   return prepared
 }

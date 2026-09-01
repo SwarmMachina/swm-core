@@ -40,6 +40,16 @@ export class RequestPrefetchPlan {
   }
 }
 
+/** Mock native-owned prepared response headers. */
+export class PreparedHeaderBlock {
+  readonly headerLines: readonly string[]
+
+  constructor(headerLines: readonly string[]) {
+    this.headerLines = Object.freeze([...headerLines])
+    Object.freeze(this)
+  }
+}
+
 /** @returns {Record<string, boolean>} */
 export function capabilities() {
   return {
@@ -47,6 +57,7 @@ export function capabilities() {
     collectBody: true,
     collectBodyLength: true,
     httpTransportConfig: true,
+    preparedHeaders: true,
     requestPause: true,
     requestPrefetch: true,
     responseBatch: true

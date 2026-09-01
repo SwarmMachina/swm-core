@@ -1,5 +1,6 @@
 import BodyParser from './body-parser.js'
 import type RequestBodyStream from './request-body-stream.js'
+import type PreparedHeaderReplies from './prepared-header-replies.js'
 import ResStreamer from './response-streamer.js'
 import { CACHED_ERRORS, JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './status.js'
 import { assertHeaderName, assertHeaderValue, getPreparedHeaders } from './headers.js'
@@ -30,6 +31,7 @@ interface HttpContextServer {
     readonly collectBodyLength?: boolean
     readonly responseBatch?: boolean
   }
+  readonly preparedHeaderReplies: PreparedHeaderReplies | null
   readonly httpBodyBudget: {
     tryReserve(bytes: number, owner: object): boolean
     resize(bytes: number, owner: object): boolean
@@ -68,6 +70,7 @@ export default class HttpContext {
   #pendingHeaders = new Map<string, PendingHeader>()
   #cleared = false
   #responseBatch = false
+  #preparedHeaderReplies: PreparedHeaderReplies | null = null
   #bodyParser = new BodyParser()
   #resStreamer = new ResStreamer()
   #requestTimeout: ReturnType<typeof setTimeout> | null = null
@@ -298,12 +301,14 @@ export default class HttpContext {
     const serverInput = typeof server === 'object' ? server : null
 
     this.#responseBatch = serverInput?.bindingCapabilities?.responseBatch === true
+    this.#preparedHeaderReplies = serverInput?.preparedHeaderReplies ?? null
 
     this.res = res
     this.req = req
     this.server = testFinalize
       ? {
           bindingCapabilities: {},
+          preparedHeaderReplies: null,
           httpBodyBudget: null,
           finalizeHttpContext: testFinalize,
           reportHttpError: () => {}
@@ -350,6 +355,7 @@ export default class HttpContext {
     this.onWritableCallback = null
 
     this.#responseBatch = false
+    this.#preparedHeaderReplies = null
 
     if (!this.#cleared) {
       this.#resetRequestState()
@@ -1312,6 +1318,16 @@ export default class HttpContext {
     this.replied = true
 
     const prepared = getPreparedHeaders(headers)
+
+    if (
+      !closeConnection &&
+      prepared &&
+      this.#pendingHeaders.size === 0 &&
+      this.res &&
+      this.#preparedHeaderReplies?.send(this.res, this.getStatus(status), prepared, body ?? undefined)
+    ) {
+      return
+    }
 
     if (
       !closeConnection &&

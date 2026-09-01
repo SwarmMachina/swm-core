@@ -1057,6 +1057,7 @@ describe('Server', () => {
         collectBody: true,
         collectBodyLength: true,
         httpTransportConfig: true,
+        preparedHeaders: true,
         requestPause: true,
         requestPrefetch: true,
         responseBatch: false

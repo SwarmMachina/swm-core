@@ -6,6 +6,7 @@ export const REQUIRED_BINDING_CAPABILITIES = [
   'beginWrite',
   'collectBody',
   'httpTransportConfig',
+  'preparedHeaders',
   'requestPause',
   'requestPrefetch',
   'responseBatch'

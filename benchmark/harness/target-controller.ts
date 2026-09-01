@@ -125,7 +125,12 @@ export class TargetController {
 
     if (fw === 'core-uwebsockets' || fw === 'raw-uwebsockets') {
       execArgv.push('--conditions=uwebsockets-reference')
-    } else if (fw === 'core-response-batch-off' || fw === 'core-response-batch-on') {
+    } else if (
+      fw === 'core-response-batch-off' ||
+      fw === 'core-response-batch-on' ||
+      fw === 'core-prepared-headers-off' ||
+      fw === 'core-prepared-headers-on'
+    ) {
       execArgv.push('--import', `./${this.#candidateLoader}`)
     }
 

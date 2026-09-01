@@ -200,6 +200,7 @@ void effectiveTransport
 void effectiveTrustedProxy?.header
 void effectiveHttp?.maxStreamBodySize
 void nativeCapabilities.requestPrefetch
+void nativeCapabilities.preparedHeaders
 void nativeCapabilities.responseBatch
 void errorDeliveryStats.oldestInFlightMs
 

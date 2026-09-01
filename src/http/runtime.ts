@@ -1,5 +1,6 @@
 import HttpContext from './context.js'
 import ContextPool from './context-pool.js'
+import type PreparedHeaderReplies from './prepared-header-replies.js'
 import { compileHeaderPrefetchPlan, mergeHeaderPrefetch } from './prefetch.js'
 import { STATUS_TEXT } from './status.js'
 import { isPromise } from '../internal/promise.js'
@@ -35,6 +36,7 @@ interface HttpRuntimeServer {
     readonly collectBodyLength?: boolean
     readonly responseBatch?: boolean
   }
+  readonly preparedHeaderReplies: PreparedHeaderReplies | null
   readonly http: NormalizedHttpOptions | null
   readonly httpBodyBudget: {
     tryReserve(bytes: number, owner: object): boolean

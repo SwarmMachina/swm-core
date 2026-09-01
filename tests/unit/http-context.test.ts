@@ -4,6 +4,8 @@ import { describe, test } from 'node:test'
 import { deepStrictEqual, rejects, strictEqual, throws } from 'node:assert/strict'
 import { createMockReadable, createMockReq, createMockRes, isWriteHeaderCall } from '../helpers/mock-http.js'
 import BaseHttpContext from '../../src/http/context.js'
+import { prepareHeaders } from '../../src/http/headers.js'
+import PreparedHeaderReplies from '../../src/http/prepared-header-replies.js'
 import { JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from '../../src/http/status.js'
 import type { HttpRequest, HttpResponse } from '@swarmmachina/swm-uws'
 
@@ -1128,6 +1130,105 @@ describe('HttpContext', () => {
   })
 
   describe('reply()', () => {
+    test('reply lazily compiles and reuses native prepared headers', () => {
+      let constructions = 0
+
+      class TestPreparedHeaderBlock {
+        readonly headerLines: readonly string[]
+
+        constructor(headerLines: readonly string[]) {
+          constructions++
+          this.headerLines = [...headerLines]
+        }
+      }
+
+      const preparedHeaderReplies = new PreparedHeaderReplies(TestPreparedHeaderBlock)
+      const server = {
+        bindingCapabilities: { preparedHeaders: true, responseBatch: true },
+        preparedHeaderReplies,
+        finalizeHttpContext() {}
+      }
+      const first = new HttpContext(null)
+      const firstResponse = createMockRes()
+      const second = new HttpContext(null)
+      const secondResponse = createMockRes()
+
+      first.reset(firstResponse, createMockReq(), server)
+      first.reply(200, JSON_HEADER, 'first')
+      second.reset(secondResponse, createMockReq(), server)
+      second.reply(201, JSON_HEADER, 'second')
+
+      strictEqual(constructions, 1)
+      strictEqual(at(firstResponse.calls, 0)[0], 'endPrepared')
+      strictEqual(at(secondResponse.calls, 0)[0], 'endPrepared')
+      strictEqual(at(firstResponse.calls, 0)[2], at(secondResponse.calls, 0)[2])
+      deepStrictEqual((at(firstResponse.calls, 0)[2] as TestPreparedHeaderBlock).headerLines, [
+        'content-type',
+        'application/json; charset=utf-8'
+      ])
+    })
+
+    test('reply keeps large prepared headers on the compatible batch path', () => {
+      class TestPreparedHeaderBlock {
+        constructor(_headerLines: readonly string[]) {
+          throw new Error('ineligible prepared headers must not reach the native constructor')
+        }
+      }
+
+      const headers = Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`x-header-${index}`, String(index)]))
+      const prepared = prepareHeaders(headers)
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const server = {
+        bindingCapabilities: { preparedHeaders: true, responseBatch: true },
+        preparedHeaderReplies: new PreparedHeaderReplies(TestPreparedHeaderBlock),
+        finalizeHttpContext() {}
+      }
+
+      ctx.reset(res, createMockReq(), server)
+      ctx.reply(200, prepared, 'ok')
+
+      strictEqual(
+        res.calls.some(([name]) => name === 'endPrepared'),
+        false
+      )
+      strictEqual(
+        res.calls.some(([name]) => name === 'endBatch'),
+        true
+      )
+    })
+
+    test('reply applies the native prepared-header limit to exact UTF-8 bytes', () => {
+      const constructions: string[][] = []
+
+      class TestPreparedHeaderBlock {
+        constructor(headerLines: readonly string[]) {
+          constructions.push([...headerLines])
+        }
+      }
+
+      const server = {
+        bindingCapabilities: { preparedHeaders: true, responseBatch: true },
+        preparedHeaderReplies: new PreparedHeaderReplies(TestPreparedHeaderBlock),
+        finalizeHttpContext() {}
+      }
+      const exact = prepareHeaders({ x: 'é'.repeat(32 * 1024 - 1) })
+      const oversized = prepareHeaders({ x: 'é'.repeat(32 * 1024) })
+      const exactContext = new HttpContext(null)
+      const exactResponse = createMockRes()
+      const oversizedContext = new HttpContext(null)
+      const oversizedResponse = createMockRes()
+
+      exactContext.reset(exactResponse, createMockReq(), server)
+      exactContext.reply(200, exact, 'exact')
+      oversizedContext.reset(oversizedResponse, createMockReq(), server)
+      oversizedContext.reply(200, oversized, 'oversized')
+
+      strictEqual(constructions.length, 1)
+      strictEqual(at(exactResponse.calls, 0)[0], 'endPrepared')
+      strictEqual(at(oversizedResponse.calls, 0)[0], 'endBatch')
+    })
+
     test('reply(200, TEXT_PLAIN_HEADER, "ok") should set replied and write status/headers/body', () => {
       const ctx = new HttpContext(null)
       const res = createMockRes()

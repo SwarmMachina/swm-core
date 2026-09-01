@@ -3,6 +3,7 @@ import BodyBudget from '../http/body-budget.js'
 import HttpErrorDispatcher, { EMPTY_HTTP_ERROR_DELIVERY_STATS } from '../http/error-dispatcher.js'
 import { createHttpErrorEvent, normalizeHttpError } from '../http/error-event.js'
 import HttpRuntime from '../http/runtime.js'
+import PreparedHeaderReplies from '../http/prepared-header-replies.js'
 import { NOOP, normalizeHttpOptions, normalizeTransportOptions, normalizeWsOptions } from './options.js'
 import WebSocketRuntime from '../ws/runtime.js'
 
@@ -101,6 +102,7 @@ export default class Server {
   }
 
   declare bindingCapabilities: Readonly<Record<string, boolean>>
+  declare preparedHeaderReplies: PreparedHeaderReplies | null
   declare requestPrefetchPlanClass:
     (new (options: { headers: 'all' | readonly string[] }) => RequestPrefetchPlan) | null
   declare host: string
@@ -206,6 +208,7 @@ export default class Server {
     }
 
     this.bindingCapabilities = Object.freeze({})
+    this.preparedHeaderReplies = null
     this.requestPrefetchPlanClass = null
 
     if (!(typeof port === 'number' && Number.isSafeInteger(port) && port > 0 && port <= 65535)) {
@@ -415,6 +418,10 @@ export default class Server {
 
       this.#backend = backend
       this.bindingCapabilities = Object.freeze({ ...backend.capabilities })
+      this.preparedHeaderReplies =
+        this.bindingCapabilities.preparedHeaders === true && backend.PreparedHeaderBlock
+          ? new PreparedHeaderReplies(backend.PreparedHeaderBlock)
+          : null
       this.requestPrefetchPlanClass =
         this.bindingCapabilities.requestPrefetch === true ? (backend.RequestPrefetchPlan ?? null) : null
 

@@ -1968,6 +1968,13 @@ const server = new Server({
 `prepareHeaders()` copies all values and rejects CR or LF before creating the
 trusted block, so later mutation of the source object cannot change responses.
 
+With `swm-uws@0.8.0`, an eligible complete block is copied into native-owned
+bytes on its first reply and reused afterwards. The native path accepts at most
+64 name/value pairs and 64 KiB of UTF-8 payload. Dynamic pending headers,
+connection-closing replies, larger blocks, and binding-managed framing headers
+keep using the existing validated fallback. Remove `preparedHeaders` from
+`SWM_UWS_NATIVE_FAST_PATHS` to disable this optimization at runtime.
+
 ### CORS
 
 `cors(options)` stages CORS headers and replies to preflight (`OPTIONS`) requests.

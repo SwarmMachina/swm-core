@@ -384,6 +384,24 @@ async function main() {
     return
   }
 
+  if (fw === 'core-prepared-headers-off') {
+    await runCore(port, {
+      nativeFastPaths:
+        'beginWrite,collectBody,collectBodyLength,httpTransportConfig,requestPause,requestPrefetch,responseBatch'
+    })
+
+    return
+  }
+
+  if (fw === 'core-prepared-headers-on') {
+    await runCore(port, {
+      nativeFastPaths:
+        'beginWrite,collectBody,collectBodyLength,httpTransportConfig,preparedHeaders,requestPause,requestPrefetch,responseBatch'
+    })
+
+    return
+  }
+
   if (fw === 'raw-swm-uws' || fw === 'raw-uwebsockets') {
     await runRawBinding(port)
 

@@ -783,6 +783,9 @@ export interface NativeCapabilities {
   /** Supports per-server native HTTP parser and timeout configuration. */
   readonly httpTransportConfig: boolean
 
+  /** Supports reusable native-owned response-header blocks. */
+  readonly preparedHeaders: boolean
+
   /** Supports pausing and resuming native request-body reads. */
   readonly requestPause: boolean
 
