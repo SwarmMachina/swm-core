@@ -4,6 +4,10 @@ import type { HttpStreamingContext, HttpStreamingResponse } from './internal.js'
 
 type ResponseChunk = string | ArrayBuffer | ArrayBufferView | Buffer
 
+const PREMATURE_CLOSE_ERROR = Object.assign(new Error('Response stream closed before its source ended'), {
+  code: 'ERR_STREAM_PREMATURE_CLOSE'
+})
+
 export default class ResStreamer {
   #ctx: HttpStreamingContext | null = null
   #res: HttpStreamingResponse | null = null
@@ -292,7 +296,7 @@ export default class ResStreamer {
     const ctx = this.#ctx
 
     if (ctx && !ctx.aborted) {
-      this.#finishEnd(null, err)
+      this.#failIncompleteStream(err)
 
       return
     }
@@ -304,7 +308,7 @@ export default class ResStreamer {
     const ctx = this.#ctx
 
     if (ctx && !ctx.aborted && this.#started) {
-      this.#finishEnd(null)
+      this.#failIncompleteStream(PREMATURE_CLOSE_ERROR)
 
       return
     }
@@ -320,13 +324,35 @@ export default class ResStreamer {
     const cb = this.#onWritableCallback
 
     if (!cb) {
-      return false
+      return true
     }
 
     this.#onWritableCallback = null
     cb(offset)
 
-    return false
+    // uWS requires true after a successful callback, including a spurious
+    // writable event that did not write data. A resumed source that blocks
+    // again registers a new callback and must return false instead.
+    return this.#onWritableCallback === null
+  }
+
+  #failIncompleteStream(reason: unknown): void {
+    const ctx = this.#ctx
+
+    if (!ctx || !this.#res) {
+      this.#settleErr(reason)
+
+      return
+    }
+
+    this.#started = false
+    ctx.streaming = false
+    this.#settleErr(reason)
+
+    // A source failure after headers must not look like a normally finished
+    // chunked download. terminate() closes without writing the terminal chunk.
+    // It intentionally waits for onAborted before releasing the pooled context.
+    ctx.terminate()
   }
 
   #finishEnd(chunk: ResponseChunk | null, streamError: unknown = null): void {

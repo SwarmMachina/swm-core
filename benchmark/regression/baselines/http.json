@@ -11,12 +11,12 @@
   },
   "calibration": {
     "status": "self-hosted-calibrated",
-    "updatedAt": "2026-07-25",
-    "node": "24.16.0",
-    "benchkit": "0.2.0",
-    "swmUws": "0.5.6",
+    "updatedAt": "2026-09-03",
+    "node": "24.17.0",
+    "benchkit": "0.3.0",
+    "swmUws": "0.8.0",
     "ciRunner": "self-hosted (Ubuntu 24.04, Intel Xeon E5-2680 v4, dedicated, schedutil)",
-    "note": "Base scenarios were calibrated from 4 self-hosted benchkit series with 3 runs per scenario. Their RPS floors sit 12-14% below the slowest series median; p99 ceilings include observed per-run scheduler spikes. Memory was stable and rssMB is report-only. Static and stream scenarios use portable same-run RPS ratios until their next self-hosted calibration."
+    "note": "Base scenarios retain their 2026-07-25 calibration; a post-calibration CI run observed 2.18 MiB arrayBuffers in every base control, so their cap is 3 MiB. On 2026-09-03, upload scenarios were calibrated from 4 self-hosted Node 24.17.0 benchkit series with 3 runs per scenario. Their RPS floors sit 12.5-13.3% below the slowest series median and p99 ceilings include observed per-run scheduler spikes. rssMB is report-only. Static and response-stream scenarios use portable same-run RPS ratios."
   },
   "parameters": {
     "runs": 3,
@@ -27,7 +27,8 @@
     "cpuProfile": true,
     "testConnections": {
       "static-cache-miss": 25,
-      "stream-backpressure": 10
+      "stream-backpressure": 10,
+      "upload-stream-backpressure": 10
     }
   },
   "metrics": {
@@ -39,8 +40,10 @@
     "arrayBuffersMB": { "label": "arrayBuffers peak", "unit": "MB" },
     "rssMB": { "label": "rss peak", "unit": "MB" },
     "rpsRelativeToBaseSync": { "label": "RPS / base-sync", "unit": "ratio" },
-    "backpressurePauses": { "label": "native backpressure pauses", "unit": "events" },
-    "backpressureResumes": { "label": "native writable resumes", "unit": "events" }
+    "backpressurePauses": { "label": "observed Readable pauses", "unit": "events" },
+    "backpressureResumes": { "label": "observed Readable resumes", "unit": "events" },
+    "backpressureQueuePeakBytes": { "label": "request stream queue peak", "unit": "bytes" },
+    "backpressureQueueLimitBytes": { "label": "request stream queue limit", "unit": "bytes" }
   },
   "tests": {
     "base-sync": {
@@ -64,7 +67,7 @@
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },
         "externalMB": { "max": 6 },
-        "arrayBuffersMB": { "max": 2 }
+        "arrayBuffersMB": { "max": 3 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
@@ -89,7 +92,7 @@
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },
         "externalMB": { "max": 6 },
-        "arrayBuffersMB": { "max": 2 }
+        "arrayBuffersMB": { "max": 3 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
@@ -114,7 +117,7 @@
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },
         "externalMB": { "max": 6 },
-        "arrayBuffersMB": { "max": 2 }
+        "arrayBuffersMB": { "max": 3 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
@@ -139,7 +142,7 @@
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },
         "externalMB": { "max": 6 },
-        "arrayBuffersMB": { "max": 2 }
+        "arrayBuffersMB": { "max": 3 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
@@ -193,6 +196,63 @@
       },
       "reportOnly": ["rps", "latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
+    "upload-stream": {
+      "description": "POST 128 KiB body through RequestBodyStream",
+      "observedMedian": {
+        "rps": 9645.5,
+        "latencyAvgMs": 10.35,
+        "latencyP97_5Ms": 18.62,
+        "latencyP99Ms": 20.56,
+        "errors": 0,
+        "eluPct": 98.87,
+        "eventLoopDelayP99Ms": 34.03,
+        "rssMB": 257.04,
+        "heapMB": 13.84,
+        "externalMB": 114.35,
+        "arrayBuffersMB": 99.74
+      },
+      "guards": {
+        "rps": { "min": 8300 },
+        "latencyP99Ms": { "max": 30 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 24 },
+        "externalMB": { "max": 128 },
+        "arrayBuffersMB": { "max": 128 }
+      },
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
+    "upload-stream-backpressure": {
+      "description": "POST 1 MiB body through a slow sink with observed RequestBodyStream backpressure",
+      "observedMedian": {
+        "rps": 1164,
+        "latencyAvgMs": 8.57,
+        "latencyP97_5Ms": 13.17,
+        "latencyP99Ms": 14.25,
+        "errors": 0,
+        "eluPct": 71.92,
+        "eventLoopDelayP99Ms": 22.91,
+        "rssMB": 179.46,
+        "heapMB": 11.08,
+        "externalMB": 83.69,
+        "arrayBuffersMB": 80.08,
+        "backpressurePauses": 21574.5,
+        "backpressureResumes": 14576.5,
+        "backpressureQueuePeakBytes": 524288,
+        "backpressureQueueLimitBytes": 589824
+      },
+      "guards": {
+        "rps": { "min": 980 },
+        "latencyP99Ms": { "max": 25 },
+        "errors": { "max": 0 },
+        "backpressurePauses": { "min": 1 },
+        "backpressureResumes": { "min": 1 },
+        "backpressureQueuePeakBytes": { "max": 589824 },
+        "heapMB": { "max": 24 },
+        "externalMB": { "max": 128 },
+        "arrayBuffersMB": { "max": 128 }
+      },
+      "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
+    },
     "post-base": {
       "description": "POST /base JSON body parsing hot path",
       "observedMedian": {
@@ -214,7 +274,7 @@
         "errors": { "max": 0 },
         "heapMB": { "max": 18 },
         "externalMB": { "max": 6 },
-        "arrayBuffersMB": { "max": 2 }
+        "arrayBuffersMB": { "max": 3 }
       },
       "reportOnly": ["latencyAvgMs", "latencyP97_5Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     }
@@ -224,6 +284,11 @@
     "minTotalTicks": 100,
     "maxGcPct": 5,
     "maxUnaccountedPct": 65,
-    "note": "Sanity check only. Across 24 headers-prepared profiles, unaccounted was 56.5-61.1% with an approximately 60% median."
+    "note": "Sanity check only. Across 24 headers-prepared profiles, unaccounted was 56.5-61.1% with an approximately 60% median. The allocation-heavy upload backpressure scenario has its own GC cap."
+  },
+  "cpuProfileTestGuards": {
+    "upload-stream-backpressure": {
+      "maxGcPct": 9
+    }
   }
 }

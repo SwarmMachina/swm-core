@@ -14,7 +14,11 @@ export interface TestDefinition {
   responseText?: string
   responseHeaders?: Record<string, string | string[]>
   requiresBackpressure?: boolean
+  requiresQueueBound?: boolean
 }
+
+const UPLOAD_STREAM_BODY = Buffer.alloc(128 * 1024, 'u')
+const UPLOAD_STREAM_BACKPRESSURE_BODY = Buffer.alloc(1024 * 1024, 'u')
 
 export interface HeadersTestDefinition extends TestDefinition {
   responseText: string
@@ -137,6 +141,36 @@ const TESTS: Map<string, TestDefinition> = new Map([
       pipelining: 1,
       description: '1 MiB Readable stream that must observe native write backpressure and resume',
       requiresBackpressure: true
+    }
+  ],
+  [
+    'upload-stream',
+    {
+      name: 'upload-stream',
+      method: 'POST',
+      path: '/upload-stream',
+      duration: 6,
+      connections: 100,
+      pipelining: 1,
+      description: '128 KiB request body consumed through RequestBodyStream',
+      body: UPLOAD_STREAM_BODY,
+      headers: { 'Content-Type': 'application/octet-stream' }
+    }
+  ],
+  [
+    'upload-stream-backpressure',
+    {
+      name: 'upload-stream-backpressure',
+      method: 'POST',
+      path: '/upload-stream-backpressure',
+      duration: 6,
+      connections: 10,
+      pipelining: 1,
+      description: '1 MiB request body through a deliberately slow sink with observed input backpressure',
+      body: UPLOAD_STREAM_BACKPRESSURE_BODY,
+      headers: { 'Content-Type': 'application/octet-stream' },
+      requiresBackpressure: true,
+      requiresQueueBound: true
     }
   ],
   [

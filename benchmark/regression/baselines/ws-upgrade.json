@@ -8,13 +8,18 @@
     "framework": "core"
   },
   "calibration": {
-    "status": "uncalibrated",
-    "note": "Throughput and latency are report-only until calibrated on the self-hosted CI runner. Errors and CPU profile integrity are guarded immediately."
+    "status": "self-hosted-calibrated",
+    "updatedAt": "2026-09-03",
+    "node": "24.17.0",
+    "benchkit": "0.3.0",
+    "swmUws": "0.8.0",
+    "ciRunner": "self-hosted (Ubuntu 24.04, Intel Xeon E5-2680 v4, dedicated, schedutil)",
+    "note": "Calibrated from 4 self-hosted Node 24.17.0 benchkit series with 3 runs per scenario. RPS floors sit 12.7-13.1% below the slowest series median; p99 ceilings include observed per-run scheduler spikes. rssMB is report-only."
   },
   "parameters": {
-    "runs": 1,
-    "warmupSec": 1,
-    "durationSec": 2,
+    "runs": 3,
+    "warmupSec": 2,
+    "durationSec": 6,
     "concurrency": 20,
     "sampleMs": 250,
     "cpuProfile": true
@@ -28,35 +33,53 @@
   "tests": {
     "sync": {
       "description": "Synchronous onUpgrade authorization",
-      "guards": { "errors": { "max": 0 } },
-      "reportOnly": [
-        "upgradesPerSec",
-        "latAvgMs",
-        "latP95Ms",
-        "latP99Ms",
-        "eluPct",
-        "eventLoopDelayP99Ms",
-        "rssMB",
-        "heapMB",
-        "externalMB",
-        "arrayBuffersMB"
-      ]
+      "observedMedian": {
+        "upgradesPerSec": 3246.83,
+        "latAvgMs": 2.41,
+        "latP95Ms": 2.94,
+        "latP99Ms": 3.3,
+        "errors": 0,
+        "eluPct": 57.63,
+        "eventLoopDelayP99Ms": 20.43,
+        "rssMB": 68.08,
+        "heapMB": 10.76,
+        "externalMB": 2.01,
+        "arrayBuffersMB": 0.03
+      },
+      "guards": {
+        "upgradesPerSec": { "min": 2800 },
+        "latP99Ms": { "max": 6 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 14 },
+        "externalMB": { "max": 5 },
+        "arrayBuffersMB": { "max": 2 }
+      },
+      "reportOnly": ["latAvgMs", "latP95Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     },
     "async": {
       "description": "Immediately resolved asynchronous onUpgrade authorization",
-      "guards": { "errors": { "max": 0 } },
-      "reportOnly": [
-        "upgradesPerSec",
-        "latAvgMs",
-        "latP95Ms",
-        "latP99Ms",
-        "eluPct",
-        "eventLoopDelayP99Ms",
-        "rssMB",
-        "heapMB",
-        "externalMB",
-        "arrayBuffersMB"
-      ]
+      "observedMedian": {
+        "upgradesPerSec": 3278.75,
+        "latAvgMs": 2.37,
+        "latP95Ms": 2.68,
+        "latP99Ms": 2.84,
+        "errors": 0,
+        "eluPct": 63.28,
+        "eventLoopDelayP99Ms": 20.42,
+        "rssMB": 69.84,
+        "heapMB": 11,
+        "externalMB": 2.01,
+        "arrayBuffersMB": 0.03
+      },
+      "guards": {
+        "upgradesPerSec": { "min": 2800 },
+        "latP99Ms": { "max": 5 },
+        "errors": { "max": 0 },
+        "heapMB": { "max": 14 },
+        "externalMB": { "max": 5 },
+        "arrayBuffersMB": { "max": 2 }
+      },
+      "reportOnly": ["latAvgMs", "latP95Ms", "eluPct", "eventLoopDelayP99Ms", "rssMB"]
     }
   },
   "cpuProfileGuard": {
@@ -64,6 +87,6 @@
     "minTotalTicks": 50,
     "maxGcPct": 8,
     "maxUnaccountedPct": 25,
-    "note": "Integrity guard; recalibrate after collecting profiles on the self-hosted runner."
+    "note": "Integrity guard. CPU profiles are verified in the post-calibration regression run."
   }
 }

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { runChild } from '@swarmmachina/benchkit/orchestration'
 import { copyCpuProfiles } from '@swarmmachina/benchkit/profiling'
-import { cpuGuard, metricGuard } from '@swarmmachina/benchkit/regression'
+import { cpuGuard, metricGuard, type CpuProfile } from '@swarmmachina/benchkit/regression'
 import { median } from '@swarmmachina/benchkit/statistics'
 import { positiveEnvNumber } from '../../harness/summary.js'
 import { requireMetric, type ProfiledBenchmarkSummary, type SuiteOptions } from '../../harness/types.js'
@@ -16,6 +16,8 @@ const TESTS = [
   'static-cache-miss',
   'stream',
   'stream-backpressure',
+  'upload-stream',
+  'upload-stream-backpressure',
   'post-base'
 ]
 const RPS_RATIO_TESTS = ['static-cache-hit', 'static-cache-miss', 'stream', 'stream-backpressure']
@@ -43,6 +45,15 @@ interface HttpBaseline {
     maxGcPct?: number
     maxUnaccountedPct?: number
   }
+  cpuProfileTestGuards?: Record<
+    string,
+    {
+      profileRequired?: boolean
+      minTotalTicks?: number
+      maxGcPct?: number
+      maxUnaccountedPct?: number
+    }
+  >
 }
 
 /**
@@ -154,6 +165,13 @@ function summarizeCore(bench: ProfiledBenchmarkSummary): Record<string, number> 
     summary.backpressureResumes = requireMetric(medianRow, 'backpressureResumes', 'http median')
   }
 
+  if (bench.test?.name === 'upload-stream-backpressure') {
+    summary.backpressurePauses = requireMetric(medianRow, 'backpressurePauses', 'http median')
+    summary.backpressureResumes = requireMetric(medianRow, 'backpressureResumes', 'http median')
+    summary.backpressureQueuePeakBytes = requireMetric(medianRow, 'backpressureQueuePeakBytes', 'http median')
+    summary.backpressureQueueLimitBytes = requireMetric(medianRow, 'backpressureQueueLimitBytes', 'http median')
+  }
+
   return summary
 }
 
@@ -193,7 +211,7 @@ export default async function runHttpSuite({ sourceBenchDir, runtimeBenchDir, re
   await fs.mkdir(outDir, { recursive: true })
 
   const results: Record<string, Record<string, number>> = {}
-  const cpuProfiles = []
+  const cpuProfiles: CpuProfile[] = []
 
   for (const test of params.tests) {
     const jsonOut = path.join(outDir, `${test}.json`)
@@ -238,7 +256,7 @@ export default async function runHttpSuite({ sourceBenchDir, runtimeBenchDir, re
     results,
     baselineTests: baseline.tests
   })
-  const expectedKeys = []
+  const expectedKeys: string[] = []
 
   if (params.cpuProfile) {
     for (const test of params.tests) {
@@ -248,11 +266,23 @@ export default async function runHttpSuite({ sourceBenchDir, runtimeBenchDir, re
     }
   }
 
-  const { failures: cpuFailures, rows: cpuRows } = cpuGuard({
-    cpuProfiles,
+  const testCpuGuards = baseline.cpuProfileTestGuards || {}
+  const guardedTests = new Set(Object.keys(testCpuGuards))
+  const hasTestSpecificCpuGuard = (key: string): boolean => [...guardedTests].some((test) => key.startsWith(`${test}:`))
+  const commonCpu = cpuGuard({
+    cpuProfiles: cpuProfiles.filter((profile) => !guardedTests.has(profile.test)),
     guard: params.cpuProfile ? baseline.cpuProfileGuard : undefined,
-    expectedKeys
+    expectedKeys: expectedKeys.filter((key) => !hasTestSpecificCpuGuard(key))
   })
+  const scopedCpu = Object.entries(testCpuGuards).map(([test, guard]) =>
+    cpuGuard({
+      cpuProfiles: cpuProfiles.filter((profile) => profile.test === test),
+      guard: params.cpuProfile ? { ...baseline.cpuProfileGuard, ...guard } : undefined,
+      expectedKeys: expectedKeys.filter((key) => key.startsWith(`${test}:`))
+    })
+  )
+  const cpuFailures = [...commonCpu.failures, ...scopedCpu.flatMap(({ failures }) => failures)]
+  const cpuRows = [...commonCpu.rows, ...scopedCpu.flatMap(({ rows }) => rows)]
   const summary = {
     suite: 'http',
     createdAt: new Date().toISOString(),

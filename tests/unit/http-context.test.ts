@@ -2276,12 +2276,12 @@ describe('HttpContext', () => {
 
         strictEqual(cbCallCount, 1)
         strictEqual(lastOffset, 123)
-        strictEqual(result1, false)
+        strictEqual(result1, true)
 
         const result2 = res.triggerWritable(456)
 
         strictEqual(cbCallCount, 1)
-        strictEqual(result2, false)
+        strictEqual(result2, true)
       })
 
       test('aborted -> onWritable should no-op and not register', () => {
@@ -2354,6 +2354,32 @@ describe('HttpContext', () => {
         strictEqual(res.calls.filter((c) => c[0] === 'writeStatus').length, 1)
         strictEqual(res.calls.filter((c) => c[0] === 'writeHeader').length, 1)
         strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
+      })
+
+      test('stops the request timeout before starting a stream', async () => {
+        const ctx = new HttpContext(null)
+        const res = createMockRes()
+        const req = createMockReq()
+
+        ctx.reset(res, req, { finalizeHttpContext: () => {} })
+        ctx.startRequestTimeout(1_000)
+
+        let stopCount = 0
+
+        const stopRequestTimeout = ctx.stopRequestTimeout.bind(ctx)
+
+        ctx.stopRequestTimeout = () => {
+          stopCount++
+          stopRequestTimeout()
+        }
+
+        const readable = createMockReadable()
+        const promise = ctx.stream(readable, 200)
+
+        strictEqual(stopCount, 1)
+
+        readable.emit('end')
+        await promise
       })
 
       test('settles before finalize returns the context to the pool', async () => {
@@ -2429,7 +2455,7 @@ describe('HttpContext', () => {
         strictEqual(res.calls.filter((c) => c[0] === 'end').length, 0)
       })
 
-      test('error event rejects and calls end() if not aborted', async () => {
+      test('error event rejects and closes without a terminal response chunk', async () => {
         const ctx = new HttpContext(null)
         const res = createMockRes()
         const req = createMockReq()
@@ -2455,7 +2481,12 @@ describe('HttpContext', () => {
           return true
         })
 
-        strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
+        strictEqual(res.calls.filter((c) => c[0] === 'end').length, 0)
+        strictEqual(res.calls.filter((c) => c[0] === 'close').length, 1)
+        strictEqual(finalizeCallCount, 0)
+
+        ctx.abort()
+
         strictEqual(finalizeCallCount, 1)
       })
     })

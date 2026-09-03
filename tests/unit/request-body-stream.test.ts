@@ -47,6 +47,23 @@ describe('RequestBodyStream', () => {
     strictEqual((await body).toString(), 'abcd')
   })
 
+  test("should keep small owned chunks outside Node's shared Buffer pool", async () => {
+    const res = createMockRes()
+    const stream = new RequestBodyStream(1, 1)
+    const chunks: Buffer[] = []
+    const ended = once(stream, 'end')
+
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk))
+    stream.start(res)
+    res.pushData('x', true)
+
+    await ended
+
+    strictEqual(chunks.length, 1)
+    strictEqual(chunks[0]!.byteOffset, 0)
+    strictEqual(chunks[0]!.buffer.byteLength, 1)
+  })
+
   test('should preserve chunks delivered after transport backpressure', async () => {
     const res = createMockRes()
     const stream = new RequestBodyStream(null, 2 * 1024 * 1024)

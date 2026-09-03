@@ -131,6 +131,8 @@ interface BenchRunResult {
 interface BackpressureStats {
   pauses: number
   resumes: number
+  queuePeakBytes: number
+  queueLimitBytes: number
 }
 
 interface BenchRow {
@@ -154,6 +156,8 @@ interface BenchRow {
   errors: number
   backpressurePauses: number | null
   backpressureResumes: number | null
+  backpressureQueuePeakBytes: number | null
+  backpressureQueueLimitBytes: number | null
   v8prof: ProcessedV8Profile | null
 }
 
@@ -169,9 +173,16 @@ interface RunOneOptions {
 }
 
 function assertBackpressureStats(value: unknown): asserts value is BackpressureStats {
-  const stats = value as { pauses?: unknown; resumes?: unknown } | null
+  const stats = value as {
+    pauses?: unknown
+    resumes?: unknown
+    queuePeakBytes?: unknown
+    queueLimitBytes?: unknown
+  } | null
   const pauses = stats?.pauses
   const resumes = stats?.resumes
+  const queuePeakBytes = stats?.queuePeakBytes
+  const queueLimitBytes = stats?.queueLimitBytes
 
   if (
     typeof pauses !== 'number' ||
@@ -179,7 +190,13 @@ function assertBackpressureStats(value: unknown): asserts value is BackpressureS
     pauses < 0 ||
     typeof resumes !== 'number' ||
     !Number.isSafeInteger(resumes) ||
-    resumes < 0
+    resumes < 0 ||
+    typeof queuePeakBytes !== 'number' ||
+    !Number.isSafeInteger(queuePeakBytes) ||
+    queuePeakBytes < 0 ||
+    typeof queueLimitBytes !== 'number' ||
+    !Number.isSafeInteger(queueLimitBytes) ||
+    queueLimitBytes < 0
   ) {
     throw new Error('stream backpressure endpoint returned invalid counters')
   }
@@ -282,6 +299,16 @@ async function runOne({
       if (backpressure.pauses === 0 || backpressure.resumes === 0) {
         throw new Error(
           `${test.name}: native backpressure was not observed (pauses=${backpressure.pauses}, resumes=${backpressure.resumes})`
+        )
+      }
+
+      if (
+        test.requiresQueueBound &&
+        (backpressure.queueLimitBytes === 0 || backpressure.queuePeakBytes > backpressure.queueLimitBytes)
+      ) {
+        throw new Error(
+          `${test.name}: request stream queue exceeded its bound ` +
+            `(peak=${backpressure.queuePeakBytes}, limit=${backpressure.queueLimitBytes})`
         )
       }
     }
@@ -404,6 +431,8 @@ async function main() {
         errors: res.errors || 0,
         backpressurePauses: res.backpressure?.pauses ?? null,
         backpressureResumes: res.backpressure?.resumes ?? null,
+        backpressureQueuePeakBytes: res.backpressure?.queuePeakBytes ?? null,
+        backpressureQueueLimitBytes: res.backpressure?.queueLimitBytes ?? null,
         v8prof: res.v8prof
       })
     }
@@ -437,7 +466,7 @@ async function main() {
         latP99: r.latP99Ms != null ? `${r.latP99Ms.toFixed(2)}ms` : 'n/a',
         backpressure:
           r.backpressurePauses != null && r.backpressureResumes != null
-            ? `${r.backpressurePauses}/${r.backpressureResumes}`
+            ? `${r.backpressurePauses}/${r.backpressureResumes} (${r.backpressureQueuePeakBytes ?? 0}/${r.backpressureQueueLimitBytes ?? 0}B)`
             : 'n/a',
         errors: r.errors
       }))
@@ -463,6 +492,12 @@ async function main() {
     const backpressureResumes = arr
       .map((x) => x.backpressure?.resumes)
       .filter((value): value is number => value !== undefined)
+    const backpressureQueuePeakBytes = arr
+      .map((x) => x.backpressure?.queuePeakBytes)
+      .filter((value): value is number => value !== undefined)
+    const backpressureQueueLimitBytes = arr
+      .map((x) => x.backpressure?.queueLimitBytes)
+      .filter((value): value is number => value !== undefined)
 
     return {
       fw,
@@ -473,6 +508,12 @@ async function main() {
       latP99Ms: p99.length ? Number(median(p99).toFixed(2)) : null,
       backpressurePauses: backpressurePauses.length ? Math.round(median(backpressurePauses)) : null,
       backpressureResumes: backpressureResumes.length ? Math.round(median(backpressureResumes)) : null,
+      backpressureQueuePeakBytes: backpressureQueuePeakBytes.length
+        ? Math.round(median(backpressureQueuePeakBytes))
+        : null,
+      backpressureQueueLimitBytes: backpressureQueueLimitBytes.length
+        ? Math.round(median(backpressureQueueLimitBytes))
+        : null,
       n: arr.length
     }
   })

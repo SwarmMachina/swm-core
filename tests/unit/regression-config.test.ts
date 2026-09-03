@@ -24,6 +24,8 @@ test('HTTP regression parameters default to the baseline configuration', () => {
       'static-cache-miss',
       'stream',
       'stream-backpressure',
+      'upload-stream',
+      'upload-stream-backpressure',
       'post-base'
     ],
     runs: 5,

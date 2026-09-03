@@ -1459,6 +1459,7 @@ export default class HttpContext {
       return Promise.resolve()
     }
 
+    this.stopRequestTimeout()
     this.replied = true
     this.streaming = true
 

@@ -949,12 +949,12 @@ describe('ResStreamer', () => {
 
       strictEqual(cbCallCount, 1)
       strictEqual(lastOffset, 123)
-      strictEqual(result1, false)
+      strictEqual(result1, true)
 
       const result2 = res.triggerWritable(456)
 
       strictEqual(cbCallCount, 1)
-      strictEqual(result2, false)
+      strictEqual(result2, true)
     })
 
     test('onWritable should be overwritten by last callback', () => {
@@ -1169,6 +1169,41 @@ describe('ResStreamer', () => {
       strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
     })
 
+    test('backpressure should report failure when resuming blocks again', async () => {
+      const streamer = new ResStreamer()
+      const ctx = new HttpContext(null)
+      const res = createMockRes()
+      const req = createMockReq()
+
+      ctx.reset(res, req, {
+        finalizeHttpContext() {
+          //
+        }
+      })
+      streamer.reset(ctx, res)
+      res.setWriteResultSequence([false, false])
+
+      const readable = createMockReadable()
+      const resume = readable.resume
+
+      readable.resume = () => {
+        resume()
+        readable.emit('data', 'b')
+
+        return readable
+      }
+
+      const promise = streamer.stream(readable, 200)
+
+      readable.emit('data', 'a')
+
+      strictEqual(res.triggerWritable(100), false)
+      strictEqual(readable.getResumeCallCount(), 1)
+
+      readable.emit('end')
+      await promise
+    })
+
     test('backpressure should pause only once until resumed', async () => {
       const streamer = new ResStreamer()
       const ctx = new HttpContext(null)
@@ -1331,8 +1366,13 @@ describe('ResStreamer', () => {
         return true
       })
 
-      strictEqual(res.calls.filter((c) => c[0] === 'end').length, 1)
+      strictEqual(res.calls.filter((c) => c[0] === 'end').length, 0)
+      strictEqual(res.calls.filter((c) => c[0] === 'close').length, 1)
       strictEqual(ctx.streaming, false)
+      strictEqual(finalizeCallCount, 0)
+
+      ctx.abort()
+
       strictEqual(finalizeCallCount, 1)
     })
 
@@ -1391,7 +1431,7 @@ describe('ResStreamer', () => {
       strictEqual(res.calls.filter((c) => c[0] === 'end').length, endCallCountBefore)
     })
 
-    test('should handle error event - end() throws', async () => {
+    test('should close instead of ending after a source error', async () => {
       const streamer = new ResStreamer()
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -1421,9 +1461,11 @@ describe('ResStreamer', () => {
       })
 
       strictEqual(ctx.streaming, false)
+      strictEqual(res.calls.filter((c) => c[0] === 'end').length, 0)
+      strictEqual(res.calls.filter((c) => c[0] === 'close').length, 1)
     })
 
-    test('should handle close event', async () => {
+    test('should reject a premature source close without ending the HTTP response', async () => {
       const streamer = new ResStreamer()
       const ctx = new HttpContext(null)
       const res = createMockRes()
@@ -1443,9 +1485,15 @@ describe('ResStreamer', () => {
       readable.emit('data', 'a')
       readable.emit('close')
 
-      await promise
+      await rejects(promise, (err) => {
+        strictEqual((err as NodeJS.ErrnoException).code, 'ERR_STREAM_PREMATURE_CLOSE')
+
+        return true
+      })
 
       strictEqual(ctx.streaming, false)
+      strictEqual(res.calls.filter((c) => c[0] === 'end').length, 0)
+      strictEqual(res.calls.filter((c) => c[0] === 'close').length, 1)
     })
 
     test('should cleanup listeners on completion', async () => {

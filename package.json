@@ -81,6 +81,8 @@
     "bench:static:miss": "pnpm build:benchmark && node .benchmark-dist/benchmark/http/runner.js --test static-cache-miss --fw core --runs 3 --warmup 2 --duration 6 --connections 25 --pipelining 1 --sample-ms 250 --v8prof true",
     "bench:stream": "pnpm build:benchmark && node .benchmark-dist/benchmark/http/runner.js --test stream --fw core --runs 3 --warmup 2 --duration 6 --connections 100 --pipelining 1 --sample-ms 250 --v8prof true",
     "bench:stream:backpressure": "pnpm build:benchmark && node .benchmark-dist/benchmark/http/runner.js --test stream-backpressure --fw core --runs 3 --warmup 2 --duration 6 --connections 10 --pipelining 1 --sample-ms 250 --v8prof true",
+    "bench:upload-stream": "pnpm build:benchmark && node .benchmark-dist/benchmark/http/runner.js --test upload-stream --fw core --runs 3 --warmup 2 --duration 6 --connections 100 --pipelining 1 --sample-ms 250 --v8prof true",
+    "bench:upload-stream:backpressure": "pnpm build:benchmark && node .benchmark-dist/benchmark/http/runner.js --test upload-stream-backpressure --fw core --runs 3 --warmup 2 --duration 6 --connections 10 --pipelining 1 --sample-ms 250 --v8prof true",
     "bench:ws": "pnpm build:benchmark && node .benchmark-dist/benchmark/ws/runner.js --fw core,hyperexpress,ws --runs 1 --warmup 2 --workers 4 --v8prof true",
     "bench:ws:upgrade": "pnpm build:benchmark && node .benchmark-dist/benchmark/ws/upgrade.js --fw core,hyperexpress --scenario sync,async --runs 1 --warmup 1 --duration 2 --concurrency 20 --v8prof true",
     "bench:ws:payload": "pnpm build:benchmark && node .benchmark-dist/benchmark/ws/payload.js --fw core,hyperexpress --sizes 64,1024,16384,65536 --runs 1 --warmup 2 --duration 6 --connections 50 --workers 4 --depth 16 --v8prof true",

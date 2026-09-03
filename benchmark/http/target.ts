@@ -1,9 +1,11 @@
 import http from 'node:http'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { parseArgs } from '@swarmmachina/benchkit/orchestration'
 import { TargetRuntime } from '@swarmmachina/benchkit/target'
 import { getTest, type HeadersTestDefinition } from './scenarios.js'
+import SlowUploadSink from './slow-upload-sink.js'
 import type HttpContext from '../../src/http/context.js'
 import type { Handler } from '../../src/server/options.js'
 
@@ -55,6 +57,10 @@ const STREAM_BACKPRESSURE_CHUNKS = Array.from({ length: 16 }, () => Buffer.alloc
 
 let streamBackpressurePauses = 0
 let streamBackpressureResumes = 0
+let uploadBackpressurePauses = 0
+let uploadBackpressureResumes = 0
+let uploadQueuePeakBytes = 0
+let uploadQueueLimitBytes = 0
 
 function createBackpressureReadable(): Readable {
   const readable = Readable.from(STREAM_BACKPRESSURE_CHUNKS)
@@ -73,6 +79,49 @@ function createBackpressureReadable(): Readable {
   })
 
   return readable
+}
+
+async function consumeUpload(ctx: HttpContext): Promise<string> {
+  let bytes = 0
+
+  for await (const chunk of ctx.bodyStream()) {
+    bytes += chunk.length
+  }
+
+  return String(bytes)
+}
+
+async function consumeBackpressuredUpload(ctx: HttpContext): Promise<string> {
+  const stream = ctx.bodyStream()
+  const sink = new SlowUploadSink()
+  const push = stream.push
+
+  let paused = false
+
+  uploadQueueLimitBytes = stream.readableHighWaterMark + 512 * 1024
+
+  stream.push = function (chunk: string | Uint8Array | null, encoding?: BufferEncoding): boolean {
+    const accepted = push.call(this, chunk, encoding)
+
+    uploadQueuePeakBytes = Math.max(uploadQueuePeakBytes, this.readableLength)
+
+    return accepted
+  }
+
+  stream.on('pause', () => {
+    paused = true
+    uploadBackpressurePauses++
+  })
+  stream.on('resume', () => {
+    if (paused) {
+      paused = false
+      uploadBackpressureResumes++
+    }
+  })
+
+  await pipeline(stream, sink)
+
+  return String(sink.bytes)
 }
 
 /**
@@ -168,12 +217,21 @@ async function runCore(port: number, options: CoreOptions = {}) {
     if (method === 'get' && url === '/__bench/stream-backpressure/reset') {
       streamBackpressurePauses = 0
       streamBackpressureResumes = 0
+      uploadBackpressurePauses = 0
+      uploadBackpressureResumes = 0
+      uploadQueuePeakBytes = 0
+      uploadQueueLimitBytes = 0
 
       return { ok: true }
     }
 
     if (method === 'get' && url === '/__bench/stream-backpressure/stats') {
-      return { pauses: streamBackpressurePauses, resumes: streamBackpressureResumes }
+      return {
+        pauses: streamBackpressurePauses + uploadBackpressurePauses,
+        resumes: streamBackpressureResumes + uploadBackpressureResumes,
+        queuePeakBytes: uploadQueuePeakBytes,
+        queueLimitBytes: uploadQueueLimitBytes
+      }
     }
 
     if (method === 'get' && url.startsWith('/static-cache-hit/')) {
@@ -190,6 +248,14 @@ async function runCore(port: number, options: CoreOptions = {}) {
 
     if (method === 'get' && url === '/stream-backpressure') {
       return ctx.stream(createBackpressureReadable(), 200, streamHeaders)
+    }
+
+    if (method === 'post' && url === '/upload-stream') {
+      return consumeUpload(ctx)
+    }
+
+    if (method === 'post' && url === '/upload-stream-backpressure') {
+      return consumeBackpressuredUpload(ctx)
     }
 
     if (method === 'post' && url === '/base') {

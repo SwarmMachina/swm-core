@@ -5,9 +5,19 @@ import type { HttpResponse } from '@swarmmachina/swm-uws'
 import { CACHED_ERRORS } from './status.js'
 
 const NOOP = () => {}
+const COPY_FAST_PATH_MIN_SIZE = Buffer.poolSize >>> 1
 
 function copyChunk(value: ArrayBuffer): Buffer {
   const source = new Uint8Array(value)
+
+  // Buffer.from(Uint8Array) copies, unlike Buffer.from(ArrayBuffer), which
+  // would expose memory owned by the native receive callback. Large chunks do
+  // not use Node's shared pool, so this takes its native memcpy fast path
+  // without retaining unrelated small buffers in a queued stream.
+  if (source.byteLength >= COPY_FAST_PATH_MIN_SIZE) {
+    return Buffer.from(source)
+  }
+
   const chunk = Buffer.allocUnsafeSlow(source.byteLength)
 
   chunk.set(source)

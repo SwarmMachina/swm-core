@@ -61,6 +61,8 @@ export type BenchmarkMetric =
   | 'errors'
   | 'backpressurePauses'
   | 'backpressureResumes'
+  | 'backpressureQueuePeakBytes'
+  | 'backpressureQueueLimitBytes'
 
 export interface BenchmarkRow {
   fw: string
@@ -85,6 +87,8 @@ export interface BenchmarkRow {
   errors?: number | null
   backpressurePauses?: number | null
   backpressureResumes?: number | null
+  backpressureQueuePeakBytes?: number | null
+  backpressureQueueLimitBytes?: number | null
 }
 
 export interface BenchmarkRun {
