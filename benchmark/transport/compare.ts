@@ -16,7 +16,9 @@ const FRAMEWORKS = `${CANDIDATE},${REFERENCE}`
 const PARAMS = {
   runs: positiveEnvNumber('BINDING_BENCH_RUNS', 4),
   order: 'balanced',
-  warmup: positiveEnvNumber('BINDING_BENCH_WARMUP', 2),
+  // 4s prevents the order-dependent first-target latency tail observed during
+  // the 2026-09-04 Linux / Node 24.16 AB/BA calibration.
+  warmup: positiveEnvNumber('BINDING_BENCH_WARMUP', 4),
   duration: positiveEnvNumber('BINDING_BENCH_DURATION', 6),
   httpConnections: positiveEnvNumber('BINDING_BENCH_HTTP_CONNECTIONS', 100),
   httpPipelining: positiveEnvNumber('BINDING_BENCH_HTTP_PIPELINING', 10),
@@ -25,11 +27,8 @@ const PARAMS = {
   sampleMs: positiveEnvNumber('BINDING_BENCH_SAMPLE_MS', 250)
 }
 const GUARDS = {
-  // Linux / Node 24.16 calibration (2026-09-04): three balanced AB/BA series saw
-  // WS throughput as low as -5.76%; the CI HTTP p97.5 outlier was +30.5%, which
-  // the 27% cap admits with the existing 0.25 ms absolute slack.
-  maxThroughputRegressionPct: positiveEnvNumber('BINDING_BENCH_MAX_THROUGHPUT_REGRESSION_PCT', 7),
-  maxLatencyRegressionPct: positiveEnvNumber('BINDING_BENCH_MAX_LATENCY_REGRESSION_PCT', 27),
+  maxThroughputRegressionPct: positiveEnvNumber('BINDING_BENCH_MAX_THROUGHPUT_REGRESSION_PCT', 5),
+  maxLatencyRegressionPct: positiveEnvNumber('BINDING_BENCH_MAX_LATENCY_REGRESSION_PCT', 20),
   latencySlackMs: positiveEnvNumber('BINDING_BENCH_LATENCY_SLACK_MS', 0.25),
   maxRssRegressionPct: positiveEnvNumber('BINDING_BENCH_MAX_RSS_REGRESSION_PCT', 15),
   rssSlackMB: positiveEnvNumber('BINDING_BENCH_RSS_SLACK_MB', 5)
