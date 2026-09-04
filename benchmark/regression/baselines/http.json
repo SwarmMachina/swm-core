@@ -11,12 +11,12 @@
   },
   "calibration": {
     "status": "self-hosted-calibrated",
-    "updatedAt": "2026-09-03",
-    "node": "24.17.0",
+    "updatedAt": "2026-09-04",
+    "node": "24.16.0 (response stream); 24.17.0 (upload)",
     "benchkit": "0.3.0",
     "swmUws": "0.8.0",
     "ciRunner": "self-hosted (Ubuntu 24.04, Intel Xeon E5-2680 v4, dedicated, schedutil)",
-    "note": "Base scenarios retain their 2026-07-25 calibration; a post-calibration CI run observed 2.18 MiB arrayBuffers in every base control, so their cap is 3 MiB. On 2026-09-03, upload scenarios were calibrated from 4 self-hosted Node 24.17.0 benchkit series with 3 runs per scenario. Their RPS floors sit 12.5-13.3% below the slowest series median and p99 ceilings include observed per-run scheduler spikes. rssMB is report-only. Static and response-stream scenarios use portable same-run RPS ratios."
+    "note": "Base scenarios retain their 2026-07-25 calibration; a post-calibration CI run observed 2.18 MiB arrayBuffers in every base control, so their cap is 3 MiB. On 2026-09-03, upload scenarios were calibrated from 4 self-hosted Node 24.17.0 benchkit series with 3 runs per scenario. Their RPS floors sit 12.5-13.3% below the slowest series median and p99 ceilings include observed per-run scheduler spikes. On 2026-09-04, response stream was calibrated from one full CI profile plus 3 dedicated self-hosted Node 24.16.0 series, each with 3 runs: same-run ratios were 0.1170, 0.1201, 0.1241, and 0.1376; its 0.11 floor is 6% below the slowest series. rssMB is report-only. Static and response-stream scenarios use portable same-run RPS ratios."
   },
   "parameters": {
     "runs": 3,
@@ -173,7 +173,7 @@
     "stream": {
       "description": "GET Readable response through ResStreamer",
       "guards": {
-        "rpsRelativeToBaseSync": { "min": 0.12 },
+        "rpsRelativeToBaseSync": { "min": 0.11 },
         "latencyP99Ms": { "max": 25 },
         "errors": { "max": 0 },
         "heapMB": { "max": 48 },
