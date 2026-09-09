@@ -1573,6 +1573,8 @@ describe('Server', () => {
 
     test('should switch to the asynchronous path only when a before hook returns a promise', async () => {
       const order: string[] = []
+      const contexts: object[] = []
+      const userKey = Symbol('user')
 
       const resume = { value: null as (() => void) | null }
 
@@ -1585,15 +1587,25 @@ describe('Server', () => {
             method: 'get',
             path: '/x',
             before: [
-              () => order.push('sync-before'),
-              () => {
+              (ctx) => {
+                contexts.push(ctx)
+                Object.defineProperty(ctx, userKey, { value: 'user' })
+                order.push('sync-before')
+              },
+              (ctx) => {
+                contexts.push(ctx)
                 order.push('async-before')
 
                 return pending
               },
-              () => order.push('after-await')
+              (ctx) => {
+                contexts.push(ctx)
+                order.push('after-await')
+              }
             ],
-            handler: () => {
+            handler: (ctx) => {
+              contexts.push(ctx)
+              strictEqual(Reflect.get(ctx, userKey), 'user')
               order.push('handler')
 
               return 'ok'
@@ -1616,6 +1628,8 @@ describe('Server', () => {
       await new Promise((resolve) => setImmediate(resolve))
 
       deepStrictEqual(order, ['sync-before', 'async-before', 'after-await', 'handler'])
+      strictEqual(contexts.length, 4)
+      strictEqual(new Set(contexts).size, 1)
       strictEqual(res.isEnded(), true)
       strictEqual(poolSize(server.httpContextPool), 1)
     })
@@ -2586,12 +2600,16 @@ describe('Server', () => {
 
     test('should return same promise for concurrent shutdown calls', async () => {
       const server = makeServer({ onRequest: () => {} })
+      const active = createMockWebSocket()
+
+      server.createWsContext(active)
       const promise1 = server.shutdown(0)
       const promise2 = server.shutdown(0)
 
       strictEqual(promise1, promise2)
 
-      server.close()
+      server.deleteWsContext(active)
+      server.finishShutdownIfNeed()
       await promise1
     })
 
@@ -2665,7 +2683,9 @@ describe('Server', () => {
   describe('onUpgrade()', () => {
     test('should return 503 when draining', () => {
       const server = makeServer({ onRequest: () => {} })
+      const active = createMockWebSocket()
 
+      server.createWsContext(active)
       server.shutdown(0)
 
       const res = createMockHttpResponse()
@@ -2682,6 +2702,8 @@ describe('Server', () => {
       const upgradeCall = res.calls.find((c) => c.method === 'upgrade')
 
       strictEqual(upgradeCall, undefined)
+      server.deleteWsContext(active)
+      server.finishShutdownIfNeed()
     })
 
     test('should upgrade when allowed (sync)', () => {
@@ -3128,7 +3150,9 @@ describe('Server', () => {
         onRequest: () => {},
         ws: {}
       })
+      const active = createMockWebSocket()
 
+      server.createWsContext(active)
       server.shutdown(0)
 
       const ws = createMockWebSocket()
@@ -3143,13 +3167,17 @@ describe('Server', () => {
 
       strictEqual(endCall.code, 1001)
       strictEqual(endCall.reason, 'server shutting down')
+      server.deleteWsContext(active)
+      server.finishShutdownIfNeed()
     })
   })
 
   describe('handleWithContext()', () => {
     test('should respond 503 and close connection when draining', () => {
       const server = makeServer({ onRequest: () => 'ok' })
+      const active = createMockWebSocket()
 
+      server.createWsContext(active)
       server.shutdown(0)
 
       const res = createMockHttpResponse()
@@ -3160,6 +3188,8 @@ describe('Server', () => {
       strictEqual(res.getStatus(), STATUS_TEXT[503])
       strictEqual(res.getHeaders()['Connection'], 'close')
       strictEqual(res.isEnded(), true)
+      server.deleteWsContext(active)
+      server.finishShutdownIfNeed()
     })
 
     test('should register onAborted with ctx.onAbort', () => {
@@ -3423,11 +3453,17 @@ describe('Server', () => {
       )
     })
 
-    test('should finalize a pending handler after an early response reaches requestTimeoutMs', async () => {
+    test('should keep a pending handler active after an early response reaches requestTimeoutMs', async () => {
       const pending = Promise.withResolvers<void>()
+
+      let reported = 0
+
       const server = makeServer({
         http: {
           requestTimeoutMs: 100,
+          onError: () => {
+            reported++
+          },
           onRequest: (ctx) => {
             ctx.sendText('ok')
 
@@ -3442,10 +3478,12 @@ describe('Server', () => {
 
       strictEqual(response.getStatus(), STATUS_TEXT[200])
       strictEqual(responseEndBody(response.calls.find(({ method }) => method === 'end')), 'ok')
-      strictEqual(server.activeHttp, 0)
+      strictEqual(reported, 0)
+      strictEqual(server.activeHttp, 1)
 
       pending.resolve()
       await new Promise((resolve) => setImmediate(resolve))
+      strictEqual(server.activeHttp, 0)
     })
 
     test('should contain a throwing then getter like a handler error', async () => {
@@ -3480,13 +3518,13 @@ describe('Server', () => {
       strictEqual(poolSize(server.httpContextPool), 1)
     })
 
-    test('should NOT finalize when ctx.streaming=true after sync throw', async () => {
+    test('should close and finalize a streaming response after a sync handler throw', async () => {
       let safeErrCalled = 0
       let finalizeCalled = 0
 
       const server = makeServer({
         onRequest: (ctx) => {
-          ctx.streaming = true
+          ctx.startStreaming()
           throw new Error('x')
         },
         httpError: (_ctx, _err) => {
@@ -3509,7 +3547,9 @@ describe('Server', () => {
       await Promise.resolve()
 
       strictEqual(safeErrCalled, 1)
-      strictEqual(finalizeCalled, 0)
+      strictEqual(finalizeCalled, 1)
+      strictEqual(res.calls.filter(({ method }) => method === 'close').length, 1)
+      strictEqual(res.isEnded(), false)
     })
 
     test('should handle promise resolve via ctx.onResolve and finalize if not streaming', async () => {

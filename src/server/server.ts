@@ -578,7 +578,7 @@ export default class Server {
 
     this.finishShutdownIfNeed()
 
-    return this.#shutdownPromise
+    return promise
   }
 
   /** Immediately closes the listener and active native connections. */
@@ -588,17 +588,19 @@ export default class Server {
     this.#httpErrorShutdownPromise = null
     this.stopAccepting()
 
+    if (this.#shutdownTimeout) {
+      clearTimeout(this.#shutdownTimeout)
+      this.#shutdownTimeout = null
+    }
+
     if (!this.app) {
+      this.#lifecycle.draining = false
+
       if (!this.#listenPromise) {
         this.#resolveShutdownIfNeeded()
       }
 
       return
-    }
-
-    if (this.#shutdownTimeout) {
-      clearTimeout(this.#shutdownTimeout)
-      this.#shutdownTimeout = null
     }
 
     const app = this.app

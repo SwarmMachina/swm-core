@@ -8,6 +8,31 @@ const PREMATURE_CLOSE_ERROR = Object.assign(new Error('Response stream closed be
   code: 'ERR_STREAM_PREMATURE_CLOSE'
 })
 
+const IGNORE_LATE_STREAM_ERROR = () => {}
+
+function finishReadableClose(this: Readable): void {
+  this.removeListener('error', IGNORE_LATE_STREAM_ERROR)
+  this.removeListener('close', finishReadableClose)
+}
+
+/**
+ * Keep asynchronous destruction errors contained without retaining a request.
+ * Only a source this streamer destroys is guarded: one it merely detaches from
+ * stays under the application's own error handling.
+ */
+function destroyReadable(readable: Readable): void {
+  if (!readable.closed) {
+    readable.on('error', IGNORE_LATE_STREAM_ERROR)
+    readable.on('close', finishReadableClose)
+  }
+
+  try {
+    readable.destroy()
+  } catch {
+    // A source cleanup failure must not interrupt request finalization.
+  }
+}
+
 export default class ResStreamer {
   #ctx: HttpStreamingContext | null = null
   #res: HttpStreamingResponse | null = null
@@ -22,18 +47,10 @@ export default class ResStreamer {
   #uwsWritableInstalled = false
 
   abort(): void {
-    if (this.#readable) {
-      try {
-        this.#readable.destroy()
-      } catch {
-        //
-      }
-    }
-
     this.#onWritableCallback = null
     this.#started = false
 
-    this.#settleOk()
+    this.#settleOk(true)
   }
 
   /**
@@ -47,6 +64,7 @@ export default class ResStreamer {
     }
 
     this.#cleanupStream()
+    this.#done = false
 
     this.#ctx = ctx
     this.#res = res
@@ -64,6 +82,7 @@ export default class ResStreamer {
     }
 
     this.#cleanupStream()
+    this.#done = true
 
     this.#ctx = null
     this.#res = null
@@ -92,6 +111,7 @@ export default class ResStreamer {
 
     const ctx = this.#ctx!
     const res = this.#res!
+    const preparedHeaders = ctx.beginStreaming(headers)
 
     if (!this.#uwsWritableInstalled) {
       this.#uwsWritableInstalled = true
@@ -100,7 +120,7 @@ export default class ResStreamer {
 
     res.cork(() => {
       res.writeStatus(typeof status === 'string' ? status : ctx.getStatus(status))
-      ctx.flushHeaders(headers)
+      ctx.flushHeaders(preparedHeaders)
 
       if (ctx.server?.bindingCapabilities?.beginWrite === true && typeof res.beginWrite === 'function') {
         res.beginWrite()
@@ -237,7 +257,12 @@ export default class ResStreamer {
     this.#paused = false
     this.#done = false
 
-    this.begin(status, headers)
+    try {
+      this.begin(status, headers)
+    } catch (error) {
+      this.#cleanupStream(true)
+      throw error
+    }
 
     const { promise, resolve, reject } = Promise.withResolvers<void>()
 
@@ -269,12 +294,16 @@ export default class ResStreamer {
       return this.abort()
     }
 
-    const ok = this.write(chunk)
+    try {
+      const ok = this.write(chunk)
 
-    if (!ok && !this.#paused) {
-      this.#paused = true
-      this.#readable?.pause()
-      this.onWritable(this.#resumeReadable)
+      if (!ok && !this.#paused) {
+        this.#paused = true
+        this.#readable?.pause()
+        this.onWritable(this.#resumeReadable)
+      }
+    } catch (error) {
+      this.#failIncompleteStream(error)
     }
   }
 
@@ -288,7 +317,7 @@ export default class ResStreamer {
     }
 
     if (ctx?.aborted) {
-      this.#settleOk()
+      this.#settleOk(true)
     }
   }
 
@@ -299,6 +328,10 @@ export default class ResStreamer {
       this.#failIncompleteStream(err)
 
       return
+    }
+
+    if (ctx) {
+      ctx.streaming = false
     }
 
     this.#settleErr(err)
@@ -328,7 +361,14 @@ export default class ResStreamer {
     }
 
     this.#onWritableCallback = null
-    cb(offset)
+
+    try {
+      cb(offset)
+    } catch (error) {
+      this.#failIncompleteStream(error)
+
+      return true
+    }
 
     // uWS requires true after a successful callback, including a spurious
     // writable event that did not write data. A resumed source that blocks
@@ -347,12 +387,13 @@ export default class ResStreamer {
 
     this.#started = false
     ctx.streaming = false
+    ctx.reportError(reason)
     this.#settleErr(reason)
 
     // A source failure after headers must not look like a normally finished
     // chunked download. terminate() closes without writing the terminal chunk.
-    // It intentionally waits for onAborted before releasing the pooled context.
-    ctx.terminate()
+    // Wait for onAborted, or discard the owner when the transport is already invalid.
+    ctx.terminateAfterError()
   }
 
   #finishEnd(chunk: ResponseChunk | null, streamError: unknown = null): void {
@@ -377,25 +418,33 @@ export default class ResStreamer {
       responseError = error
     }
 
+    if (responseError) {
+      const hasStreamPromise = this.#streamPromise !== null
+
+      this.#failIncompleteStream(responseError)
+
+      // Manual callers receive the write error; a piped source delivers it
+      // through stream() instead of throwing out of its native end event.
+      if (!hasStreamPromise) {
+        throw responseError
+      }
+
+      return
+    }
+
     this.#started = false
     ctx.streaming = false
 
     if (streamError) {
       this.#settleErr(streamError)
-    } else if (responseError) {
-      this.#settleErr(responseError)
     } else {
       this.#settleOk()
     }
 
     ctx.finalize()
-
-    if (responseError && !streamError) {
-      throw responseError
-    }
   }
 
-  #settleOk(): void {
+  #settleOk(destroySource = false): void {
     if (this.#done) {
       return
     }
@@ -403,7 +452,7 @@ export default class ResStreamer {
     this.#done = true
 
     this.#streamResolve?.()
-    this.#cleanupStream()
+    this.#cleanupStream(destroySource)
   }
 
   #settleErr(err: unknown): void {
@@ -414,10 +463,12 @@ export default class ResStreamer {
     this.#done = true
 
     this.#streamReject?.(err)
-    this.#cleanupStream()
+    this.#cleanupStream(true)
   }
 
-  #cleanupStream(): void {
+  #cleanupStream(destroySource = false): void {
+    const readable = this.#readable
+
     if (this.#readable) {
       if (typeof this.#readable.off === 'function') {
         this.#readable.off('data', this.#onData)
@@ -437,6 +488,9 @@ export default class ResStreamer {
     this.#streamResolve = null
     this.#streamReject = null
     this.#paused = false
-    this.#done = false
+
+    if (destroySource && readable && !readable.destroyed) {
+      destroyReadable(readable)
+    }
   }
 }

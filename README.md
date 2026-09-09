@@ -14,7 +14,7 @@ native binding.
 
 - **Native uWS transport** - HTTP/WebSocket transport through `swm-uws`.
 - **HTTP + WebSocket** - Both protocols in a single server instance.
-- **Context pooling** - Minimizes garbage collection overhead.
+- **Resource pooling** - Reuses HTTP resources while keeping each request's context isolated.
 - **Graceful shutdown** - Cleanly closes active connections.
 - **Streaming support** - Efficient handling of large payloads.
 - **Auto Content-Type detection** - Automatically sets headers based on response type.
@@ -447,7 +447,7 @@ fails instead of silently falling back to a full JavaScript header scan.
 
 #### Bounded asynchronous error delivery
 
-`http.onError` receives an immutable, body-free event rather than the pooled
+`http.onError` receives an immutable, body-free event rather than the request's
 `HttpContext`. The request context and its body budget are released independently
 of remote logging, tracing, or metrics delivery.
 
@@ -770,9 +770,10 @@ aggregate limit. The budget accounts for bodies only, not total process RSS.
 
 Body accessors materialize a `Buffer`; use a streaming or object-storage upload
 flow for larger uploads. `requestTimeoutMs` defaults to 30 seconds. Before a
-response starts it releases the body reservation and returns `408`; after an
-early response it finalizes the request without a second response. It does not
-cancel application work.
+response starts it releases the body reservation and returns `408`. After an
+early response it only releases the retained body bytes: an answered request is
+not reported as an error, receives no second response, and stays active until
+its handler settles. It does not cancel application work.
 
 `ctx.bodyStream(maxSize)` does not retain the complete body or use
 `maxBodyBudget`. Its per-call and route limits can only lower
@@ -1551,16 +1552,31 @@ await.
 
 #### WSContext lifetime & pooling
 
-`HttpContext` is pooled and reused across requests to minimize GC overhead;
-`WSContext` is allocated fresh per connection and **never reused** — that is
-what guarantees the fail-loud behavior below. Do not reason about `WSContext`
-by analogy to `HttpContext`.
+`HttpContext` is allocated fresh per request; its internal body and response
+resources are pooled. Hooks and the handler receive the same context, including
+across `await`. Application properties such as `ctx.user`, symbols and
+non-enumerable or non-configurable properties belong only to that request.
+Freezing the context is supported. Cleanup detaches its internal resources
+without enumerating or deleting application properties.
 
-| Context          | Allocated per…            | Valid for…                    | Safe to retain?                             |
-| ---------------- | ------------------------- | ----------------------------- | ------------------------------------------- |
-| `HttpContext`    | request (pooled, reused)  | request/response lifecycle    | No — copy data needed by background work    |
-| `HttpErrorEvent` | reported HTTP error       | independent immutable value   | Yes — it contains bounded metadata, no body |
-| `WSContext`      | connection (never reused) | the whole connection lifetime | Yes, for the connection; not past `onClose` |
+The context remains active until the returned handler Promise settles and the
+response lifecycle finishes. After cleanup, its HTTP methods throw
+`HTTP context is no longer active`; an old reference cannot act on another
+request. Application properties remain accessible while the application retains
+the context, so drop those references when background work finishes. Raw native
+request/response handles retain their own, shorter transport lifetimes.
+
+Context identity across requests, enumeration of internal fields, and replacing
+framework methods or lifecycle fields are not supported extension points. Add
+application properties under separate names instead.
+
+`WSContext` is allocated fresh per connection and **never reused**.
+
+| Context          | Allocated per…            | Valid for…                    | Safe to retain?                              |
+| ---------------- | ------------------------- | ----------------------------- | -------------------------------------------- |
+| `HttpContext`    | request (never reused)    | request/response lifecycle    | Data only after cleanup; HTTP methods expire |
+| `HttpErrorEvent` | reported HTTP error       | independent immutable value   | Yes — it contains bounded metadata, no body  |
+| `WSContext`      | connection (never reused) | the whole connection lifetime | Yes, for the connection; not past `onClose`  |
 
 - **One instance per connection.** The _same_ `WSContext` is passed to every
   callback of a given connection (`onOpen`, `onMessage`, `onClose`, `onDrain`,
@@ -1965,13 +1981,18 @@ const server = new Server({
 })
 ```
 
-`prepareHeaders()` copies all values and rejects CR or LF before creating the
-trusted block, so later mutation of the source object cannot change responses.
+`prepareHeaders()` copies all values and rejects invalid names and control
+characters (except horizontal tabs) before creating the trusted block, so later
+mutation of the source object cannot change responses. Response APIs also reject
+manual `Content-Length` and `Transfer-Encoding`: the transport manages framing
+from the body or streaming operations. Dynamic headers are validated before
+starting the response. An uncaught validation error in a handler produces the
+normal error response; `prepareHeaders()` called during setup throws immediately.
 
-With `swm-uws@0.8.0`, an eligible complete block is copied into native-owned
+Starting with `swm-uws@0.8.0`, an eligible complete block is copied into native-owned
 bytes on its first reply and reused afterwards. The native path accepts at most
 64 name/value pairs and 64 KiB of UTF-8 payload. Dynamic pending headers,
-connection-closing replies, larger blocks, and binding-managed framing headers
+connection-closing replies and larger blocks
 keep using the existing validated fallback. Remove `preparedHeaders` from
 `SWM_UWS_NATIVE_FAST_PATHS` to disable this optimization at runtime.
 

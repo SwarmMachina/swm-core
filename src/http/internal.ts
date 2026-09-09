@@ -36,6 +36,9 @@ export interface HttpStreamingContext {
   readonly res: HttpStreamingResponse | null
   readonly server: { readonly bindingCapabilities: { readonly beginWrite?: boolean } } | null
   terminate(): void
+  terminateAfterError(): void
+  reportError(error: unknown): void
+  beginStreaming(headers: object | null): object | null
   getStatus(status?: number): string
   flushHeaders(headers: object | null): void
   finalize(): void

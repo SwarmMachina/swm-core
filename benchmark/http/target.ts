@@ -6,7 +6,7 @@ import { parseArgs } from '@swarmmachina/benchkit/orchestration'
 import { TargetRuntime } from '@swarmmachina/benchkit/target'
 import { getTest, type HeadersTestDefinition } from './scenarios.js'
 import SlowUploadSink from './slow-upload-sink.js'
-import type HttpContext from '../../src/http/context.js'
+import type HttpContext from '../../src/http/public-context.js'
 import type { Handler } from '../../src/server/options.js'
 
 interface RawResponse {
@@ -132,7 +132,7 @@ async function getAsyncPayload(): Promise<unknown> {
 }
 
 /**
- * @param {import('../../src/http/context.js').default} ctx
+ * @param {import('../../src/http/public-context.js').default} ctx
  */
 function sendCoreHeadersBenchWithAppend(ctx: HttpContext): void {
   ctx.setHeader('content-type', HEADERS_TEST.responseHeaders['content-type'])
@@ -145,7 +145,7 @@ function sendCoreHeadersBenchWithAppend(ctx: HttpContext): void {
 }
 
 /**
- * @param {import('../../src/http/context.js').default} ctx
+ * @param {import('../../src/http/public-context.js').default} ctx
  */
 function sendCoreHeadersBenchWithArray(ctx: HttpContext): void {
   ctx.setHeader('content-type', HEADERS_TEST.responseHeaders['content-type'])

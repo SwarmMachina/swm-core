@@ -56,7 +56,8 @@ export type ResponseHeaders = HttpHeaders | PreparedHeaders
  * @param headers Headers to validate and prepare.
  * @returns An immutable header block that may be reused across requests.
  * @throws {TypeError} If a header name or value is invalid, including values
- * containing CR or LF characters.
+ * containing control characters other than horizontal tabs, or manual
+ * `Content-Length` / `Transfer-Encoding` (managed by the transport).
  *
  * @example
  * ```ts
@@ -74,8 +75,8 @@ export function prepareHeaders(headers: HttpHeaders): PreparedHeaders
  * An HTTP route or universal request handler.
  *
  * A returned value is sent through {@link HttpContext.send} unless the handler
- * already replied or started a stream. Promise handlers keep the pooled
- * context assigned until the Promise settles.
+ * already replied or started a stream. Promise handlers keep the request's
+ * context active until the Promise settles.
  *
  * @param ctx Per-request HTTP context.
  * @returns A response value or a Promise for one.
@@ -800,9 +801,14 @@ export interface NativeCapabilities {
  * Per-request context passed to HTTP handlers.
  *
  * @remarks
- * Contexts are pooled. A context remains valid through the Promise returned by
- * its handler, but must not be retained after that Promise settles. Copy any
- * data needed by background work.
+ * Each request receives a fresh, extensible context; only internal resources
+ * are pooled. Hooks and the handler share its identity across `await`. It stays
+ * active until the returned handler Promise settles and the response lifecycle
+ * finishes. HTTP methods throw after cleanup instead of accessing another request.
+ * Application properties, including symbols and non-configurable properties,
+ * remain on a retained context; the pool does not retain them. Freezing is supported.
+ * Do not replace framework methods or lifecycle fields. Native handles have
+ * their own transport lifetimes and are not extended by retaining the context.
  */
 export interface HttpContext {
   /**
@@ -938,14 +944,16 @@ export interface HttpContext {
    * Array values emit one header field per item, preserving order. `Cookie`
    * values follow node:http and are joined with `; `.
    *
-   * @throws {TypeError} For invalid names or CR/LF-containing values.
+   * @throws {TypeError} For invalid names, control characters other than tabs,
+   * or transport-managed `Content-Length` / `Transfer-Encoding`.
    */
   setHeader(key: string, value: string | number | readonly string[]): this
 
   /**
    * Appends another value for a repeatable response header.
    *
-   * @throws {TypeError} For invalid names or CR/LF-containing values.
+   * @throws {TypeError} For invalid names, control characters other than tabs,
+   * or transport-managed `Content-Length` / `Transfer-Encoding`.
    */
   appendHeader(key: string, value: string | number): this
 

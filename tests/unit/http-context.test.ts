@@ -2599,7 +2599,7 @@ describe('HttpContext', () => {
       )
     })
 
-    test('should finalize a still-pending handler after an early response', async () => {
+    test('should keep a still-pending handler active after an early response', async () => {
       let finalized = 0
       let reported = 0
 
@@ -2623,8 +2623,9 @@ describe('HttpContext', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 20))
 
-      strictEqual(finalized, 1)
-      strictEqual(reported, 1)
+      // The deadline must not turn an answered request into a reported failure.
+      strictEqual(finalized, 0)
+      strictEqual(reported, 0)
       strictEqual(res.calls.filter(([name]) => name === 'end').length, 1)
     })
   })
@@ -2769,7 +2770,7 @@ describe('HttpContext', () => {
       strictEqual(finalizeCount, 0)
     })
 
-    test('onReject should NOT finalize when streaming=true', () => {
+    test('onReject should close a streaming response and wait for its transport abort', () => {
       let finalizeCount = 0
 
       const server = {
@@ -2783,15 +2784,18 @@ describe('HttpContext', () => {
       const req = createMockReq()
 
       ctx.reset(res, req, server)
-      ctx.streaming = true
+      ctx.startStreaming()
 
       ctx.onReject(Object.assign(new Error('bad'), { status: 400 }))
 
       strictEqual(
         res.calls.some(([name, ...args]) => name === 'writeStatus' && args[0] === STATUS_TEXT[400]),
-        true
+        false
       )
+      strictEqual(res.calls.filter(([name]) => name === 'close').length, 1)
       strictEqual(finalizeCount, 0)
+      ctx.onAbort()
+      strictEqual(finalizeCount, 1)
     })
 
     test('onResolve/onReject finalize when already replied, but no-op when aborted or done', () => {

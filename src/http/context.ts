@@ -1,3 +1,4 @@
+import PublicHttpContext from './public-context.js'
 import BodyParser from './body-parser.js'
 import type RequestBodyStream from './request-body-stream.js'
 import type PreparedHeaderReplies from './prepared-header-replies.js'
@@ -11,9 +12,10 @@ import type { Readable } from 'node:stream'
 import type { HttpRequest, HttpResponse, RequestPrefetchPlan, RequestPrefetchSnapshot } from '@swarmmachina/swm-uws'
 
 const MISSING_HEADER = Symbol('missing-header')
+const NO_REPORTED_ERROR = Symbol('no-reported-error')
 
-type HttpBody = string | ArrayBuffer | ArrayBufferView | Buffer
-type HeaderInput = Record<string, string | string[]> | object | null | undefined
+export type HttpBody = string | ArrayBuffer | ArrayBufferView | Buffer
+export type HeaderInput = Record<string, string | string[]> | object | null | undefined
 type HeaderMap = Record<string, string>
 type CachedHeaderMap = Record<string, string | typeof MISSING_HEADER>
 type QueryMap = Record<string, string | undefined>
@@ -49,6 +51,10 @@ interface HttpContextServer {
 export type HttpContextServerInput = Partial<HttpContextServer> | ((context: HttpContext) => void)
 
 export default class HttpContext {
+  #publicContext: PublicHttpContext | null = null
+  #reusable = true
+  #lastReportedError: unknown = NO_REPORTED_ERROR
+
   #ip = ''
   #ipCached = false
   #method = ''
@@ -73,6 +79,7 @@ export default class HttpContext {
   #preparedHeaderReplies: PreparedHeaderReplies | null = null
   #bodyParser = new BodyParser()
   #resStreamer = new ResStreamer()
+  #resStreamerReady = false
   #requestTimeout: ReturnType<typeof setTimeout> | null = null
 
   declare pool: ContextPool | null
@@ -149,12 +156,17 @@ export default class HttpContext {
 
     this.#bodyParser.timeout()
 
-    if (!this.replied) {
-      try {
-        this.replyAndClose(408, TEXT_PLAIN_HEADER, CACHED_ERRORS.requestTimeout.message)
-      } catch {
-        // The transport may have closed without delivering onAborted yet.
-      }
+    // An early reply already answered the client. Reclaim the retained body
+    // bytes at the deadline, but keep the request active: its handler still
+    // owns the outcome to report and the lifecycle to finish.
+    if (this.replied) {
+      return
+    }
+
+    try {
+      this.replyAndClose(408, TEXT_PLAIN_HEADER, CACHED_ERRORS.requestTimeout.message)
+    } catch {
+      // The transport may have closed without delivering onAborted yet.
     }
 
     this.reportError(CACHED_ERRORS.requestTimeout)
@@ -177,9 +189,8 @@ export default class HttpContext {
   }
 
   onResolve = (result: unknown): void => {
-    this.asyncPending = false
-
     if (this.done || this.aborted) {
+      this.asyncPending = false
       this.maybeRelease()
 
       return
@@ -190,42 +201,43 @@ export default class HttpContext {
         this.send(result)
       }
     } catch (err) {
-      if (!this.replied) {
-        try {
-          this.sendError(err)
-        } catch {
-          //
-        }
-      }
-
-      this.reportError(err)
+      this.fail(err)
+    } finally {
+      this.asyncPending = false
     }
 
-    if (!this.streaming) {
+    if (this.done || this.aborted) {
+      this.maybeRelease()
+    } else if (!this.streaming && !this.terminating) {
       this.finalize()
     }
   }
 
   onReject = (err: unknown): void => {
-    this.asyncPending = false
-
     if (this.done || this.aborted) {
+      // A settled response cannot change, so a late rejection normally repeats
+      // a failure that was already reported. The exception is a context whose
+      // terminate() failed: no onAborted will arrive to carry the reason, so
+      // this rejection is its only delivery path.
+      if (!this.#reusable) {
+        this.reportError(err)
+      }
+
+      this.asyncPending = false
       this.maybeRelease()
 
       return
     }
 
-    if (!this.replied) {
-      try {
-        this.sendError(err)
-      } catch {
-        //
-      }
+    try {
+      this.fail(err)
+    } finally {
+      this.asyncPending = false
     }
 
-    this.reportError(err)
-
-    if (!this.streaming) {
+    if (this.done || this.aborted) {
+      this.maybeRelease()
+    } else if (!this.streaming && !this.terminating) {
       this.finalize()
     }
   }
@@ -254,9 +266,14 @@ export default class HttpContext {
   }
 
   #resetRequestState() {
+    this.#lastReportedError = NO_REPORTED_ERROR
     this.#statusOverride = null
     this.#contentLength = undefined
-    this.#pendingHeaders.clear()
+
+    if (this.#pendingHeaders.size !== 0) {
+      this.#pendingHeaders.clear()
+    }
+
     this.#ip = ''
     this.#ipCached = false
     this.#url = ''
@@ -297,6 +314,7 @@ export default class HttpContext {
     }
 
     this.#cleared = false
+    this.#reusable = true
     const testFinalize = typeof server === 'function' ? server : null
     const serverInput = typeof server === 'object' ? server : null
 
@@ -328,14 +346,26 @@ export default class HttpContext {
     this.onWritableCallback = null
 
     this.#bodyParser.reset(this, maxSize, maxStreamSize)
-    this.#resStreamer.reset(this, res)
+
+    if (this.#resStreamerReady) {
+      this.#resStreamer.clear()
+      this.#resStreamerReady = false
+    }
 
     return this
   }
 
-  /**
-   */
-  clear(): void {
+  /** The stable, extensible public object for this request only. */
+  expose(): PublicHttpContext {
+    return (this.#publicContext ??= new PublicHttpContext(this))
+  }
+
+  clear(): boolean {
+    if (this.#publicContext !== null) {
+      PublicHttpContext.detach(this.#publicContext)
+      this.#publicContext = null
+    }
+
     this.stopRequestTimeout()
 
     this.res = null
@@ -361,9 +391,16 @@ export default class HttpContext {
       this.#resetRequestState()
 
       this.#bodyParser.clear()
-      this.#resStreamer.clear()
+
+      if (this.#resStreamerReady) {
+        this.#resStreamer.clear()
+        this.#resStreamerReady = false
+      }
+
       this.#cleared = true
     }
+
+    return this.#reusable
   }
 
   abort(): void {
@@ -377,7 +414,10 @@ export default class HttpContext {
     this.streamingStarted = false
     this.onWritableCallback = null
 
-    this.#resStreamer.abort()
+    if (this.#resStreamerReady) {
+      this.#resStreamer.abort()
+    }
+
     this.#bodyParser.abort()
 
     if (this.handlerPending) {
@@ -399,7 +439,37 @@ export default class HttpContext {
 
   /** Submit stable metadata to observability without retaining this context. */
   reportError(error: unknown): void {
-    this.server?.reportHttpError(this, error)
+    if (this.#lastReportedError === error) {
+      return
+    }
+
+    // A stream failure is reported before close and may also reject the
+    // handler Promise afterwards. Deliver that same failure only once.
+    this.#lastReportedError = error
+    this.server?.reportHttpError?.(this, error)
+  }
+
+  /** Contain handler failures while preserving ownership of an unfinished response. */
+  fail(error: unknown): void {
+    this.reportError(error)
+
+    if (this.done || this.aborted || this.terminating) {
+      return
+    }
+
+    if (this.streaming) {
+      this.terminateAfterError()
+
+      return
+    }
+
+    if (!this.replied) {
+      try {
+        this.sendError(error)
+      } catch {
+        this.terminateAfterError()
+      }
+    }
   }
 
   /**
@@ -407,7 +477,7 @@ export default class HttpContext {
    * owns an immutable event and never participates in request lifecycle.
    */
   maybeRelease(): void {
-    if (!this.releasePending || this.asyncPending) {
+    if (!this.releasePending || this.handlerPending || this.asyncPending) {
       return
     }
 
@@ -1048,6 +1118,22 @@ export default class HttpContext {
     this.#flushPendingHeaders(headers)
   }
 
+  /** Validate before streaming writes status or headers into the native cork. */
+  beginStreaming(headers: HeaderInput): object | null {
+    if (headers && !getPreparedHeaders(headers)) {
+      this.#stageHeaders(headers)
+      headers = null
+    }
+
+    this.stopRequestTimeout()
+    this.replied = true
+    this.streaming = true
+
+    // Prepared headers are already trusted. Preserve their direct flush path
+    // instead of allocating pending Map entries for every streaming response.
+    return headers ?? null
+  }
+
   /**
    * @param {string} key
    * @param {string | string[] | null | undefined} value
@@ -1300,67 +1386,100 @@ export default class HttpContext {
     this.stopRequestTimeout()
     this.terminating = true
     this.replied = true
-    this.res!.close()
+
+    try {
+      this.res!.close()
+    } catch (error) {
+      // Native cork failure may already have invalidated the response without
+      // delivering onAborted. An owner whose close failed must not be reused,
+      // including by a delayed callback from an alternative transport.
+      this.#reusable = false
+      this.abort()
+      throw error
+    }
   }
 
-  /**
-   * @param {number} status
-   * @param {Record<string, string | string[]>} headers
-   * @param {string|ArrayBuffer|Uint8Array|Buffer|null|undefined} body
-   * @param {boolean} closeConnection
-   */
+  /** Preserve the original response/stream error if closing also fails. */
+  terminateAfterError(): void {
+    try {
+      this.terminate()
+    } catch {
+      // terminate() has already detached or marked this owner for disposal.
+    }
+  }
+
   #reply(status: number, headers: HeaderInput, body: HttpBody | null | undefined, closeConnection: boolean): void {
     if (this.replied || this.aborted) {
       return
     }
 
-    this.stopRequestTimeout()
-    this.replied = true
-
     const prepared = getPreparedHeaders(headers)
 
-    if (
-      !closeConnection &&
-      prepared &&
-      this.#pendingHeaders.size === 0 &&
-      this.res &&
-      this.#preparedHeaderReplies?.send(this.res, this.getStatus(status), prepared, body ?? undefined)
-    ) {
-      return
+    if (!closeConnection && prepared && this.#pendingHeaders.size === 0 && this.res) {
+      this.replied = true
+      try {
+        if (this.#preparedHeaderReplies?.send(this.res, this.getStatus(status), prepared, body ?? undefined)) {
+          return
+        }
+      } catch (error) {
+        this.terminateAfterError()
+        throw error
+      }
     }
 
-    if (
-      !closeConnection &&
-      this.#responseBatch &&
-      prepared &&
-      this.#pendingHeaders.size === 0 &&
-      typeof this.res?.endBatch === 'function'
-    ) {
-      this.res.endBatch(this.getStatus(status), [...prepared.lines], body ?? undefined)
+    this.#replyFallback(status, headers, body, closeConnection, prepared)
+  }
 
-      return
+  #replyFallback(
+    status: number,
+    headers: HeaderInput,
+    body: HttpBody | null | undefined,
+    closeConnection: boolean,
+    prepared: ReturnType<typeof getPreparedHeaders>
+  ): void {
+    if (headers && !prepared) {
+      this.#stageHeaders(headers)
+      headers = null
     }
 
-    this.res!.cork(() => {
-      if (this.aborted) {
+    this.replied = true
+    try {
+      if (
+        !closeConnection &&
+        this.#responseBatch &&
+        prepared &&
+        this.#pendingHeaders.size === 0 &&
+        typeof this.res?.endBatch === 'function'
+      ) {
+        this.res.endBatch(this.getStatus(status), [...prepared.lines], body ?? undefined)
+
         return
       }
 
-      this.res!.writeStatus(this.getStatus(status))
-      this.#flushPendingHeaders(headers, prepared)
-
-      if (body != null) {
-        if (closeConnection) {
-          this.res!.end(body, true)
-        } else {
-          this.res!.end(body)
+      this.res!.cork(() => {
+        if (this.aborted) {
+          return
         }
-      } else if (closeConnection) {
-        this.res!.end(undefined, true)
-      } else {
-        this.res!.end()
-      }
-    })
+
+        this.res!.writeStatus(this.getStatus(status))
+        this.#flushPendingHeaders(headers, prepared)
+
+        if (body != null) {
+          if (closeConnection) {
+            this.res!.end(body, true)
+          } else {
+            this.res!.end(body)
+          }
+        } else if (closeConnection) {
+          this.res!.end(undefined, true)
+        } else {
+          this.res!.end()
+        }
+      })
+    } catch (error) {
+      this.terminateAfterError()
+      throw error
+    }
   }
 
   /**
@@ -1373,11 +1492,7 @@ export default class HttpContext {
       return this
     }
 
-    this.stopRequestTimeout()
-    this.replied = true
-    this.streaming = true
-
-    this.#resStreamer.begin(status, headers as Record<string, string | string[]> | null)
+    this.#getResponseStreamer().begin(status, headers as Record<string, string | string[]> | null)
 
     return this
   }
@@ -1397,7 +1512,7 @@ export default class HttpContext {
 
     this.streamingStarted = true
 
-    return this.#resStreamer.write(chunk)
+    return this.#getResponseStreamer().write(chunk)
   }
 
   /**
@@ -1414,7 +1529,7 @@ export default class HttpContext {
       throw new Error('Must call startStreaming() before tryEnd()')
     }
 
-    return this.#resStreamer.tryEnd(chunk, totalSize)
+    return this.#getResponseStreamer().tryEnd(chunk, totalSize)
   }
 
   /**
@@ -1429,7 +1544,7 @@ export default class HttpContext {
       throw new Error('Must call startStreaming() before end()')
     }
 
-    this.#resStreamer.end(chunk)
+    this.#getResponseStreamer().end(chunk)
   }
 
   onWritable(callback: (offset: number) => void): void {
@@ -1437,7 +1552,7 @@ export default class HttpContext {
       return
     }
 
-    this.#resStreamer.onWritable(callback)
+    this.#getResponseStreamer().onWritable(callback)
   }
 
   getWriteOffset(): number {
@@ -1445,7 +1560,7 @@ export default class HttpContext {
       return 0
     }
 
-    return this.#resStreamer.getWriteOffset()
+    return this.#getResponseStreamer().getWriteOffset()
   }
 
   /**
@@ -1459,10 +1574,15 @@ export default class HttpContext {
       return Promise.resolve()
     }
 
-    this.stopRequestTimeout()
-    this.replied = true
-    this.streaming = true
+    return this.#getResponseStreamer().stream(readable, status, headers as Record<string, string | string[]> | null)
+  }
 
-    return this.#resStreamer.stream(readable, status, headers as Record<string, string | string[]> | null)
+  #getResponseStreamer(): ResStreamer {
+    if (!this.#resStreamerReady) {
+      this.#resStreamer.reset(this, this.res)
+      this.#resStreamerReady = true
+    }
+
+    return this.#resStreamer
   }
 }

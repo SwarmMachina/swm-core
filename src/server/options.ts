@@ -1,4 +1,4 @@
-import type HttpContext from '../http/context.js'
+import type HttpContext from '../http/public-context.js'
 import type WSContext from '../ws/context.js'
 import type WebSocketUpgradeMeta from '../ws/upgrade-meta.js'
 

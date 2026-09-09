@@ -1,4 +1,5 @@
 import HttpContext from './context.js'
+import type PublicHttpContext from './public-context.js'
 import ContextPool from './context-pool.js'
 import type PreparedHeaderReplies from './prepared-header-replies.js'
 import { compileHeaderPrefetchPlan, mergeHeaderPrefetch } from './prefetch.js'
@@ -8,7 +9,7 @@ import { isPromise } from '../internal/promise.js'
 import type { HttpRequest, HttpResponse, RequestPrefetchPlan } from '@swarmmachina/swm-uws'
 import type { HeaderPrefetch, HttpMethod, NormalizedHttpOptions } from '../server/options.js'
 
-type Handler = (ctx: HttpContext) => unknown | Promise<unknown>
+type Handler = (ctx: PublicHttpContext) => unknown | Promise<unknown>
 type NativeRouteHandler = (res: HttpResponse, req: HttpRequest) => void
 type NativeRouteMethod = (path: string, handler: NativeRouteHandler) => void
 type NativeRouteName = Exclude<HttpMethod, 'delete'>
@@ -79,7 +80,7 @@ function composeRouteHandler(handler: Handler, before?: Handler | Handler[]): Ha
     return handler
   }
 
-  return (ctx: HttpContext) => runBeforeChain(ctx, chain, handler, 0)
+  return (ctx: PublicHttpContext) => runBeforeChain(ctx, chain, handler, 0)
 }
 
 /**
@@ -87,7 +88,7 @@ function composeRouteHandler(handler: Handler, before?: Handler | Handler[]): Ha
  * @returns {(ctx: HttpContext) => unknown|Promise<unknown>}
  */
 function withBodyPrefetch(handler: Handler): Handler {
-  return (ctx: HttpContext) => {
+  return (ctx: PublicHttpContext) => {
     const error = ctx.prefetchBody()
 
     if (error) {
@@ -107,7 +108,7 @@ function withBodyPrefetch(handler: Handler): Handler {
  * @returns {unknown|Promise<unknown>}
  */
 function runBeforeChain(
-  ctx: HttpContext,
+  ctx: PublicHttpContext,
   chain: Handler[],
   handler: Handler,
   start: number
@@ -137,7 +138,7 @@ function runBeforeChain(
  * @param {HttpContext} ctx
  * @returns {boolean}
  */
-function shouldStopBefore(ctx: HttpContext): boolean {
+function shouldStopBefore(ctx: PublicHttpContext): boolean {
   return ctx.done || ctx.aborted || ctx.terminating || (ctx.replied && !ctx.streaming)
 }
 
@@ -158,7 +159,7 @@ export default class HttpRuntime {
    * @param {HttpContext} ctx
    */
   finalizeHttpContext = (ctx: HttpContext): void => {
-    if (ctx.asyncPending) {
+    if (ctx.handlerPending || ctx.asyncPending) {
       ctx.releasePending = true
     } else {
       ctx.release()
@@ -172,21 +173,24 @@ export default class HttpRuntime {
   }
 
   #handleHandlerError(ctx: HttpContext, err: unknown): void {
-    if (!ctx.replied) {
-      ctx.sendError(err as Error)
+    try {
+      ctx.fail(err)
+    } finally {
+      this.#finishHandlerInvocation(ctx)
     }
+  }
 
-    ctx.reportError(err)
+  #finishHandlerInvocation(ctx: HttpContext): void {
     ctx.handlerPending = false
 
     if (ctx.abortPending) {
       ctx.abortPending = false
       ctx.finalize()
-
-      return
     }
 
-    if (!ctx.done && !ctx.aborted && !ctx.terminating && !ctx.streaming) {
+    if (ctx.done || ctx.aborted) {
+      ctx.maybeRelease()
+    } else if (!ctx.asyncPending && !ctx.terminating && !ctx.streaming) {
       ctx.finalize()
     }
   }
@@ -245,7 +249,7 @@ export default class HttpRuntime {
         ctx.attachPrefetchedHeaders(headerSelection, headerPlan)
       }
 
-      result = handler(ctx)
+      result = handler(ctx.expose())
     } catch (err) {
       this.#handleHandlerError(ctx, err)
 
@@ -262,21 +266,20 @@ export default class HttpRuntime {
       return
     }
 
-    if (asyncPending && !ctx.aborted) {
-      // Native request access ends when this callback returns. Header
-      // retention remains governed by the configured prefetch policy.
-      ctx.cacheRequest(paramNames)
-    }
-
     ctx.asyncPending = asyncPending
-    ctx.handlerPending = false
-
-    if (ctx.abortPending) {
-      ctx.abortPending = false
-      ctx.finalize()
-    }
 
     if (asyncPending) {
+      try {
+        if (!ctx.aborted) {
+          // Native request access ends when this callback returns.
+          ctx.cacheRequest(paramNames)
+        }
+      } catch (err) {
+        ctx.fail(err)
+      } finally {
+        this.#finishHandlerInvocation(ctx)
+      }
+
       ctx.startRequestTimeout(server.httpRequestTimeoutMs)
 
       // eslint-disable-next-line promise/catch-or-return
@@ -285,24 +288,14 @@ export default class HttpRuntime {
       return
     }
 
-    if (ctx.done || ctx.aborted || ctx.terminating) {
-      return
-    }
-
-    if (!ctx.replied) {
-      try {
+    try {
+      if (!ctx.done && !ctx.aborted && !ctx.terminating && !ctx.replied) {
         ctx.send(result)
-      } catch (err) {
-        if (!ctx.replied) {
-          ctx.sendError(err as Error)
-        }
-
-        ctx.reportError(err)
       }
-    }
-
-    if (!ctx.streaming) {
-      ctx.finalize()
+    } catch (err) {
+      ctx.fail(err)
+    } finally {
+      this.#finishHandlerInvocation(ctx)
     }
   }
 

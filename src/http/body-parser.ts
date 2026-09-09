@@ -430,8 +430,14 @@ export default class BodyParser {
       this.#clearRequestState()
     }
 
-    this.#maxSize = validateBodyByteLimit(maxSize, 'maxSize')
-    this.#maxStreamSize = validateStreamBodyByteLimit(maxStreamSize, 'maxStreamSize')
+    if (maxSize !== this.#maxSize) {
+      this.#maxSize = validateBodyByteLimit(maxSize, 'maxSize')
+    }
+
+    if (maxStreamSize !== this.#maxStreamSize) {
+      this.#maxStreamSize = validateStreamBodyByteLimit(maxStreamSize, 'maxStreamSize')
+    }
+
     this.#ctx = ctx
     this.#state = 'idle'
   }
@@ -442,7 +448,7 @@ export default class BodyParser {
     }
 
     if (this.#state === 'idle') {
-      this.#clearRequestState()
+      // No reader has started: storage, callbacks and reservations are empty.
       this.#ctx = null
       this.#state = 'cleared'
 

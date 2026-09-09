@@ -1,8 +1,8 @@
 const POOLED_BY = Symbol('ContextPool.pooledBy')
 
 interface Poolable {
-  [POOLED_BY]?: ContextPool<Poolable> | null
-  clear(): void
+  [POOLED_BY]?: object | null
+  clear(): boolean | void
 }
 
 export default class ContextPool<T extends Poolable> {
@@ -37,13 +37,11 @@ export default class ContextPool<T extends Poolable> {
       throw new TypeError('ContextPool.release: ctx.clear() is required')
     }
 
-    if (ctx[POOLED_BY] === (this as unknown as ContextPool<Poolable>)) {
+    if (ctx[POOLED_BY] === this) {
       return
     }
 
-    ctx.clear()
-
-    if (this.maxSize === 0) {
+    if (ctx.clear() === false || this.maxSize === 0) {
       return
     }
 
@@ -51,7 +49,7 @@ export default class ContextPool<T extends Poolable> {
       return
     }
 
-    ctx[POOLED_BY] = this as unknown as ContextPool<Poolable>
+    ctx[POOLED_BY] = this
     this.pool.push(ctx)
   }
 }

@@ -1,4 +1,6 @@
-const INVALID_HEADER_VALUE = /[\r\n]/
+// Explicitly reject HTTP control bytes while allowing horizontal tabs.
+// eslint-disable-next-line no-control-regex
+const INVALID_HEADER_VALUE = /[\x00-\x08\x0a-\x1f\x7f]/
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
 
 interface PreparedHeaderGroup {
@@ -15,17 +17,43 @@ export interface PreparedHeaderData {
 
 const PREPARED_HEADERS = new WeakMap<object, PreparedHeaderData>()
 
-/** Throws when a response-header value contains a line break. */
+/** Throws for response-header control characters other than horizontal tabs. */
 export function assertHeaderValue(value: string): void {
   if (INVALID_HEADER_VALUE.test(value)) {
-    throw new TypeError('Header value must not contain CR or LF')
+    throwInvalidHeaderValue(value)
   }
 }
 
-/** Throws when a response-header name is not a valid HTTP token. */
+function throwInvalidHeaderValue(value: string): never {
+  throw new TypeError(
+    value.includes('\r') || value.includes('\n')
+      ? 'Header value must not contain CR or LF'
+      : 'Header value must not contain control characters'
+  )
+}
+
+const MANAGED_HEADER_NAMES = new Set(['content-length', 'transfer-encoding'])
+const MANAGED_NAME_LENGTHS = new Set(Array.from(MANAGED_HEADER_NAMES, (name) => name.length))
+
+/** Keep framing-name normalization off the common header validation path. */
+function assertUnmanagedHeaderName(value: string): void {
+  if (MANAGED_HEADER_NAMES.has(value.toLowerCase())) {
+    throw new TypeError('Content-Length and Transfer-Encoding are managed by the HTTP transport')
+  }
+}
+
+function throwInvalidHeaderName(): never {
+  throw new TypeError('Header name must be a valid HTTP token')
+}
+
+/** Rejects invalid HTTP tokens and transport-managed response framing headers. */
 export function assertHeaderName(value: string): void {
   if (!HEADER_NAME.test(value)) {
-    throw new TypeError('Header name must be a valid HTTP token')
+    throwInvalidHeaderName()
+  }
+
+  if (MANAGED_NAME_LENGTHS.has(value.length)) {
+    assertUnmanagedHeaderName(value)
   }
 }
 
@@ -100,12 +128,6 @@ export function prepareHeaders(headers: unknown): object {
   for (let index = 0; nativeEligible && index < lines.length; index += 2) {
     const name = lines[index]!
     const value = lines[index + 1]!
-    const lowercaseName = name.toLowerCase()
-
-    if (lowercaseName === 'content-length' || lowercaseName === 'transfer-encoding') {
-      nativeEligible = false
-      break
-    }
 
     nativeBytes += name.length + Buffer.byteLength(value)
     nativeEligible = nativeBytes <= 64 * 1024
