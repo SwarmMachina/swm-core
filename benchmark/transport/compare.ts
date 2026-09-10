@@ -361,6 +361,8 @@ async function main() {
     candidate: bindings.candidate,
     reference: bindings.reference,
     parameters: PARAMS,
+    wsWarmupStrategy: 'same-workers-and-connections',
+    wsTargetMetricsWindow: 'warmup-and-measurement',
     guards: GUARDS,
     status,
     failures,
@@ -380,6 +382,8 @@ async function main() {
     '',
     renderSuite('http / base-sync', 'req/s', http.candidate, http.reference, 'latencyP97_5Ms', 'p97.5'),
     renderSuite('ws / echo', 'msg/s', ws.candidate, ws.reference, 'latencyP95Ms', 'p95'),
+    'WS throughput and latency exclude warmup. WS target ELU and memory cover warmup and measurement.',
+    '',
     failures.length ? `Failures:\n\n${failures.map((failure) => `- ${failure}`).join('\n')}` : 'All guards passed.'
   ].join('\n')
 

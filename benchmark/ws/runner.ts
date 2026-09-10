@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { runWebSocketLoad } from '@swarmmachina/benchkit/load/websocket'
 import type { WebSocketLoadResult } from '@swarmmachina/benchkit/load/websocket'
 import { timed, type MetricsSummary, type TimedResult } from '@swarmmachina/benchkit/measurement'
 import { parseArgs, shuffle } from '@swarmmachina/benchkit/orchestration'
@@ -17,6 +16,7 @@ import { TargetController } from '../harness/target-controller.js'
 import { TARGET_ARG_HANDLERS, targetDefaults, targetUrl } from '../harness/target-session.js'
 import { REPOSITORY_ROOT, RUNTIME_BENCHMARK_ROOT } from '../harness/runtime-paths.js'
 import type { TargetArgs } from '../harness/types.js'
+import { runWsBenchmarkLoad } from './load.js'
 
 const KNOWN_FRAMEWORKS = new Set([
   'core',
@@ -211,31 +211,25 @@ async function runOne({
   })
   const url = targetUrl('ws', session, '/')
   const maxInFlight = mode === 'open' ? depth : 1
-  const message = new Uint8Array(Math.max(1, msgSize)).fill(0x61)
-  const runLoad = (durationSecArg: number): Promise<WebSocketLoadResult> =>
-    runWebSocketLoad({
-      name: `${fw} ws-echo`,
-      url,
-      message,
-      connections,
-      workers,
-      maxInFlight,
-      durationMs: durationSecArg * 1000,
-      timeoutMs: 5000
-    })
 
   let runTimed: TimedResult<WebSocketLoadResult> | undefined
   let m: MetricsSummary | null | undefined
 
   try {
-    if (warmupSec > 0) {
-      const w = await timed(() => runLoad(warmupSec))
-
-      console.log(`[ws-bench] ${fw}: warmup done in ${msToHuman(w.ms)}`)
-    }
-
+    // Target telemetry includes warmup; throughput and latency exclude it.
     await session.startMetrics({ sampleMs })
-    runTimed = await timed(() => runLoad(durationSec))
+    runTimed = await timed(() =>
+      runWsBenchmarkLoad({
+        name: `${fw} ws-echo`,
+        url,
+        connections,
+        workers,
+        msgSize,
+        maxInFlight,
+        warmupSec,
+        durationSec
+      })
+    )
     m = await session.stopMetrics()
   } finally {
     await session.stop()
@@ -416,6 +410,8 @@ async function main() {
     options: {
       runs: args.runs,
       warmup: args.warmup,
+      warmupStrategy: 'same-workers-and-connections',
+      targetMetricsWindow: 'warmup-and-measurement',
       workers: args.workers,
       sampleMs: args.sampleMs,
       mode: args.mode,
@@ -428,6 +424,8 @@ async function main() {
     runs: runRows,
     median: medians
   }
+
+  console.log('[ws-bench] Throughput/latency exclude warmup; target ELU and memory include warmup.')
 
   if (args.jsonOut) {
     await fs.mkdir(path.dirname(args.jsonOut), { recursive: true })
