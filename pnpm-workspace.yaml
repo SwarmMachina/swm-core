@@ -1,5 +1,5 @@
 minimumReleaseAgeExclude:
   - '@swarmmachina/swm-uws@0.8.1'
-  - '@swarmmachina/benchkit@0.3.0'
+  - '@swarmmachina/benchkit@0.3.0 || 0.3.1'
 allowBuilds:
   '@swarmmachina/swm-uws': true

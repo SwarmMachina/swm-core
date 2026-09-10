@@ -105,7 +105,7 @@
     "prepublishOnly": "pnpm release:gate"
   },
   "devDependencies": {
-    "@swarmmachina/benchkit": "0.3.0",
+    "@swarmmachina/benchkit": "0.3.1",
     "@swarmmachina/standards": "^3.1.0",
     "@types/express": "^5.0.6",
     "@types/node": "24.13.3",

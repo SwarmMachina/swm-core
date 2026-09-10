@@ -12,8 +12,8 @@ importers:
         version: 0.8.1
     devDependencies:
       '@swarmmachina/benchkit':
-        specifier: 0.3.0
-        version: 0.3.0
+        specifier: 0.3.1
+        version: 0.3.1
       '@swarmmachina/standards':
         specifier: ^3.1.0
         version: 3.1.0(@typescript-eslint/parser@8.66.0(@typescript/typescript6@6.0.2)(eslint@10.8.0))(typescript-eslint@8.66.0(@typescript/typescript6@6.0.2)(eslint@10.8.0))
@@ -181,9 +181,9 @@ packages:
       { integrity: sha512-TeheYy0ILzBEI/CO55CP6zJCSdSWeRtGnHy8U8dWSUH4I68iqTsy7HkMktR4xakThc9jotkPQUXT4ITdbV7cHA== }
     engines: { node: '>=18' }
 
-  '@swarmmachina/benchkit@0.3.0':
+  '@swarmmachina/benchkit@0.3.1':
     resolution:
-      { integrity: sha512-Ufy9Yfq1fjctKtUinN9VMEWF1qcpjF+WgWU1pq8q11tHxIU1Q1sbT7ggIhPQ4sToCNsuk3eAqzenEV5u7208tg== }
+      { integrity: sha512-hzx/dHfDaFlgq62fwIfCRUL3pV9xI+aevRkRzM/Ildn8emEf0MGClvLTgEaY7fd4/5ziN/NIly/wuOJ06gjNSg== }
     engines: { node: ^22.13.0 || 24.x }
     hasBin: true
 
@@ -1653,7 +1653,7 @@ snapshots:
 
   '@sindresorhus/base62@1.0.0': {}
 
-  '@swarmmachina/benchkit@0.3.0': {}
+  '@swarmmachina/benchkit@0.3.1': {}
 
   '@swarmmachina/standards@3.1.0(@typescript-eslint/parser@8.66.0(@typescript/typescript6@6.0.2)(eslint@10.8.0))(typescript-eslint@8.66.0(@typescript/typescript6@6.0.2)(eslint@10.8.0))':
     dependencies:
