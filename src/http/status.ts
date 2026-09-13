@@ -48,7 +48,9 @@ export const STATUS_TEXT: Readonly<Record<number, string>> = Object.freeze({
   504: '504 Gateway Timeout'
 })
 
-export type StatusError = Error & { status: number }
+export interface StatusError extends Error {
+  status: number
+}
 
 export const CACHED_ERRORS = Object.freeze({
   bodyTooLarge: Object.assign(new Error('Request body too large'), { status: 413 }),

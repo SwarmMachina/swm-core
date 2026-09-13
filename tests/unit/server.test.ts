@@ -14,6 +14,7 @@ import {
   setListenCallback
 } from '../helpers/mock-uws-module.js'
 import { STATUS_TEXT } from '../../src/http/status.js'
+import ErrorWithCode from '../../src/internal/error-with-code.js'
 import type {
   CommonServerOptions,
   Handler,
@@ -3096,7 +3097,7 @@ describe('Server', () => {
     })
 
     test('should time out an unresolved upgrade at zero milliseconds', async () => {
-      const receivedError = { value: null as (Error & { code?: string }) | null }
+      const receivedError: { value: ErrorWithCode | null } = { value: null }
 
       const server = makeServer({
         onRequest: () => {},
@@ -3104,7 +3105,9 @@ describe('Server', () => {
           upgradeTimeoutMs: 0,
           onUpgrade: () => new Promise(() => {}),
           onError: (_ctx, error) => {
-            receivedError.value = error as Error & { code?: string }
+            if (error instanceof ErrorWithCode) {
+              receivedError.value = error
+            }
           }
         }
       })
@@ -3119,7 +3122,7 @@ describe('Server', () => {
     })
 
     test('should terminate an async upgrade that exceeds ws.upgradeTimeoutMs', async () => {
-      const receivedError = { value: null as (Error & { code?: string }) | null }
+      const receivedError: { value: ErrorWithCode | null } = { value: null }
 
       const server = makeServer({
         onRequest: () => {},
@@ -3127,7 +3130,9 @@ describe('Server', () => {
           upgradeTimeoutMs: 100,
           onUpgrade: () => new Promise(() => {}),
           onError: (_ctx, error) => {
-            receivedError.value = error as Error & { code?: string }
+            if (error instanceof ErrorWithCode) {
+              receivedError.value = error
+            }
           }
         }
       })

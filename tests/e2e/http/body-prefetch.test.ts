@@ -7,8 +7,16 @@ import { reqText } from '../../helpers/http-client.js'
 
 let server: HttpServerHandle | null = null
 
-interface UserContext {
-  userId?: number
+function setUserId(context: object, userId: number): void {
+  Object.assign(context, { userId })
+}
+
+function getUserId(context: object): number | undefined {
+  if (!('userId' in context) || typeof context.userId !== 'number') {
+    return undefined
+  }
+
+  return context.userId
 }
 
 const delay = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -90,9 +98,9 @@ test('route prefetch: body is available after an asynchronous before hook', { ti
         prefetch: true,
         before: async (ctx) => {
           await delay(30)
-          ;(ctx as typeof ctx & UserContext).userId = 42
+          setUserId(ctx, 42)
         },
-        handler: async (ctx) => ({ userId: (ctx as typeof ctx & UserContext).userId, data: await ctx.json() })
+        handler: async (ctx) => ({ userId: getUserId(ctx), data: await ctx.json() })
       }
     ]
   })

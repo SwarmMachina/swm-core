@@ -3,6 +3,7 @@ import BodyParser from './body-parser.js'
 import type RequestBodyStream from './request-body-stream.js'
 import type PreparedHeaderReplies from './prepared-header-replies.js'
 import ResStreamer from './response-streamer.js'
+import ErrorWithCode from '../internal/error-with-code.js'
 import { CACHED_ERRORS, JSON_HEADER, OCTET_STREAM_HEADER, STATUS_TEXT, TEXT_PLAIN_HEADER } from './status.js'
 import { assertHeaderName, assertHeaderValue, getPreparedHeaders } from './headers.js'
 import { getRemoteAddress } from '../net/remote-address.js'
@@ -687,7 +688,7 @@ export default class HttpContext {
 
   /** Numeric status selected for the framework-controlled error response. */
   resolveErrorStatus(error: Error): number {
-    const errorStatus = (error as Error & { status?: unknown }).status
+    const errorStatus = 'status' in error ? error.status : undefined
 
     if (Number.isFinite(this.#statusOverride)) {
       return this.#statusOverride!
@@ -920,13 +921,10 @@ export default class HttpContext {
         return Object.create(null)
       }
 
-      const error = new Error(
-        'All request headers are unavailable after the async boundary; use prefetchHeaders: "all" or call getHeaders() synchronously'
+      throw new ErrorWithCode(
+        'All request headers are unavailable after the async boundary; use prefetchHeaders: "all" or call getHeaders() synchronously',
+        'REQUEST_HEADERS_NOT_RETAINED'
       )
-
-      ;(error as Error & { code: string }).code = 'REQUEST_HEADERS_NOT_RETAINED'
-
-      throw error
     }
 
     const headers = Object.create(null)

@@ -1,4 +1,5 @@
 import type { HttpErrorEvent } from '../server/options.js'
+import ErrorWithCode from '../internal/error-with-code.js'
 
 interface HttpErrorEventSource {
   getIP(): string
@@ -74,9 +75,5 @@ export function normalizeHttpError(value: unknown): Error {
     }
   }
 
-  const error = new Error(message)
-
-  ;(error as Error & { code: string }).code = 'ERR_NON_ERROR_THROWN'
-
-  return error
+  return new ErrorWithCode(message, 'ERR_NON_ERROR_THROWN')
 }

@@ -1,6 +1,7 @@
 import { compileHeaderPrefetchPlan } from '../http/prefetch.js'
 import { STATUS_TEXT } from '../http/status.js'
 import { isPromise } from '../internal/promise.js'
+import ErrorWithCode from '../internal/error-with-code.js'
 import { parseWsProtocols, validateWsProtocolSelection } from './protocol.js'
 import WebSocketUpgradeMeta from './upgrade-meta.js'
 
@@ -190,11 +191,11 @@ export default class WebSocketUpgradeRuntime {
         upgradeTimer = null
         rejectUpgrade(res, 408)
 
-        const error = new Error(`WebSocket upgrade timed out after ${server.wsUpgradeTimeoutMs}ms`) as Error & {
-          code: string
-        }
+        const error = new ErrorWithCode(
+          `WebSocket upgrade timed out after ${server.wsUpgradeTimeoutMs}ms`,
+          'WS_UPGRADE_TIMEOUT'
+        )
 
-        error.code = 'WS_UPGRADE_TIMEOUT'
         void server.safeCall(server.onWsError, null, error)
       }, server.wsUpgradeTimeoutMs) as unknown as number
 

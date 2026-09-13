@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test'
 import { deepStrictEqual, strictEqual } from 'node:assert/strict'
 import { createHttpErrorEvent, normalizeHttpError } from '../../src/http/error-event.js'
+import ErrorWithCode from '../../src/internal/error-with-code.js'
 
 describe('HTTP error event', () => {
   test('captures an immutable body-free metadata allowlist', () => {
@@ -80,9 +81,15 @@ describe('HTTP error event', () => {
       [Symbol.toPrimitive]() {
         throw new Error('cannot stringify')
       }
-    }) as Error & { code?: string }
+    })
 
     strictEqual(error.message, 'Non-Error value thrown')
+    strictEqual(error instanceof ErrorWithCode, true)
+
+    if (!(error instanceof ErrorWithCode)) {
+      throw new Error('Expected ErrorWithCode')
+    }
+
     strictEqual(error.code, 'ERR_NON_ERROR_THROWN')
   })
 })
