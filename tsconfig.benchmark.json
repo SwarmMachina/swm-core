@@ -6,5 +6,6 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["src/**/*.js", "src/**/*.ts", "src/**/*.d.ts", "benchmark/**/*.js", "benchmark/**/*.ts"]
+  "include": ["src/**/*.js", "src/**/*.ts", "src/**/*.d.ts", "benchmark/**/*.js", "benchmark/**/*.ts"],
+  "exclude": ["benchmark/profiles/**"]
 }
