@@ -64,6 +64,13 @@ config.push({
 
 config.push({
   rules: {
+    'no-restricted-syntax': [
+      'error',
+      {
+        selector: "BinaryExpression[operator='in']",
+        message: 'Use Object.hasOwn() for own-property checks.'
+      }
+    ],
     'promise/always-return': 'off',
     'n/no-process-exit': 'off',
     'n/no-unsupported-features/es-syntax': 'off'

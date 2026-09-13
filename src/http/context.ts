@@ -688,7 +688,8 @@ export default class HttpContext {
 
   /** Numeric status selected for the framework-controlled error response. */
   resolveErrorStatus(error: Error): number {
-    const errorStatus = 'status' in error ? error.status : undefined
+    const statusError = error as Error & { status?: unknown }
+    const errorStatus = Object.hasOwn(statusError, 'status') ? statusError.status : undefined
 
     if (Number.isFinite(this.#statusOverride)) {
       return this.#statusOverride!

@@ -12,11 +12,13 @@ function setUserId(context: object, userId: number): void {
 }
 
 function getUserId(context: object): number | undefined {
-  if (!('userId' in context) || typeof context.userId !== 'number') {
+  const userContext = context as { userId?: unknown }
+
+  if (!Object.hasOwn(userContext, 'userId') || typeof userContext.userId !== 'number') {
     return undefined
   }
 
-  return context.userId
+  return userContext.userId
 }
 
 const delay = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms))
