@@ -8,8 +8,8 @@ importers:
   .:
     dependencies:
       '@swarmmachina/swm-uws':
-        specifier: 0.8.2
-        version: 0.8.2
+        specifier: 0.8.3
+        version: 0.8.3
     devDependencies:
       '@swarmmachina/benchkit':
         specifier: 0.3.1
@@ -198,9 +198,9 @@ packages:
       typescript-eslint:
         optional: true
 
-  '@swarmmachina/swm-uws@0.8.2':
+  '@swarmmachina/swm-uws@0.8.3':
     resolution:
-      { integrity: sha512-+DsKLokBee/ElqDKorphOLnyYMSz+YFM6X7tcvRQQ415GFOmnNOprc3f05J+HtRpxbKnOkkmOUsXGxSzhcTcJA== }
+      { integrity: sha512-hZzPih84m5AO9tZs/loTtINetA5yclOxwDDHJz69bIOxieZfYPTsXdUG17ZA+Bw7XaXbPzCrX8rRZaxEem87Qw== }
     engines: { node: 22.x || 24.x }
 
   '@types/body-parser@1.19.6':
@@ -1674,7 +1674,7 @@ snapshots:
       - jiti
       - supports-color
 
-  '@swarmmachina/swm-uws@0.8.2': {}
+  '@swarmmachina/swm-uws@0.8.3': {}
 
   '@types/body-parser@1.19.6':
     dependencies:

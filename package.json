@@ -123,6 +123,6 @@
     "ws": "^8.21.2"
   },
   "dependencies": {
-    "@swarmmachina/swm-uws": "0.8.2"
+    "@swarmmachina/swm-uws": "0.8.3"
   }
 }
