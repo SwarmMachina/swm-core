@@ -222,7 +222,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          # Keep the benchmark runtime fixed: Node patch releases can change
+          # process.memoryUsage() accounting and invalidate calibrated guards.
+          node-version: '24.16.0'
           cache: pnpm
 
       - name: Install
